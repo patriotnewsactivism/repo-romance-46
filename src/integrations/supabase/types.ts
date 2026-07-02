@@ -14,7 +14,113 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      analyses: {
+        Row: {
+          created_at: string
+          error: string | null
+          id: string
+          repo_count: number
+          status: string
+          summary_md: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          error?: string | null
+          id?: string
+          repo_count?: number
+          status?: string
+          summary_md?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          error?: string | null
+          id?: string
+          repo_count?: number
+          status?: string
+          summary_md?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      analysis_items: {
+        Row: {
+          analysis_id: string
+          created_at: string
+          effort: number
+          id: string
+          kind: string
+          market_potential: number
+          next_steps: Json
+          pitch: string
+          rank: number
+          repos: Json
+          title: string
+          user_id: string
+        }
+        Insert: {
+          analysis_id: string
+          created_at?: string
+          effort?: number
+          id?: string
+          kind: string
+          market_potential?: number
+          next_steps?: Json
+          pitch: string
+          rank?: number
+          repos?: Json
+          title: string
+          user_id: string
+        }
+        Update: {
+          analysis_id?: string
+          created_at?: string
+          effort?: number
+          id?: string
+          kind?: string
+          market_potential?: number
+          next_steps?: Json
+          pitch?: string
+          rank?: number
+          repos?: Json
+          title?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "analysis_items_analysis_id_fkey"
+            columns: ["analysis_id"]
+            isOneToOne: false
+            referencedRelation: "analyses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      github_connections: {
+        Row: {
+          access_token: string
+          connected_at: string
+          github_login: string
+          scope: string | null
+          user_id: string
+        }
+        Insert: {
+          access_token: string
+          connected_at?: string
+          github_login: string
+          scope?: string | null
+          user_id: string
+        }
+        Update: {
+          access_token?: string
+          connected_at?: string
+          github_login?: string
+          scope?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
