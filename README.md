@@ -1,46 +1,89 @@
-# RepoFinisher
+# repo_finisher
 
-AI-powered audit of your GitHub portfolio. Connect your GitHub, deep-sample every repo, and get concrete recommendations on what to **finish**, **combine**, and **repurpose**.
+Ship the repos you already started. Connect your GitHub, get an AI-powered audit
+of your portfolio — which repos to finish, combine, or repurpose.
 
-## What it does
+## Features
 
-1. **Connect GitHub** — OAuth one-click, reads your repos
-2. **Deep sample** — Fetches metadata, README, file tree, and key source files for up to 25 repos
-3. **AI analysis** — Generates ranked recommendations:
-   - **Finish**: Repos ~80% done with exactly what's missing to ship
-   - **Combine**: Groups of repos that together form a stronger product
-   - **Repurpose**: Existing code repositioned as a marketable tool/SaaS
-4. **Marketing copy** — Each recommendation includes a ready-to-post tweet + LinkedIn post
-5. **Portfolio stats** — Language breakdown, total stars, dormant repos, most active repo
-6. **Share** — Generate public shareable links for your analysis
-7. **Export** — Download as Markdown or JSON
+### Core
 
-## Tech stack
+- **GitHub OAuth integration** — one-click connect, reads up to 25 repos
+- **AI portfolio analysis** — ranked recommendations (finish / combine / repurpose)
+- **Tech stack detection** — AI identifies frameworks/languages/tools per recommendation
+- **Marketing copy** — auto-generated tweet + LinkedIn post per recommendation
+- **Estimated hours** — realistic time estimates for each recommendation
+- **Action Plan generator** — phased execution roadmap with quick wins and moonshots
+- **Repo health scoring** — CI status, test detection, license check, activity grade (A-F)
+- **Combine merge instructions** — actual git commands to merge repos into a new product
+- **Portfolio stats** — language breakdown, star count, dormant repos, activity timeline
+- **Shareable links** — toggle public sharing with auto-generated slug
+- **Export** — Markdown + JSON download
+- **Re-run analysis** — fresh analysis with latest repo data
+- **Delete analysis** — with confirmation on both analysis page and dashboard
 
-- **TanStack Start** — Full-stack React framework with file-based routing
-- **Supabase** — Auth, Postgres database, RLS
-- **Lovable AI Gateway** — AI analysis via Google Gemini
-- **GitHub OAuth** — Repository access
-- **Tailwind CSS v4** — Terminal-inspired dark theme
+### AI Provider Options (BYOK)
+
+- **Lovable Gateway** (default)
+- **GitHub Models — GPT-4o** (free, uses your GitHub token, no API key needed)
+- **OpenAI** (bring your own key)
+- **Anthropic / Claude** (bring your own key)
+- **Google / Gemini** (bring your own key)
+
+### Productivity
+
+- **Starred recommendations** — star items to track which you're acting on
+- **Scheduled re-analysis** — weekly or monthly auto-scans of your portfolio
+- **Email notifications** — get emailed when analyses complete
+- **Analysis filters** — filter by languages, minimum stars, exclude archived
+
+### Pages
+
+- `/` — Landing page with feature overview
+- `/auth` — Sign in / sign up
+- `/dashboard` — Portfolio summary, run analysis, past analyses, starred items
+- `/analysis/$id` — Full analysis results with recommendations
+- `/settings` — AI provider, scheduling, filters, starred items, GitHub connection
+- `/shared/$slug` — Public shared analysis (no auth required)
+
+## Tech Stack
+
+- TanStack Start (React + server functions)
+- Supabase (auth + Postgres + RLS)
+- GitHub OAuth (read repo access)
+- GitHub Models API or Lovable AI Gateway
+- Cloudflare Workers / Vercel deployment
 
 ## Setup
 
-1. Create a GitHub OAuth App (Settings → Developer settings → OAuth Apps)
-   - Callback URL: `https://<your-domain>/api/public/github/callback`
-2. Set environment variables:
-   - `GITHUB_CLIENT_ID` — GitHub OAuth App client ID
-   - `GITHUB_CLIENT_SECRET` — GitHub OAuth App client secret
-   - `SUPABASE_URL` — Supabase project URL
-   - `SUPABASE_PUBLISHABLE_KEY` — Supabase anon/publishable key
-   - `LOVABLE_API_KEY` — Lovable AI gateway key
-   - `APP_ORIGIN` — Your app's origin URL (e.g. `https://myapp.lovable.app`)
-3. Run Supabase migrations
-4. `bun install && bun run dev`
+### Environment Variables
 
-## Database schema
+```
+SUPABASE_URL=...
+SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+LOVABLE_API_KEY=...              # default AI provider
+CRON_SECRET=...                  # protects /api/cron/scheduled-analysis
+RESEND_API_KEY=...               # optional, for email notifications
+APP_URL=https://your-app.com     # used in email links
+GITHUB_CLIENT_ID=...
+GITHUB_CLIENT_SECRET=...
+```
 
-- `github_connections` — user_id, github_login, access_token, scope, connected_at
-- `analyses` — id, user_id, status, repo_count, summary_md, portfolio_stats, is_public, share_slug, error, created_at
-- `analysis_items` — id, analysis_id, kind, title, repos, pitch, effort, market_potential, next_steps, tech_stack, marketing_tweet, marketing_linkedin, estimated_hours, rank
+### Database
 
-All tables have RLS enabled — users can only see their own data. Public sharing uses a separate RLS policy that allows anonymous reads on explicitly shared analyses.
+Run migrations in `supabase/migrations/` to create the schema:
+
+- `analyses` — analysis runs (status, summary, portfolio stats, sharing)
+- `analysis_items` — individual recommendations (ranked, with star tracking)
+- `github_connections` — OAuth tokens
+- `user_preferences` — scheduling, BYOK, filters, notifications
+
+### Scheduled Analysis
+
+The cron endpoint at `/api/cron/scheduled-analysis` runs all due analyses.
+Configure in `vercel.json` (Vercel) or `wrangler-cron.jsonc` (Cloudflare).
+Protected by `CRON_SECRET` bearer token.
+
+## License
+
+MIT

@@ -23,7 +23,8 @@ import {
   getPortfolioSummary,
 } from "@/lib/github.functions";
 import { listAnalyses, runAnalysis, deleteAnalysis } from "@/lib/analysis.functions";
-import { getPreferences } from "@/lib/preferences.functions";
+import { getPreferences, getStarredItems } from "@/lib/preferences.functions";
+import { Link as TanLink } from "@tanstack/react-router";
 import { formatDistanceToNow } from "date-fns";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
@@ -49,6 +50,7 @@ function Dashboard() {
   const listFn = useServerFn(listAnalyses);
   const runFn = useServerFn(runAnalysis);
   const prefFn = useServerFn(getPreferences);
+  const starredFn = useServerFn(getStarredItems);
   const deleteFn = useServerFn(deleteAnalysis);
 
   const status = useQuery({ queryKey: ["gh-status"], queryFn: () => statusFn() });
