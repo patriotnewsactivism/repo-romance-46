@@ -22,7 +22,7 @@ import {
   disconnectGithub,
   getPortfolioSummary,
 } from "@/lib/github.functions";
-import { listAnalyses, runAnalysis } from "@/lib/analysis.functions";
+import { listAnalyses, runAnalysis, deleteAnalysis } from "@/lib/analysis.functions";
 import { formatDistanceToNow } from "date-fns";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
@@ -47,6 +47,7 @@ function Dashboard() {
   const summaryFn = useServerFn(getPortfolioSummary);
   const listFn = useServerFn(listAnalyses);
   const runFn = useServerFn(runAnalysis);
+  const deleteFn = useServerFn(deleteAnalysis);
 
   const status = useQuery({ queryKey: ["gh-status"], queryFn: () => statusFn() });
   const portfolio = useQuery({
@@ -240,9 +241,20 @@ function Dashboard() {
                         {a.repo_count} repos
                       </div>
                     </div>
-                    <Badge variant={a.status === "complete" ? "default" : "secondary"}>
-                      {a.status}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={a.status === "complete" ? "default" : "secondary"}>
+                        {a.status}
+                      </Badge>
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (confirm("Delete this analysis?")) deleteMut.mutate(a.id);
+                        }}
+                        className="text-muted-foreground hover:text-destructive transition"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </Card>
               </Link>

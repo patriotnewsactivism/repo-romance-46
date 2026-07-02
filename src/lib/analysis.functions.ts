@@ -738,3 +738,112 @@ export const generateMergeInstructions = createServerFn({ method: "POST" })
       mergedRepos: otherRepos.map((r) => r.name),
     };
   });
+
+export const rerunAnalysis = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { analysisId: string }) =>
+    z.object({ analysisId: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ context, data }) => {
+    // Verify ownership
+    const { data: existing } = await context.supabase
+      .from("analyses")
+      .select("id")
+      .eq("id", data.analysisId)
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    if (!existing) throw new Error("Analysis not found");
+
+    // Create a new analysis (same flow as runAnalysis but we know they're connected)
+    const { data: conn } = await context.supabase
+      .from("github_connections")
+      .select("access_token, github_login")
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    if (!conn) throw new Error("Connect GitHub first.");
+    const token = conn.access_token;
+
+    const { data: analysis, error: aErr } = await context.supabase
+      .from("analyses")
+      .insert({ user_id: context.userId, status: "running" })
+      .select("id")
+      .single();
+    if (aErr || !analysis) throw new Error(aErr?.message ?? "Failed to create analysis");
+    const analysisId = analysis.id;
+
+    try {
+      const repos = await gh<Repo[]>(
+        `/user/repos?per_page=100&affiliation=owner&sort=pushed`,
+        token,
+      );
+      const shortlist = repos.filter((r) => !r.fork && !r.archived).slice(0, 25);
+      if (shortlist.length < 2) throw new Error("Need at least 2 active repos to analyze.");
+
+      const digests: string[] = [];
+      for (const repo of shortlist) {
+        try {
+          digests.push(await digestRepo(repo, token));
+        } catch (e) {
+          console.error("digest failed", repo.full_name, e);
+        }
+      }
+
+      const ai = await callLovableAI(digests);
+      const ranked = [...ai.recommendations].sort(
+        (a, b) => b.market_potential * 2 - b.effort - (a.market_potential * 2 - a.effort),
+      );
+
+      const rows = ranked.map((r, i) => ({
+        analysis_id: analysisId,
+        user_id: context.userId,
+        kind: r.kind,
+        title: r.title,
+        repos: r.repos,
+        pitch: r.pitch,
+        effort: Math.max(1, Math.min(5, r.effort)),
+        market_potential: Math.max(1, Math.min(5, r.market_potential)),
+        next_steps: r.next_steps,
+        tech_stack: r.tech_stack ?? [],
+        marketing_tweet: r.marketing_tweet ?? null,
+        marketing_linkedin: r.marketing_linkedin ?? null,
+        estimated_hours: r.estimated_hours ?? null,
+        rank: i,
+      }));
+      if (rows.length) {
+        const { error: iErr } = await context.supabase.from("analysis_items").insert(rows);
+        if (iErr) throw new Error(iErr.message);
+      }
+
+      await context.supabase
+        .from("analyses")
+        .update({
+          status: "complete",
+          repo_count: shortlist.length,
+          summary_md: ai.summary_md,
+          portfolio_stats: ai.portfolio_stats ?? {},
+        })
+        .eq("id", analysisId);
+
+      return { id: analysisId };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Analysis failed";
+      await context.supabase
+        .from("analyses")
+        .update({ status: "failed", error: msg })
+        .eq("id", analysisId);
+      throw new Error(msg);
+    }
+  });
+
+export const deleteAnalysis = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ context, data }) => {
+    const { error } = await context.supabase
+      .from("analyses")
+      .delete()
+      .eq("id", data.id)
+      .eq("user_id", context.userId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });

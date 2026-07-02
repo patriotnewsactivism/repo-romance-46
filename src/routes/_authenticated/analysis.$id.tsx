@@ -1,7 +1,7 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { getAnalysis, toggleShare } from "@/lib/analysis.functions";
+import { getAnalysis, toggleShare, rerunAnalysis, deleteAnalysis } from "@/lib/analysis.functions";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -74,8 +74,11 @@ interface PortfolioStats {
 
 function AnalysisPage() {
   const { id } = Route.useParams();
+  const router = useRouter();
   const fn = useServerFn(getAnalysis);
   const shareFn = useServerFn(toggleShare);
+  const rerunFn = useServerFn(rerunAnalysis);
+  const deleteFn = useServerFn(deleteAnalysis);
   const q = useQuery({ queryKey: ["analysis", id], queryFn: () => fn({ data: { id } }) });
   const [filter, setFilter] = useState<Kind | "all">("all");
   const [tab, setTab] = useState<"recommendations" | "actionPlan">("recommendations");
@@ -92,6 +95,24 @@ function AnalysisPage() {
         toast.success("Analysis is now private");
       }
       q.refetch();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const rerunMut = useMutation({
+    mutationFn: () => rerunFn({ data: { analysisId: id } }),
+    onSuccess: (res) => {
+      toast.success("Re-analysis complete — new results ready");
+      router.navigate({ to: "/analysis/$id", params: { id: res.id } });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: () => deleteFn({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Analysis deleted");
+      router.navigate({ to: "/dashboard" });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -216,8 +237,32 @@ function AnalysisPage() {
           <Button onClick={downloadJson} variant="outline" size="sm">
             <Code2 className="h-4 w-4 mr-2" /> JSON
           </Button>
+          <Button
+            onClick={() => rerunMut.mutate()}
+            variant="outline"
+            size="sm"
+            disabled={rerunMut.isPending}
+          >
+            {rerunMut.isPending ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4 mr-2" />
+            )}
+            Re-run
+          </Button>
           <Button onClick={downloadMd} variant="outline" size="sm">
             <Download className="h-4 w-4 mr-2" /> Markdown
+          </Button>
+          <Button
+            onClick={() => {
+              if (confirm("Delete this analysis? This cannot be undone.")) deleteMut.mutate();
+            }}
+            variant="ghost"
+            size="sm"
+            disabled={deleteMut.isPending}
+            className="text-destructive hover:text-destructive"
+          >
+            <Trash2 className="h-4 w-4" />
           </Button>
         </div>
       </div>
