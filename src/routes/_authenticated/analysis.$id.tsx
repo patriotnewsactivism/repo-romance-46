@@ -22,6 +22,7 @@ import {
   Package,
 } from "lucide-react";
 import { useState } from "react";
+import { ActionPlan } from "@/components/ActionPlan";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/analysis/$id")({
@@ -75,6 +76,7 @@ function AnalysisPage() {
   const shareFn = useServerFn(toggleShare);
   const q = useQuery({ queryKey: ["analysis", id], queryFn: () => fn({ data: { id } }) });
   const [filter, setFilter] = useState<Kind | "all">("all");
+  const [tab, setTab] = useState<"recommendations" | "actionPlan">("recommendations");
   const [expandedMarketing, setExpandedMarketing] = useState<string | null>(null);
 
   const shareMut = useMutation({
@@ -313,142 +315,172 @@ function AnalysisPage() {
         </Card>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
-        {(["all", "finish", "combine", "repurpose"] as const).map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`px-3 py-1.5 rounded-md text-xs font-mono border transition ${
-              filter === f
-                ? "bg-primary text-primary-foreground border-primary"
-                : "border-border bg-card hover:bg-accent"
-            }`}
-          >
-            {f}
-            {f !== "all" && (
-              <span className="ml-1.5 opacity-60">
-                {typedItems.filter((i) => i.kind === f).length}
-              </span>
-            )}
-          </button>
-        ))}
+      {/* Tab switcher */}
+      <div className="flex gap-1 border-b border-border">
+        <button
+          onClick={() => setTab("recommendations")}
+          className={`px-4 py-2 text-sm font-mono border-b-2 transition ${
+            tab === "recommendations"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Recommendations
+        </button>
+        <button
+          onClick={() => setTab("actionPlan")}
+          className={`px-4 py-2 text-sm font-mono border-b-2 transition ${
+            tab === "actionPlan"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Action Plan
+        </button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        {filtered.map((it) => {
-          const meta = KIND_META[it.kind as Kind];
-          const Icon = meta.icon;
-          const marketingOpen = expandedMarketing === it.id;
-          return (
-            <Card key={it.id} className="p-5 space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div
-                  className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs font-mono ${meta.color}`}
-                >
-                  <Icon className="h-3 w-3" /> {meta.label}
-                </div>
-                <div className="text-right text-[10px] font-mono text-muted-foreground leading-tight">
-                  <div>effort {it.effort}/5</div>
-                  <div>market {it.market_potential}/5</div>
-                  {it.estimated_hours ? (
-                    <div className="text-primary mt-0.5">~{it.estimated_hours}h</div>
-                  ) : null}
-                </div>
-              </div>
-              <h3 className="font-semibold leading-tight">{it.title}</h3>
-              <div className="flex flex-wrap gap-1">
-                {it.repos.map((r) => (
-                  <Badge key={r} variant="secondary" className="font-mono text-[10px]">
-                    {r}
-                  </Badge>
-                ))}
-              </div>
-              {it.tech_stack && it.tech_stack.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {it.tech_stack.map((tech) => (
-                    <Badge key={tech} variant="outline" className="text-[10px] font-mono">
-                      {tech}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-              <p className="text-sm text-muted-foreground">{it.pitch}</p>
-              {it.next_steps.length > 0 && (
-                <div>
-                  <div className="font-mono text-[10px] uppercase text-muted-foreground mb-1">
-                    Next steps
+      {tab === "recommendations" && (
+        <>
+          <div className="flex flex-wrap gap-2">
+            {(["all", "finish", "combine", "repurpose"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={`px-3 py-1.5 rounded-md text-xs font-mono border transition ${
+                  filter === f
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-border bg-card hover:bg-accent"
+                }`}
+              >
+                {f}
+                {f !== "all" && (
+                  <span className="ml-1.5 opacity-60">
+                    {typedItems.filter((i) => i.kind === f).length}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            {filtered.map((it) => {
+              const meta = KIND_META[it.kind as Kind];
+              const Icon = meta.icon;
+              const marketingOpen = expandedMarketing === it.id;
+              return (
+                <Card key={it.id} className="p-5 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div
+                      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs font-mono ${meta.color}`}
+                    >
+                      <Icon className="h-3 w-3" /> {meta.label}
+                    </div>
+                    <div className="text-right text-[10px] font-mono text-muted-foreground leading-tight">
+                      <div>effort {it.effort}/5</div>
+                      <div>market {it.market_potential}/5</div>
+                      {it.estimated_hours ? (
+                        <div className="text-primary mt-0.5">~{it.estimated_hours}h</div>
+                      ) : null}
+                    </div>
                   </div>
-                  <ul className="space-y-1 text-sm">
-                    {it.next_steps.map((s, i) => (
-                      <li key={i} className="flex gap-2">
-                        <span className="text-primary">▸</span>
-                        <span>{s}</span>
-                      </li>
+                  <h3 className="font-semibold leading-tight">{it.title}</h3>
+                  <div className="flex flex-wrap gap-1">
+                    {it.repos.map((r) => (
+                      <Badge key={r} variant="secondary" className="font-mono text-[10px]">
+                        {r}
+                      </Badge>
                     ))}
-                  </ul>
-                </div>
-              )}
-              {/* Marketing copy */}
-              {(it.marketing_tweet || it.marketing_linkedin) && (
-                <div className="pt-2 border-t border-border">
-                  <button
-                    onClick={() => setExpandedMarketing(marketingOpen ? null : it.id)}
-                    className="text-xs font-mono text-muted-foreground hover:text-foreground"
-                  >
-                    {marketingOpen ? "▾ hide marketing copy" : "▸ show marketing copy"}
-                  </button>
-                  {marketingOpen && (
-                    <div className="mt-3 space-y-3">
-                      {it.marketing_tweet && (
-                        <div className="rounded-md border border-border bg-muted/30 p-3">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground">
-                              <Twitter className="h-3 w-3" /> Tweet
+                  </div>
+                  {it.tech_stack && it.tech_stack.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {it.tech_stack.map((tech) => (
+                        <Badge key={tech} variant="outline" className="text-[10px] font-mono">
+                          {tech}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-sm text-muted-foreground">{it.pitch}</p>
+                  {it.next_steps.length > 0 && (
+                    <div>
+                      <div className="font-mono text-[10px] uppercase text-muted-foreground mb-1">
+                        Next steps
+                      </div>
+                      <ul className="space-y-1 text-sm">
+                        {it.next_steps.map((s, i) => (
+                          <li key={i} className="flex gap-2">
+                            <span className="text-primary">▸</span>
+                            <span>{s}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {/* Marketing copy */}
+                  {(it.marketing_tweet || it.marketing_linkedin) && (
+                    <div className="pt-2 border-t border-border">
+                      <button
+                        onClick={() => setExpandedMarketing(marketingOpen ? null : it.id)}
+                        className="text-xs font-mono text-muted-foreground hover:text-foreground"
+                      >
+                        {marketingOpen ? "▾ hide marketing copy" : "▸ show marketing copy"}
+                      </button>
+                      {marketingOpen && (
+                        <div className="mt-3 space-y-3">
+                          {it.marketing_tweet && (
+                            <div className="rounded-md border border-border bg-muted/30 p-3">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground">
+                                  <Twitter className="h-3 w-3" /> Tweet
+                                </div>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 px-2"
+                                  onClick={() => copyToClipboard(it.marketing_tweet!, "Tweet")}
+                                >
+                                  <Copy className="h-3 w-3" />
+                                </Button>
+                              </div>
+                              <p className="text-sm">{it.marketing_tweet}</p>
                             </div>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 px-2"
-                              onClick={() => copyToClipboard(it.marketing_tweet!, "Tweet")}
-                            >
-                              <Copy className="h-3 w-3" />
-                            </Button>
-                          </div>
-                          <p className="text-sm">{it.marketing_tweet}</p>
-                        </div>
-                      )}
-                      {it.marketing_linkedin && (
-                        <div className="rounded-md border border-border bg-muted/30 p-3">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground">
-                              <Linkedin className="h-3 w-3" /> LinkedIn
+                          )}
+                          {it.marketing_linkedin && (
+                            <div className="rounded-md border border-border bg-muted/30 p-3">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground">
+                                  <Linkedin className="h-3 w-3" /> LinkedIn
+                                </div>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 px-2"
+                                  onClick={() =>
+                                    copyToClipboard(it.marketing_linkedin!, "LinkedIn post")
+                                  }
+                                >
+                                  <Copy className="h-3 w-3" />
+                                </Button>
+                              </div>
+                              <p className="text-sm whitespace-pre-wrap">{it.marketing_linkedin}</p>
                             </div>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 px-2"
-                              onClick={() =>
-                                copyToClipboard(it.marketing_linkedin!, "LinkedIn post")
-                              }
-                            >
-                              <Copy className="h-3 w-3" />
-                            </Button>
-                          </div>
-                          <p className="text-sm whitespace-pre-wrap">{it.marketing_linkedin}</p>
+                          )}
                         </div>
                       )}
                     </div>
                   )}
-                </div>
-              )}
-            </Card>
-          );
-        })}
-      </div>
+                </Card>
+              );
+            })}
+          </div>
 
-      {filtered.length === 0 && (
-        <p className="text-sm text-muted-foreground">No recommendations in this category.</p>
+          {filtered.length === 0 && (
+            <p className="text-sm text-muted-foreground">No recommendations in this category.</p>
+          )}
+        </>
       )}
+
+      {tab === "actionPlan" && <ActionPlan analysisId={id} />}
     </main>
   );
 }

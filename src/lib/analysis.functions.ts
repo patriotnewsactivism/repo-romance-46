@@ -480,3 +480,126 @@ export const getPublicAnalysis = createServerFn({ method: "GET" })
 
     return { analysis, items };
   });
+
+export const generateActionPlan = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { analysisId: string }) =>
+    z.object({ analysisId: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ context, data }) => {
+    // Fetch the analysis + items
+    const { data: analysis } = await context.supabase
+      .from("analyses")
+      .select("*")
+      .eq("id", data.analysisId)
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    if (!analysis) throw new Error("Analysis not found");
+
+    const { data: items } = await context.supabase
+      .from("analysis_items")
+      .select("*")
+      .eq("analysis_id", data.analysisId)
+      .order("rank", { ascending: true });
+    if (!items?.length) throw new Error("No recommendations to plan");
+
+    // Build context for AI
+    const itemSummaries = items
+      .map((it, i) => {
+        const r = it as Record<string, unknown>;
+        return `${i + 1}. [${r.kind}] ${r.title} — repos: ${(r.repos as string[]).join(", ")} — effort: ${r.effort}/5 — market: ${r.market_potential}/5 — est: ${r.estimated_hours ?? "?"}h`;
+      })
+      .join("\n");
+
+    const apiKey = process.env.LOVABLE_API_KEY;
+    if (!apiKey) throw new Error("LOVABLE_API_KEY missing");
+
+    const system = `You are a technical product manager creating a sequenced action plan from a portfolio analysis.
+Given a set of recommendations (finish/combine/repurpose), create a realistic execution roadmap.
+Return a JSON object with:
+- phases: array of { name, duration_weeks, items: [{ title, recommendation_index, why_now, key_deliverable }] }
+- total_weeks: estimated total
+- quick_wins: array of recommendation titles that can be done in <1 week
+- moonshots: array of recommendation titles that are highest reward
+- dependencies: array of { from_title, to_title, reason }`;
+
+    const user = `Recommendations:\n${itemSummaries}\n\nCreate a phased action plan. Group quick wins first, then medium effort, then moonshots. Max 4 phases.`;
+
+    const body = {
+      model: "google/gemini-3-flash-preview",
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "action_plan",
+          strict: true,
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              total_weeks: { type: "integer" },
+              phases: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    name: { type: "string" },
+                    duration_weeks: { type: "integer" },
+                    items: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        additionalProperties: false,
+                        properties: {
+                          title: { type: "string" },
+                          recommendation_index: { type: "integer" },
+                          why_now: { type: "string" },
+                          key_deliverable: { type: "string" },
+                        },
+                        required: ["title", "recommendation_index", "why_now", "key_deliverable"],
+                      },
+                    },
+                  },
+                  required: ["name", "duration_weeks", "items"],
+                },
+              },
+              quick_wins: { type: "array", items: { type: "string" } },
+              moonshots: { type: "array", items: { type: "string" } },
+              dependencies: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    from_title: { type: "string" },
+                    to_title: { type: "string" },
+                    reason: { type: "string" },
+                  },
+                  required: ["from_title", "to_title", "reason"],
+                },
+              },
+            },
+            required: ["total_weeks", "phases", "quick_wins", "moonshots", "dependencies"],
+          },
+        },
+      },
+    };
+
+    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Lovable-API-Key": apiKey },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      if (res.status === 429) throw new Error("AI rate limit hit — try again in a minute.");
+      throw new Error(`AI error ${res.status}: ${text.slice(0, 300)}`);
+    }
+    const json = (await res.json()) as { choices: { message: { content: string } }[] };
+    const plan = JSON.parse(json.choices?.[0]?.message?.content ?? "{}");
+    return plan;
+  });
