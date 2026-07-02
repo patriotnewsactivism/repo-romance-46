@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { ActionPlan } from "@/components/ActionPlan";
+import { RepoHealthCheck } from "@/components/RepoHealth";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/analysis/$id")({
@@ -416,6 +417,13 @@ function AnalysisPage() {
                       </ul>
                     </div>
                   )}
+                  {/* Health check for each repo */}
+                  {it.repos.length > 0 && (
+                    <div className="pt-2 border-t border-border">
+                      <RepoHealthCheck repo={it.repos[0]} />
+                    </div>
+                  )}
+
                   {/* Marketing copy */}
                   {(it.marketing_tweet || it.marketing_linkedin) && (
                     <div className="pt-2 border-t border-border">
