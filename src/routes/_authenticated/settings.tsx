@@ -62,6 +62,7 @@ function SettingsPage() {
           schedule_frequency: scheduleFreq,
           custom_ai_provider: customProvider,
           ...(customKey ? { custom_ai_key: customKey } : {}),
+          ...(customProvider === "github_models" ? { custom_ai_key: null } : {}),
           filter_languages: filterLanguages
             .split(",")
             .map((s) => s.trim())
@@ -212,9 +213,12 @@ function SettingsPage() {
               className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm"
             >
               <option value="lovable">Lovable Gateway (default)</option>
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic (Claude)</option>
-              <option value="google">Google (Gemini)</option>
+              <option value="github_models">
+                GitHub Models — GPT-4o (free, uses your GitHub token)
+              </option>
+              <option value="openai">OpenAI (bring your own key)</option>
+              <option value="anthropic">Anthropic / Claude (bring your own key)</option>
+              <option value="google">Google / Gemini (bring your own key)</option>
             </select>
           </div>
           <div>

@@ -341,7 +341,12 @@ export const runAnalysis = createServerFn({ method: "POST" })
       }
 
       // Call AI
-      const ai = await callLovableAI(digests, prefs?.custom_ai_key, prefs?.custom_ai_provider);
+      const ai = await callLovableAI(
+        digests,
+        prefs?.custom_ai_key,
+        prefs?.custom_ai_provider,
+        token, // GitHub OAuth token — used by GitHub Models provider
+      );
 
       // Rank and persist items
       const ranked = [...ai.recommendations].sort(
@@ -789,7 +794,12 @@ export const rerunAnalysis = createServerFn({ method: "POST" })
         }
       }
 
-      const ai = await callLovableAI(digests, prefs?.custom_ai_key, prefs?.custom_ai_provider);
+      const ai = await callLovableAI(
+        digests,
+        prefs?.custom_ai_key,
+        prefs?.custom_ai_provider,
+        token, // GitHub OAuth token — used by GitHub Models provider
+      );
       const ranked = [...ai.recommendations].sort(
         (a, b) => b.market_potential * 2 - b.effort - (a.market_potential * 2 - a.effort),
       );
