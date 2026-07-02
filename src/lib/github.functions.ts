@@ -32,7 +32,10 @@ export const startGithubOAuth = createServerFn({ method: "GET" })
       throw new Error("GitHub OAuth not configured yet. Add GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET secrets.");
     }
     const state = makeState(context.userId);
-    const origin = process.env.APP_ORIGIN ?? "";
+    const req = getRequest();
+    const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
+    const proto = req.headers.get("x-forwarded-proto") ?? "https";
+    const origin = process.env.APP_ORIGIN ?? (host ? `${proto}://${host}` : "");
     const redirectUri = `${origin}/api/public/github/callback`;
     const params = new URLSearchParams({
       client_id: clientId,
