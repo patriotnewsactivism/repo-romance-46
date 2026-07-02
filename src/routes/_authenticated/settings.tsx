@@ -1,26 +1,82 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Github, Unplug, LogOut, User, Mail, Calendar, Shield } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { ArrowLeft, Mail, Clock, Key, Filter, Star, Loader2, Check } from "lucide-react";
 import { toast } from "sonner";
-import { useRouter } from "@tanstack/react-router";
-import { supabase } from "@/integrations/supabase/client";
+import { useState, useEffect } from "react";
 import { getConnectionStatus, disconnectGithub } from "@/lib/github.functions";
-import { formatDistanceToNow } from "date-fns";
+import { getPreferences, updatePreferences, getStarredItems } from "@/lib/preferences.functions";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   component: SettingsPage,
 });
 
 function SettingsPage() {
-  const router = useRouter();
   const statusFn = useServerFn(getConnectionStatus);
   const disconnectFn = useServerFn(disconnectGithub);
+  const prefFn = useServerFn(getPreferences);
+  const updateFn = useServerFn(updatePreferences);
+  const starredFn = useServerFn(getStarredItems);
 
   const status = useQuery({ queryKey: ["gh-status"], queryFn: () => statusFn() });
+  const prefs = useQuery({ queryKey: ["prefs"], queryFn: () => prefFn() });
+  const starred = useQuery({ queryKey: ["starred"], queryFn: () => starredFn() });
+
+  // Local state for form
+  const [emailNotif, setEmailNotif] = useState(false);
+  const [scheduleEnabled, setScheduleEnabled] = useState(false);
+  const [scheduleFreq, setScheduleFreq] = useState<"weekly" | "monthly">("weekly");
+  const [customProvider, setCustomProvider] = useState("lovable");
+  const [customKey, setCustomKey] = useState("");
+  const [filterLanguages, setFilterLanguages] = useState("");
+  const [filterMinStars, setFilterMinStars] = useState(0);
+  const [excludeArchived, setExcludeArchived] = useState(true);
+
+  // Sync from server
+  useEffect(() => {
+    if (prefs.data) {
+      const p = prefs.data as Record<string, unknown>;
+      setEmailNotif(p.email_notifications as boolean);
+      setScheduleEnabled(p.schedule_enabled as boolean);
+      setScheduleFreq(p.schedule_frequency as "weekly" | "monthly");
+      setCustomProvider((p.custom_ai_provider as string) || "lovable");
+      setCustomKey("");
+      setFilterLanguages(((p.filter_languages as string[]) || []).join(", "));
+      setFilterMinStars((p.filter_min_stars as number) || 0);
+      setExcludeArchived(p.filter_exclude_archived as boolean);
+    }
+  }, [prefs.data]);
+
+  const updateMut = useMutation({
+    mutationFn: () =>
+      updateFn({
+        data: {
+          email_notifications: emailNotif,
+          schedule_enabled: scheduleEnabled,
+          schedule_frequency: scheduleFreq,
+          custom_ai_provider: customProvider,
+          ...(customKey ? { custom_ai_key: customKey } : {}),
+          filter_languages: filterLanguages
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+          filter_exclude_archived: excludeArchived,
+          filter_min_stars: filterMinStars,
+        },
+      }),
+    onSuccess: () => {
+      toast.success("Settings saved");
+      prefs.refetch();
+      setCustomKey(""); // Clear after save
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   const disconnectMut = useMutation({
     mutationFn: () => disconnectFn(),
@@ -28,139 +84,237 @@ function SettingsPage() {
       toast.success("GitHub disconnected");
       status.refetch();
     },
-    onError: (e: Error) => toast.error(e.message),
   });
 
-  async function signOut() {
-    await supabase.auth.signOut();
-    router.navigate({ to: "/auth" });
-  }
-
-  const { user } = Route.useRouteContext();
   const connected = status.data?.connected;
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-10 space-y-8">
-      <section>
-        <h1 className="font-mono text-3xl font-bold tracking-tight">
-          <span className="text-primary">$</span> settings
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">Manage your account and integrations.</p>
-      </section>
+      <Link
+        to="/dashboard"
+        className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="h-4 w-4" /> Dashboard
+      </Link>
 
-      {/* Account section */}
+      <h1 className="font-mono text-3xl font-bold tracking-tight">
+        <span className="text-primary">$</span> settings
+      </h1>
+
+      {/* Starred recommendations */}
       <Card className="p-6 space-y-4">
         <div className="flex items-center gap-2">
-          <User className="h-5 w-5 text-muted-foreground" />
-          <h2 className="font-mono font-semibold">Account</h2>
+          <Star className="h-4 w-4 text-primary" />
+          <h2 className="font-mono text-sm font-semibold">Starred recommendations</h2>
         </div>
-        <div className="space-y-3">
-          <Row icon={<Mail className="h-4 w-4" />} label="Email" value={user.email ?? "—"} />
-          <Row
-            icon={<Calendar className="h-4 w-4" />}
-            label="Member since"
-            value={
-              user.created_at
-                ? new Date(user.created_at).toLocaleDateString(undefined, {
-                    year: "numeric",
-                    month: "long",
-                    day: "numeric",
-                  })
-                : "—"
-            }
-          />
-          <Row
-            icon={<Shield className="h-4 w-4" />}
-            label="Auth provider"
-            value={user.app_metadata?.provider ?? "email"}
-          />
-        </div>
-        <Button variant="outline" size="sm" onClick={signOut}>
-          <LogOut className="h-4 w-4 mr-2" /> Sign out
-        </Button>
+        {starred.isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : !starred.data?.length ? (
+          <p className="text-sm text-muted-foreground">
+            No starred recommendations yet. Star items from an analysis to track them here.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {(starred.data as Array<Record<string, unknown>>).map((item) => (
+              <div key={item.id as string} className="rounded-md border border-border p-3">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-[10px] font-mono">
+                    {item.kind as string}
+                  </Badge>
+                  <span className="font-medium text-sm">{item.title as string}</span>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">{item.pitch as string}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
 
-      {/* GitHub integration */}
+      {/* Scheduled re-analysis */}
       <Card className="p-6 space-y-4">
         <div className="flex items-center gap-2">
-          <Github className="h-5 w-5 text-muted-foreground" />
-          <h2 className="font-mono font-semibold">GitHub Integration</h2>
+          <Clock className="h-4 w-4 text-primary" />
+          <h2 className="font-mono text-sm font-semibold">Scheduled re-analysis</h2>
         </div>
-        {status.isLoading ? (
-          <p className="text-sm text-muted-foreground">Checking connection…</p>
-        ) : connected ? (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
-                  <Github className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <div className="font-mono text-sm font-medium">{status.data?.login}</div>
-                  <div className="text-xs text-muted-foreground">
-                    Connected{" "}
-                    {status.data?.connected_at
-                      ? formatDistanceToNow(new Date(status.data.connected_at), { addSuffix: true })
-                      : "—"}
-                  </div>
-                </div>
-              </div>
-              <Badge variant="default" className="bg-primary/20 text-primary border-primary/30">
-                Active
-              </Badge>
+        <p className="text-sm text-muted-foreground">
+          Automatically re-scan your GitHub portfolio on a schedule. New repos and changes will be
+          picked up.
+        </p>
+        <div className="flex items-center justify-between">
+          <Label htmlFor="schedule" className="text-sm">
+            Enable scheduled analysis
+          </Label>
+          <Switch id="schedule" checked={scheduleEnabled} onCheckedChange={setScheduleEnabled} />
+        </div>
+        {scheduleEnabled && (
+          <div className="space-y-2">
+            <Label className="text-sm">Frequency</Label>
+            <div className="flex gap-2">
+              {(["weekly", "monthly"] as const).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setScheduleFreq(f)}
+                  className={`px-3 py-1.5 rounded-md text-xs font-mono border transition ${
+                    scheduleFreq === f
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "border-border bg-card hover:bg-accent"
+                  }`}
+                >
+                  {f}
+                </button>
+              ))}
             </div>
-            <p className="text-xs text-muted-foreground">
-              RepoFinisher has read access to your public and private repositories. Disconnecting
-              revokes access immediately.
-            </p>
+            {prefs.data && (prefs.data as Record<string, unknown>).last_scheduled_run && (
+              <p className="text-xs text-muted-foreground font-mono">
+                Last auto-run:{" "}
+                {new Date(
+                  (prefs.data as Record<string, unknown>).last_scheduled_run as string,
+                ).toLocaleString()}
+              </p>
+            )}
+          </div>
+        )}
+      </Card>
+
+      {/* Email notifications */}
+      <Card className="p-6 space-y-4">
+        <div className="flex items-center gap-2">
+          <Mail className="h-4 w-4 text-primary" />
+          <h2 className="font-mono text-sm font-semibold">Email notifications</h2>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Get an email when an analysis completes (including scheduled runs).
+        </p>
+        <div className="flex items-center justify-between">
+          <Label htmlFor="email" className="text-sm">
+            Enable email notifications
+          </Label>
+          <Switch id="email" checked={emailNotif} onCheckedChange={setEmailNotif} />
+        </div>
+      </Card>
+
+      {/* BYOK: Bring Your Own AI Key */}
+      <Card className="p-6 space-y-4">
+        <div className="flex items-center gap-2">
+          <Key className="h-4 w-4 text-primary" />
+          <h2 className="font-mono text-sm font-semibold">AI provider (BYOK)</h2>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Bring your own AI API key to use instead of the default Lovable gateway. Your key is
+          stored securely and only used for your analyses.
+        </p>
+        <div className="space-y-3">
+          <div>
+            <Label className="text-sm">Provider</Label>
+            <select
+              value={customProvider}
+              onChange={(e) => setCustomProvider(e.target.value)}
+              className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm"
+            >
+              <option value="lovable">Lovable Gateway (default)</option>
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic (Claude)</option>
+              <option value="google">Google (Gemini)</option>
+            </select>
+          </div>
+          <div>
+            <Label className="text-sm">
+              API Key{" "}
+              {prefs.data &&
+                (prefs.data as Record<string, unknown>).custom_ai_key &&
+                "(saved — leave blank to keep)"}
+            </Label>
+            <Input
+              type="password"
+              value={customKey}
+              onChange={(e) => setCustomKey(e.target.value)}
+              placeholder={
+                prefs.data && (prefs.data as Record<string, unknown>).custom_ai_key
+                  ? "••••••••••••"
+                  : "sk-..."
+              }
+              className="mt-1 font-mono"
+            />
+          </div>
+        </div>
+      </Card>
+
+      {/* Analysis filters */}
+      <Card className="p-6 space-y-4">
+        <div className="flex items-center gap-2">
+          <Filter className="h-4 w-4 text-primary" />
+          <h2 className="font-mono text-sm font-semibold">Analysis filters</h2>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Control which repos are included in your analyses. Applied to all future runs.
+        </p>
+        <div className="space-y-3">
+          <div>
+            <Label className="text-sm">
+              Filter by languages (comma-separated, e.g. "TypeScript, Python")
+            </Label>
+            <Input
+              value={filterLanguages}
+              onChange={(e) => setFilterLanguages(e.target.value)}
+              placeholder="All languages"
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <Label className="text-sm">Minimum stars</Label>
+            <Input
+              type="number"
+              min={0}
+              value={filterMinStars}
+              onChange={(e) => setFilterMinStars(parseInt(e.target.value) || 0)}
+              className="mt-1"
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <Label className="text-sm">Exclude archived repos</Label>
+            <Switch checked={excludeArchived} onCheckedChange={setExcludeArchived} />
+          </div>
+        </div>
+      </Card>
+
+      {/* GitHub connection */}
+      <Card className="p-6 space-y-4">
+        <h2 className="font-mono text-sm font-semibold">GitHub connection</h2>
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-muted-foreground font-mono">
+            {connected ? `connected as ${status.data?.login}` : "not connected"}
+          </span>
+          {connected && (
             <Button
               variant="outline"
               size="sm"
               onClick={() => disconnectMut.mutate()}
               disabled={disconnectMut.isPending}
             >
-              <Unplug className="h-4 w-4 mr-2" />
-              {disconnectMut.isPending ? "Disconnecting…" : "Disconnect GitHub"}
+              Disconnect
             </Button>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Not connected. Visit the dashboard to connect your GitHub account.
-            </p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => router.navigate({ to: "/dashboard" })}
-            >
-              Go to dashboard
-            </Button>
-          </div>
-        )}
+          )}
+        </div>
       </Card>
 
-      {/* About */}
-      <Card className="p-6 space-y-2">
-        <h2 className="font-mono font-semibold">About RepoFinisher</h2>
-        <p className="text-sm text-muted-foreground">
-          RepoFinisher deep-samples your GitHub repos and uses AI to identify which are close to
-          shippable, which can be combined into stronger products, and how to reposition existing
-          code as marketable tools.
-        </p>
-        <p className="text-xs text-muted-foreground font-mono pt-2">
-          Built with TanStack Start + Supabase + Lovable AI
-        </p>
-      </Card>
+      {/* Save button */}
+      <div className="flex justify-end">
+        <Button
+          onClick={() => updateMut.mutate()}
+          disabled={updateMut.isPending}
+          className="glow-primary"
+        >
+          {updateMut.isPending ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving…
+            </>
+          ) : (
+            <>
+              <Check className="h-4 w-4 mr-2" /> Save settings
+            </>
+          )}
+        </Button>
+      </div>
     </main>
-  );
-}
-
-function Row({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
-  return (
-    <div className="flex items-center gap-3 text-sm">
-      <span className="text-muted-foreground">{icon}</span>
-      <span className="text-muted-foreground w-28 font-mono">{label}</span>
-      <span className="font-medium">{value}</span>
-    </div>
   );
 }

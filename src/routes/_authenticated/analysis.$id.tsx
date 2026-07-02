@@ -2,6 +2,7 @@ import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { getAnalysis, toggleShare, rerunAnalysis, deleteAnalysis } from "@/lib/analysis.functions";
+import { toggleStar } from "@/lib/preferences.functions";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -60,6 +61,7 @@ interface AnalysisItem {
   marketing_tweet?: string | null;
   marketing_linkedin?: string | null;
   estimated_hours?: number | null;
+  is_starred?: boolean;
   rank: number;
 }
 
@@ -79,6 +81,7 @@ function AnalysisPage() {
   const shareFn = useServerFn(toggleShare);
   const rerunFn = useServerFn(rerunAnalysis);
   const deleteFn = useServerFn(deleteAnalysis);
+  const starFn = useServerFn(toggleStar);
   const q = useQuery({ queryKey: ["analysis", id], queryFn: () => fn({ data: { id } }) });
   const [filter, setFilter] = useState<Kind | "all">("all");
   const [tab, setTab] = useState<"recommendations" | "actionPlan">("recommendations");
@@ -114,6 +117,13 @@ function AnalysisPage() {
       toast.success("Analysis deleted");
       router.navigate({ to: "/dashboard" });
     },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const starMut = useMutation({
+    mutationFn: ({ itemId, starred }: { itemId: string; starred: boolean }) =>
+      starFn({ data: { itemId, starred } }),
+    onSuccess: () => q.refetch(),
     onError: (e: Error) => toast.error(e.message),
   });
 

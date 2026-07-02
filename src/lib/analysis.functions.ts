@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { getPreferences } from "@/lib/preferences.functions";
 import { z } from "zod";
 
 const GH_API = "https://api.github.com";
@@ -340,7 +341,7 @@ export const runAnalysis = createServerFn({ method: "POST" })
       }
 
       // Call AI
-      const ai = await callLovableAI(digests);
+      const ai = await callLovableAI(digests, prefs?.custom_ai_key, prefs?.custom_ai_provider);
 
       // Rank and persist items
       const ranked = [...ai.recommendations].sort(
@@ -788,7 +789,7 @@ export const rerunAnalysis = createServerFn({ method: "POST" })
         }
       }
 
-      const ai = await callLovableAI(digests);
+      const ai = await callLovableAI(digests, prefs?.custom_ai_key, prefs?.custom_ai_provider);
       const ranked = [...ai.recommendations].sort(
         (a, b) => b.market_potential * 2 - b.effort - (a.market_potential * 2 - a.effort),
       );

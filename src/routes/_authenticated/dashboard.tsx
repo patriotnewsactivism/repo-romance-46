@@ -23,6 +23,7 @@ import {
   getPortfolioSummary,
 } from "@/lib/github.functions";
 import { listAnalyses, runAnalysis, deleteAnalysis } from "@/lib/analysis.functions";
+import { getPreferences } from "@/lib/preferences.functions";
 import { formatDistanceToNow } from "date-fns";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
@@ -47,6 +48,7 @@ function Dashboard() {
   const summaryFn = useServerFn(getPortfolioSummary);
   const listFn = useServerFn(listAnalyses);
   const runFn = useServerFn(runAnalysis);
+  const prefFn = useServerFn(getPreferences);
   const deleteFn = useServerFn(deleteAnalysis);
 
   const status = useQuery({ queryKey: ["gh-status"], queryFn: () => statusFn() });
@@ -56,6 +58,11 @@ function Dashboard() {
     enabled: !!status.data?.connected,
   });
   const analyses = useQuery({ queryKey: ["analyses"], queryFn: () => listFn() });
+  const prefs = useQuery({
+    queryKey: ["prefs"],
+    queryFn: () => prefFn(),
+    enabled: !!status.data?.connected,
+  });
 
   const connectMut = useMutation({
     mutationFn: () => startFn(),
@@ -212,6 +219,14 @@ function Dashboard() {
             )}
           </Button>
         </div>
+        {connected && (
+          <Link
+            to="/settings"
+            className="text-xs font-mono text-muted-foreground hover:text-foreground mt-2 inline-block"
+          >
+            Configure filters & schedule →
+          </Link>
+        )}
         {runMut.isPending && (
           <p className="mt-3 text-xs text-muted-foreground font-mono">
             fetching repos → sampling code → asking the AI (this can take 30–90s)…

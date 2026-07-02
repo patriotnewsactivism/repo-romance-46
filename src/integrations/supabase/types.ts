@@ -65,6 +65,8 @@ export type Database = {
           marketing_tweet: string | null;
           marketing_linkedin: string | null;
           estimated_hours: number | null;
+          is_starred: boolean;
+          starred_at: string | null;
         };
         Insert: {
           analysis_id: string;
@@ -83,6 +85,8 @@ export type Database = {
           marketing_tweet?: string | null;
           marketing_linkedin?: string | null;
           estimated_hours?: number | null;
+          is_starred?: boolean;
+          starred_at?: string | null;
         };
         Update: {
           analysis_id?: string;
@@ -101,6 +105,8 @@ export type Database = {
           marketing_tweet?: string | null;
           marketing_linkedin?: string | null;
           estimated_hours?: number | null;
+          is_starred?: boolean;
+          starred_at?: string | null;
         };
         Relationships: [
           {
@@ -111,6 +117,51 @@ export type Database = {
             referencedColumns: ["id"];
           },
         ];
+      };
+      user_preferences: {
+        Row: {
+          user_id: string;
+          email_notifications: boolean;
+          schedule_enabled: boolean;
+          schedule_frequency: string;
+          last_scheduled_run: string | null;
+          custom_ai_provider: string;
+          custom_ai_key: string | null;
+          filter_languages: Json;
+          filter_exclude_archived: boolean;
+          filter_min_stars: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          email_notifications?: boolean;
+          schedule_enabled?: boolean;
+          schedule_frequency?: string;
+          last_scheduled_run?: string | null;
+          custom_ai_provider?: string;
+          custom_ai_key?: string | null;
+          filter_languages?: Json;
+          filter_exclude_archived?: boolean;
+          filter_min_stars?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          email_notifications?: boolean;
+          schedule_enabled?: boolean;
+          schedule_frequency?: string;
+          last_scheduled_run?: string | null;
+          custom_ai_provider?: string;
+          custom_ai_key?: string | null;
+          filter_languages?: Json;
+          filter_exclude_archived?: boolean;
+          filter_min_stars?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
       };
       github_connections: {
         Row: {
