@@ -17,6 +17,9 @@ export type Database = {
           status: string;
           summary_md: string | null;
           user_id: string;
+          portfolio_stats: Json | null;
+          is_public: boolean;
+          share_slug: string | null;
         };
         Insert: {
           created_at?: string;
@@ -26,6 +29,9 @@ export type Database = {
           status?: string;
           summary_md?: string | null;
           user_id: string;
+          portfolio_stats?: Json | null;
+          is_public?: boolean;
+          share_slug?: string | null;
         };
         Update: {
           created_at?: string;
@@ -35,6 +41,9 @@ export type Database = {
           status?: string;
           summary_md?: string | null;
           user_id?: string;
+          portfolio_stats?: Json | null;
+          is_public?: boolean;
+          share_slug?: string | null;
         };
         Relationships: [];
       };
@@ -52,6 +61,10 @@ export type Database = {
           repos: Json;
           title: string;
           user_id: string;
+          tech_stack: Json | null;
+          marketing_tweet: string | null;
+          marketing_linkedin: string | null;
+          estimated_hours: number | null;
         };
         Insert: {
           analysis_id: string;
@@ -66,6 +79,10 @@ export type Database = {
           repos?: Json;
           title: string;
           user_id: string;
+          tech_stack?: Json | null;
+          marketing_tweet?: string | null;
+          marketing_linkedin?: string | null;
+          estimated_hours?: number | null;
         };
         Update: {
           analysis_id?: string;
@@ -80,6 +97,10 @@ export type Database = {
           repos?: Json;
           title?: string;
           user_id?: string;
+          tech_stack?: Json | null;
+          marketing_tweet?: string | null;
+          marketing_linkedin?: string | null;
+          estimated_hours?: number | null;
         };
         Relationships: [
           {
