@@ -6,7 +6,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Github } from "lucide-react";
 
 export const Route = createFileRoute("/auth")({
   component: AuthPage,
@@ -36,7 +35,9 @@ function AuthPage() {
           options: { emailRedirectTo: window.location.origin },
         });
         if (error) throw error;
-        toast.success("Account created. Check your inbox to confirm your email if required, then sign in.");
+        toast.success(
+          "Account created. Check your inbox to confirm your email if required, then sign in.",
+        );
         setMode("signin");
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -92,7 +93,6 @@ function AuthPage() {
             />
           </div>
           <Button type="submit" disabled={loading} className="w-full">
-            <Github className="h-4 w-4 mr-2" />
             {loading ? "…" : mode === "signin" ? "Sign in" : "Create account"}
           </Button>
         </form>
@@ -101,9 +101,7 @@ function AuthPage() {
           onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
           className="mt-6 text-xs text-muted-foreground hover:text-foreground"
         >
-          {mode === "signin"
-            ? "No account? Create one →"
-            : "Already have an account? Sign in →"}
+          {mode === "signin" ? "No account? Create one →" : "Already have an account? Sign in →"}
         </button>
       </Card>
     </div>

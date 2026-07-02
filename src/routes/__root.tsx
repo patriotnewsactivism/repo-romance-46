@@ -92,11 +92,21 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "RepoFinisher — Ship the repos you already started" },
-      { name: "description", content: "Project Spark analyzes GitHub repositories to identify projects ready for completion or combination for marketability." },
-      { property: "og:description", content: "Project Spark analyzes GitHub repositories to identify projects ready for completion or combination for marketability." },
-      { name: "twitter:description", content: "Project Spark analyzes GitHub repositories to identify projects ready for completion or combination for marketability." },
-      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/79b27571-b827-4628-8ab4-5b973ef75b67/id-preview-589581a9--298536c9-f24e-4b04-bd54-d42319ad1389.lovable.app-1783025194705.png" },
-      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/79b27571-b827-4628-8ab4-5b973ef75b67/id-preview-589581a9--298536c9-f24e-4b04-bd54-d42319ad1389.lovable.app-1783025194705.png" },
+      {
+        name: "twitter:description",
+        content:
+          "AI-powered audit of your GitHub portfolio. Find which repos to finish, which to combine, and how to market them.",
+      },
+      {
+        property: "og:image",
+        content:
+          "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/79b27571-b827-4628-8ab4-5b973ef75b67/id-preview-589581a9--298536c9-f24e-4b04-bd54-d42319ad1389.lovable.app-1783025194705.png",
+      },
+      {
+        name: "twitter:image",
+        content:
+          "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/79b27571-b827-4628-8ab4-5b973ef75b67/id-preview-589581a9--298536c9-f24e-4b04-bd54-d42319ad1389.lovable.app-1783025194705.png",
+      },
     ],
     links: [
       { rel: "stylesheet", href: appCss },

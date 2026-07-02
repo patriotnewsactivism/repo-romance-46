@@ -13,6 +13,8 @@ import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as SharedSlugRouteImport } from './routes/shared.$slug'
+import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedAnalysisIdRouteImport } from './routes/_authenticated/analysis.$id'
 import { Route as ApiPublicGithubCallbackRouteImport } from './routes/api/public/github/callback'
@@ -36,6 +38,16 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SharedSlugRoute = SharedSlugRouteImport.update({
+  id: '/shared/$slug',
+  path: '/shared/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -57,6 +69,8 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/settings': typeof AuthenticatedSettingsRoute
+  '/shared/$slug': typeof SharedSlugRoute
   '/analysis/$id': typeof AuthenticatedAnalysisIdRoute
   '/api/public/github/callback': typeof ApiPublicGithubCallbackRoute
 }
@@ -65,6 +79,8 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/settings': typeof AuthenticatedSettingsRoute
+  '/shared/$slug': typeof SharedSlugRoute
   '/analysis/$id': typeof AuthenticatedAnalysisIdRoute
   '/api/public/github/callback': typeof ApiPublicGithubCallbackRoute
 }
@@ -75,6 +91,8 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/_authenticated/settings': typeof AuthenticatedSettingsRoute
+  '/shared/$slug': typeof SharedSlugRoute
   '/_authenticated/analysis/$id': typeof AuthenticatedAnalysisIdRoute
   '/api/public/github/callback': typeof ApiPublicGithubCallbackRoute
 }
@@ -85,6 +103,8 @@ export interface FileRouteTypes {
     | '/auth'
     | '/sitemap.xml'
     | '/dashboard'
+    | '/settings'
+    | '/shared/$slug'
     | '/analysis/$id'
     | '/api/public/github/callback'
   fileRoutesByTo: FileRoutesByTo
@@ -93,6 +113,8 @@ export interface FileRouteTypes {
     | '/auth'
     | '/sitemap.xml'
     | '/dashboard'
+    | '/settings'
+    | '/shared/$slug'
     | '/analysis/$id'
     | '/api/public/github/callback'
   id:
@@ -102,6 +124,8 @@ export interface FileRouteTypes {
     | '/auth'
     | '/sitemap.xml'
     | '/_authenticated/dashboard'
+    | '/_authenticated/settings'
+    | '/shared/$slug'
     | '/_authenticated/analysis/$id'
     | '/api/public/github/callback'
   fileRoutesById: FileRoutesById
@@ -111,6 +135,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
+  SharedSlugRoute: typeof SharedSlugRoute
   ApiPublicGithubCallbackRoute: typeof ApiPublicGithubCallbackRoute
 }
 
@@ -144,6 +169,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/shared/$slug': {
+      id: '/shared/$slug'
+      path: '/shared/$slug'
+      fullPath: '/shared/$slug'
+      preLoaderRoute: typeof SharedSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/settings': {
+      id: '/_authenticated/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AuthenticatedSettingsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/dashboard': {
       id: '/_authenticated/dashboard'
       path: '/dashboard'
@@ -170,11 +209,13 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedAnalysisIdRoute: typeof AuthenticatedAnalysisIdRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedAnalysisIdRoute: AuthenticatedAnalysisIdRoute,
 }
 
@@ -186,6 +227,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
+  SharedSlugRoute: SharedSlugRoute,
   ApiPublicGithubCallbackRoute: ApiPublicGithubCallbackRoute,
 }
 export const routeTree = rootRouteImport

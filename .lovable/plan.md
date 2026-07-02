@@ -1,6 +1,7 @@
 # RepoFinisher — GitHub Portfolio Analyzer
 
 An app that connects to your GitHub, deep-samples your repos, and uses AI to identify:
+
 - Repos that are ~80% done and could be shipped with focused effort
 - Groups of repos that can be **combined** into a stronger product
 - Concrete "market as X" positioning + effort/impact scores
@@ -50,6 +51,7 @@ Uses Lovable AI Gateway (no external key needed). Deep code sampling: metadata +
 ## Secrets you'll need to provide
 
 To enable "Sign in with GitHub" I need a **GitHub OAuth App** (Lovable Cloud doesn't broker GitHub natively). You'll:
+
 1. Go to GitHub → Settings → Developer settings → OAuth Apps → New OAuth App
 2. Authorization callback URL: `https://<your-app>.lovable.app/api/public/github/callback` (I'll show you the exact URL)
 3. Paste the Client ID and Client Secret — I'll store them securely

@@ -69,7 +69,19 @@ const KEY_FILES = [
   "app.py",
 ];
 
-const SAMPLE_EXT = new Set([".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".rb", ".java", ".swift", ".kt"]);
+const SAMPLE_EXT = new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".py",
+  ".go",
+  ".rs",
+  ".rb",
+  ".java",
+  ".swift",
+  ".kt",
+]);
 
 async function digestRepo(repo: Repo, token: string): Promise<string> {
   const parts: string[] = [];
@@ -135,23 +147,51 @@ const RecommendationSchema = z.object({
       effort: z.number().int(),
       market_potential: z.number().int(),
       next_steps: z.array(z.string()),
+      tech_stack: z.array(z.string()).optional().default([]),
+      marketing_tweet: z.string().optional(),
+      marketing_linkedin: z.string().optional(),
+      estimated_hours: z.number().int().optional(),
     }),
   ),
   summary_md: z.string(),
+  portfolio_stats: z
+    .object({
+      total_repos: z.number().int(),
+      languages: z.array(z.object({ name: z.string(), count: z.number().int(), pct: z.number() })),
+      total_stars: z.number().int(),
+      most_active_repo: z.string().optional(),
+      dormant_repos: z.array(z.string()).optional().default([]),
+      average_repo_size_kb: z.number().optional(),
+    })
+    .optional(),
 });
 
 async function callLovableAI(digests: string[]): Promise<z.infer<typeof RecommendationSchema>> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) throw new Error("LOVABLE_API_KEY missing");
 
-  const system = `You are an expert product strategist reviewing a developer's GitHub portfolio.
+  const system = `You are an expert product strategist and technical marketer reviewing a developer's GitHub portfolio.
 For each repo digest, identify:
 - FINISH: repos that are close to shippable — describe exactly what's missing.
 - COMBINE: 2+ repos that together form a stronger product than any alone. List their full names.
 - REPURPOSE: repos whose code could be rebranded/positioned as a marketable tool.
 
-For every recommendation give: kind, title (5-8 words), repos (full_name array), pitch (2-3 sentence "market as X"), effort (1=hours, 5=months), market_potential (1=niche, 5=broad), next_steps (3-5 concrete todos).
-Also produce a short summary_md (markdown, ~200 words) covering the portfolio.
+For every recommendation give:
+- kind, title (5-8 words)
+- repos (full_name array)
+- pitch (2-3 sentence "market as X")
+- effort (1=hours, 5=months)
+- market_potential (1=niche, 5=broad)
+- next_steps (3-5 concrete, specific todos — not generic advice)
+- tech_stack (array of detected technologies, frameworks, languages, tools used across the repos)
+- marketing_tweet (a punchy, engaging tweet promoting the product — include relevant hashtags, max 280 chars)
+- marketing_linkedin (a professional LinkedIn post promoting the product — 3-4 sentences, include a hook + value prop + CTA)
+- estimated_hours (realistic total hours to complete the recommendation, 1-500)
+
+Also produce:
+- summary_md (markdown, ~200 words) covering the portfolio
+- portfolio_stats object with: total_repos, languages (array of {name, count, pct} — top 5 languages), total_stars, most_active_repo (full_name of most recently pushed), dormant_repos (array of repos not pushed in 6+ months), average_repo_size_kb
+
 Return 5-12 recommendations. Rank by (market_potential * 2 - effort) desc.`;
 
   const user = `Here are the repo digests:\n\n${digests.join("\n\n=========\n\n")}`;
@@ -172,6 +212,31 @@ Return 5-12 recommendations. Rank by (market_potential * 2 - effort) desc.`;
           additionalProperties: false,
           properties: {
             summary_md: { type: "string" },
+            portfolio_stats: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                total_repos: { type: "integer" },
+                total_stars: { type: "integer" },
+                most_active_repo: { type: "string" },
+                dormant_repos: { type: "array", items: { type: "string" } },
+                average_repo_size_kb: { type: "number" },
+                languages: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      name: { type: "string" },
+                      count: { type: "integer" },
+                      pct: { type: "number" },
+                    },
+                    required: ["name", "count", "pct"],
+                  },
+                },
+              },
+              required: ["total_repos", "languages", "total_stars"],
+            },
             recommendations: {
               type: "array",
               items: {
@@ -185,8 +250,20 @@ Return 5-12 recommendations. Rank by (market_potential * 2 - effort) desc.`;
                   effort: { type: "integer" },
                   market_potential: { type: "integer" },
                   next_steps: { type: "array", items: { type: "string" } },
+                  tech_stack: { type: "array", items: { type: "string" } },
+                  marketing_tweet: { type: "string" },
+                  marketing_linkedin: { type: "string" },
+                  estimated_hours: { type: "integer" },
                 },
-                required: ["kind", "title", "repos", "pitch", "effort", "market_potential", "next_steps"],
+                required: [
+                  "kind",
+                  "title",
+                  "repos",
+                  "pitch",
+                  "effort",
+                  "market_potential",
+                  "next_steps",
+                ],
               },
             },
           },
@@ -207,7 +284,8 @@ Return 5-12 recommendations. Rank by (market_potential * 2 - effort) desc.`;
   if (!res.ok) {
     const text = await res.text();
     if (res.status === 429) throw new Error("AI rate limit hit — please try again in a minute.");
-    if (res.status === 402) throw new Error("Lovable AI credits exhausted. Add credits in workspace billing.");
+    if (res.status === 402)
+      throw new Error("Lovable AI credits exhausted. Add credits in workspace billing.");
     throw new Error(`AI error ${res.status}: ${text.slice(0, 300)}`);
   }
   const json = (await res.json()) as { choices: { message: { content: string } }[] };
@@ -245,9 +323,7 @@ export const runAnalysis = createServerFn({ method: "POST" })
         `/user/repos?per_page=100&affiliation=owner&sort=pushed`,
         token,
       );
-      const shortlist = repos
-        .filter((r) => !r.fork && !r.archived)
-        .slice(0, 25);
+      const shortlist = repos.filter((r) => !r.fork && !r.archived).slice(0, 25);
 
       if (shortlist.length < 2) {
         throw new Error("Need at least 2 active repos to analyze. Push some code first!");
@@ -281,6 +357,10 @@ export const runAnalysis = createServerFn({ method: "POST" })
         effort: Math.max(1, Math.min(5, r.effort)),
         market_potential: Math.max(1, Math.min(5, r.market_potential)),
         next_steps: r.next_steps,
+        tech_stack: r.tech_stack ?? [],
+        marketing_tweet: r.marketing_tweet ?? null,
+        marketing_linkedin: r.marketing_linkedin ?? null,
+        estimated_hours: r.estimated_hours ?? null,
         rank: i,
       }));
       if (rows.length) {
@@ -294,16 +374,14 @@ export const runAnalysis = createServerFn({ method: "POST" })
           status: "complete",
           repo_count: shortlist.length,
           summary_md: ai.summary_md,
+          portfolio_stats: ai.portfolio_stats ?? {},
         })
         .eq("id", analysisId);
 
       return { id: analysisId };
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Analysis failed";
-      await supabase
-        .from("analyses")
-        .update({ status: "failed", error: msg })
-        .eq("id", analysisId);
+      await supabase.from("analyses").update({ status: "failed", error: msg }).eq("id", analysisId);
       throw new Error(msg);
     }
   });
@@ -341,4 +419,64 @@ export const getAnalysis = createServerFn({ method: "GET" })
       .order("rank", { ascending: true });
 
     return { analysis, items: items ?? [] };
+  });
+
+// Generate a random share slug
+function generateSlug(): string {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  let slug = "";
+  for (let i = 0; i < 10; i++) slug += chars[Math.floor(Math.random() * chars.length)];
+  return slug;
+}
+
+export const toggleShare = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { id: string; isPublic: boolean }) =>
+    z.object({ id: z.string().uuid(), isPublic: z.boolean() }).parse(d),
+  )
+  .handler(async ({ context, data }) => {
+    if (data.isPublic) {
+      // Generate slug if not already shared
+      const slug = generateSlug();
+      const { error } = await context.supabase
+        .from("analyses")
+        .update({ is_public: true, share_slug: slug })
+        .eq("id", data.id)
+        .eq("user_id", context.userId);
+      if (error) throw new Error(error.message);
+      return { isPublic: true, slug };
+    } else {
+      const { error } = await context.supabase
+        .from("analyses")
+        .update({ is_public: false, share_slug: null })
+        .eq("id", data.id)
+        .eq("user_id", context.userId);
+      if (error) throw new Error(error.message);
+      return { isPublic: false, slug: null };
+    }
+  });
+
+export const getPublicAnalysis = createServerFn({ method: "GET" })
+  .inputValidator((d: { slug: string }) => z.object({ slug: z.string() }).parse(d))
+  .handler(async ({ data }) => {
+    // Use anon client — RLS allows reading public analyses
+    const SUPABASE_URL = process.env.SUPABASE_URL;
+    const SUPABASE_ANON_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) throw new Error("Server misconfigured");
+
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/analyses?select=*&share_slug=eq.${data.slug}&is_public=eq.true&status=eq.complete`,
+      { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` } },
+    );
+    const analyses = (await res.json()) as Array<Record<string, unknown>>;
+    if (!analyses.length) throw new Error("Analysis not found or not shared");
+    const analysis = analyses[0];
+
+    const itemsRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/analysis_items?select=*&analysis_id=eq.${analysis.id}&order=rank.asc`,
+      { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` } },
+    );
+    const items = (await itemsRes.json()) as Array<Record<string, unknown>>;
+
+    return { analysis, items };
   });

@@ -31,8 +31,8 @@ function Landing() {
           <span className="font-mono text-primary">you already started.</span>
         </h1>
         <p className="mx-auto mt-6 max-w-2xl text-lg text-muted-foreground">
-          Connect your GitHub. We deep-sample every repo, then tell you exactly which ones
-          to <span className="text-foreground">finish</span>, which to{" "}
+          Connect your GitHub. We deep-sample every repo, then tell you exactly which ones to{" "}
+          <span className="text-foreground">finish</span>, which to{" "}
           <span className="text-foreground">combine</span>, and how to{" "}
           <span className="text-foreground">market</span> what you already built.
         </p>

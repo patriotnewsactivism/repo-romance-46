@@ -5,7 +5,10 @@ import { createHmac } from "crypto";
 
 function hmac(userId: string) {
   const secret = process.env.GITHUB_CLIENT_SECRET;
-  if (!secret) throw new Error("GitHub OAuth not configured. Ask the admin to set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.");
+  if (!secret)
+    throw new Error(
+      "GitHub OAuth not configured. Ask the admin to set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.",
+    );
   return createHmac("sha256", secret).update(userId).digest("hex").slice(0, 32);
 }
 
@@ -29,7 +32,9 @@ export const startGithubOAuth = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const clientId = process.env.GITHUB_CLIENT_ID;
     if (!clientId) {
-      throw new Error("GitHub OAuth not configured yet. Add GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET secrets.");
+      throw new Error(
+        "GitHub OAuth not configured yet. Add GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET secrets.",
+      );
     }
     const state = makeState(context.userId);
     const req = getRequest();
@@ -71,4 +76,78 @@ export const disconnectGithub = createServerFn({ method: "POST" })
       .eq("user_id", context.userId);
     if (error) throw new Error(error.message);
     return { ok: true };
+  });
+
+export const getPortfolioSummary = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data: conn } = await context.supabase
+      .from("github_connections")
+      .select("access_token, github_login")
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    if (!conn) return { connected: false, summary: null };
+
+    const token = conn.access_token;
+
+    // Fetch repos — just metadata, no deep sampling
+    const res = await fetch(
+      "https://api.github.com/user/repos?per_page=100&affiliation=owner&sort=pushed",
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "User-Agent": "repo-finisher",
+        },
+      },
+    );
+    if (!res.ok) return { connected: true, summary: null };
+    const repos = (await res.json()) as Array<{
+      name: string;
+      full_name: string;
+      language: string | null;
+      stargazers_count: number;
+      fork: boolean;
+      archived: boolean;
+      pushed_at: string;
+      size: number;
+      description: string | null;
+    }>;
+
+    const active = repos.filter((r) => !r.fork && !r.archived);
+    const now = Date.now();
+    const sixMonthsAgo = now - 180 * 24 * 60 * 60 * 1000;
+
+    // Language breakdown
+    const langCounts: Record<string, number> = {};
+    let totalStars = 0;
+    let totalSize = 0;
+    let dormant = 0;
+    let mostRecent = "";
+
+    for (const r of active) {
+      if (r.language) langCounts[r.language] = (langCounts[r.language] ?? 0) + 1;
+      totalStars += r.stargazers_count;
+      totalSize += r.size;
+      if (new Date(r.pushed_at).getTime() < sixMonthsAgo) dormant++;
+      if (!mostRecent || r.pushed_at > mostRecent) mostRecent = r.pushed_at;
+    }
+
+    const topLangs = Object.entries(langCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, count]) => ({ name, count, pct: Math.round((count / active.length) * 100) }));
+
+    return {
+      connected: true,
+      summary: {
+        login: conn.github_login,
+        totalRepos: active.length,
+        totalStars,
+        dormantCount: dormant,
+        avgSizeKb: active.length ? Math.round(totalSize / active.length) : 0,
+        topLanguages: topLangs,
+        mostRecentPush: mostRecent,
+      },
+    };
   });
