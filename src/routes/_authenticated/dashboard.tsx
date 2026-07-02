@@ -179,6 +179,3 @@ function Dashboard() {
     </main>
   );
 }
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const _unused = Trash2;
