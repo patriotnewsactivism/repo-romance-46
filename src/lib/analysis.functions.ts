@@ -603,3 +603,138 @@ Return a JSON object with:
     const plan = JSON.parse(json.choices?.[0]?.message?.content ?? "{}");
     return plan;
   });
+
+export const generateMergeInstructions = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { analysisId: string; itemRank: number }) =>
+    z.object({ analysisId: z.string().uuid(), itemRank: z.number().int() }).parse(d),
+  )
+  .handler(async ({ context, data }) => {
+    // Fetch the specific recommendation
+    const { data: item } = await context.supabase
+      .from("analysis_items")
+      .select("*")
+      .eq("analysis_id", data.analysisId)
+      .eq("user_id", context.userId)
+      .eq("rank", data.itemRank)
+      .maybeSingle();
+    if (!item) throw new Error("Recommendation not found");
+    if ((item as Record<string, unknown>).kind !== "combine")
+      throw new Error("Merge instructions only available for combine recommendations");
+
+    const repos = (item as Record<string, unknown>).repos as string[];
+    if (repos.length < 2) throw new Error("Need at least 2 repos to generate merge instructions");
+
+    // Fetch the user's GitHub login
+    const { data: conn } = await context.supabase
+      .from("github_connections")
+      .select("github_login, access_token")
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    if (!conn) throw new Error("GitHub not connected");
+
+    const token = conn.access_token;
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "User-Agent": "repo-finisher",
+    };
+
+    // Fetch repo metadata for each repo
+    const repoInfo: {
+      name: string;
+      default_branch: string;
+      language: string | null;
+      description: string | null;
+    }[] = [];
+    for (const r of repos) {
+      try {
+        const res = await fetch(`https://api.github.com/repos/${r}`, { headers });
+        if (res.ok) {
+          const json = (await res.json()) as {
+            default_branch: string;
+            language: string | null;
+            description: string | null;
+          };
+          repoInfo.push({
+            name: r,
+            default_branch: json.default_branch,
+            language: json.language,
+            description: json.description,
+          });
+        }
+      } catch {
+        /* skip */
+      }
+    }
+
+    if (repoInfo.length < 2) throw new Error("Could not fetch enough repo metadata");
+
+    // Generate merge instructions
+    const primaryRepo = repoInfo[0];
+    const otherRepos = repoInfo.slice(1);
+    const newRepoName = (item as Record<string, unknown>).title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+    const fullName = `${conn.github_login}/${newRepoName}`;
+
+    const steps: string[] = [];
+    steps.push(`# Merge plan: ${(item as Record<string, unknown>).title}`);
+    steps.push(``);
+    steps.push(`## 1. Create the new combined repo`);
+    steps.push(`# Create a new repo on GitHub`);
+    steps.push(
+      `gh repo create ${fullName} --public --description "${(item as Record<string, unknown>).pitch}"`,
+    );
+    steps.push(`git clone https://github.com/${fullName}.git`);
+    steps.push(`cd ${newRepoName}`);
+    steps.push(``);
+    steps.push(`## 2. Set up the primary repo as base`);
+    steps.push(`# Pull in the primary repo (${primaryRepo.name})`);
+    steps.push(`git remote add primary https://github.com/${primaryRepo.name}.git`);
+    steps.push(`git fetch primary`);
+    steps.push(
+      `git merge primary/${primaryRepo.default_branch} --allow-unrelated-histories -m "Merge ${primaryRepo.name} as base"`,
+    );
+    steps.push(``);
+
+    for (let i = 0; i < otherRepos.length; i++) {
+      const r = otherRepos[i];
+      const subdir = r.name
+        .split("/")
+        .pop()!
+        .replace(/[^a-zA-Z0-9-]/g, "-")
+        .toLowerCase();
+      steps.push(`## ${3 + i}. Merge in ${r.name}`);
+      steps.push(`# Add as remote and merge into a subdirectory`);
+      steps.push(`git remote add repo${i + 2} https://github.com/${r.name}.git`);
+      steps.push(`git fetch repo${i + 2}`);
+      steps.push(`# Move files into a subdirectory to avoid conflicts`);
+      steps.push(`git read-tree --prefix=${subdir}/ repo${i + 2}/${r.default_branch}`);
+      steps.push(`git commit -m "Merge ${r.name} into /${subdir}"`);
+      steps.push(``);
+    }
+
+    steps.push(`## ${3 + otherRepos.length}. Clean up remotes`);
+    steps.push(`git remote remove primary`);
+    for (let i = 0; i < otherRepos.length; i++) {
+      steps.push(`git remote remove repo${i + 2}`);
+    }
+    steps.push(``);
+    steps.push(`## ${4 + otherRepos.length}. Push and create initial PR`);
+    steps.push(`git push -u origin main`);
+    steps.push(``);
+    steps.push(`## Next steps from AI analysis:`);
+    for (const step of (item as Record<string, unknown>).next_steps as string[]) {
+      steps.push(`- [ ] ${step}`);
+    }
+
+    return {
+      instructions: steps.join("\n"),
+      newRepoName,
+      newRepoUrl: `https://github.com/${fullName}`,
+      primaryRepo: primaryRepo.name,
+      mergedRepos: otherRepos.map((r) => r.name),
+    };
+  });

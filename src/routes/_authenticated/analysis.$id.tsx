@@ -24,6 +24,7 @@ import {
 import { useState } from "react";
 import { ActionPlan } from "@/components/ActionPlan";
 import { RepoHealthCheck } from "@/components/RepoHealth";
+import { MergeInstructions } from "@/components/MergeInstructions";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/analysis/$id")({
@@ -422,6 +423,11 @@ function AnalysisPage() {
                     <div className="pt-2 border-t border-border">
                       <RepoHealthCheck repo={it.repos[0]} />
                     </div>
+                  )}
+
+                  {/* Merge instructions for combine recommendations */}
+                  {it.kind === "combine" && (
+                    <MergeInstructions analysisId={id} itemRank={it.rank} />
                   )}
 
                   {/* Marketing copy */}
