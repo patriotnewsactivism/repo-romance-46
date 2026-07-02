@@ -4,7 +4,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Github, Loader2, PlayCircle, Trash2, Unplug } from "lucide-react";
+import { Github, Loader2, PlayCircle, Unplug } from "lucide-react";
 import { toast } from "sonner";
 import {
   getConnectionStatus,
