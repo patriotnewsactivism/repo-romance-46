@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "5bw4774Njux5K8G99rgwn"
+uri = "file://artifacts/repo-finisher-mobile/assets/images/icon.png"
+type = "image"
+title = "repo finisher app icon"
