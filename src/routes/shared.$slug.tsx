@@ -83,7 +83,10 @@ function SharedAnalysisPage() {
       </div>
     );
 
-  const { analysis, items } = q.data! as unknown as { analysis: Record<string, unknown>; items: SharedItem[] };
+  const { analysis, items } = q.data! as unknown as {
+    analysis: Record<string, unknown>;
+    items: SharedItem[];
+  };
   const filtered = filter === "all" ? items : items.filter((i) => i.kind === filter);
   const stats =
     (analysis.portfolio_stats as {

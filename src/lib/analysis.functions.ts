@@ -312,7 +312,13 @@ export const runAnalysis = createServerFn({ method: "POST" })
     // Insert pending analysis
     const { data: analysis, error: aErr } = await supabase
       .from("analyses")
-      .insert({ user_id: userId, status: "running" })
+      .insert({
+        user_id: userId,
+        status: "running",
+        trigger_type: "manual",
+        ai_provider: prefs?.custom_ai_provider || "lovable",
+        ai_model: prefs?.custom_ai_provider === "github_models" ? "openai/gpt-4o" : "gpt-4o",
+      })
       .select("id")
       .single();
     if (aErr || !analysis) throw new Error(aErr?.message ?? "Failed to create analysis");
@@ -324,7 +330,9 @@ export const runAnalysis = createServerFn({ method: "POST" })
         `/user/repos?per_page=100&affiliation=owner&sort=pushed`,
         token,
       );
-      const shortlist = repos.filter((r) => !r.fork && !r.archived).slice(0, 25);
+      const shortlist = repos
+        .filter((r) => !r.fork && !r.archived)
+        .slice(0, prefs?.filter_max_repos || 25);
 
       if (shortlist.length < 2) {
         throw new Error("Need at least 2 active repos to analyze. Push some code first!");
@@ -374,8 +382,10 @@ export const runAnalysis = createServerFn({ method: "POST" })
         .update({
           status: "complete",
           repo_count: shortlist.length,
+          analyzed_repo_names: shortlist.map((r: Repo) => r.full_name),
           summary_md: ai.summary_md,
           portfolio_stats: ai.portfolio_stats ?? {},
+          completed_at: new Date().toISOString(),
         })
         .eq("id", analysisId);
 
@@ -483,7 +493,6 @@ export const getPublicAnalysis = createServerFn({ method: "GET" })
 
     return { analysis: analysis as JsonObj, items: items as JsonObj[] };
   });
-
 
 export const generateActionPlan = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -769,7 +778,13 @@ export const rerunAnalysis = createServerFn({ method: "POST" })
 
     const { data: analysis, error: aErr } = await context.supabase
       .from("analyses")
-      .insert({ user_id: context.userId, status: "running" })
+      .insert({
+        user_id: context.userId,
+        status: "running",
+        trigger_type: "rerun",
+        ai_provider: rerunPrefs?.custom_ai_provider || "lovable",
+        ai_model: rerunPrefs?.custom_ai_provider === "github_models" ? "openai/gpt-4o" : "gpt-4o",
+      })
       .select("id")
       .single();
     if (aErr || !analysis) throw new Error(aErr?.message ?? "Failed to create analysis");
@@ -780,7 +795,9 @@ export const rerunAnalysis = createServerFn({ method: "POST" })
         `/user/repos?per_page=100&affiliation=owner&sort=pushed`,
         token,
       );
-      const shortlist = repos.filter((r) => !r.fork && !r.archived).slice(0, 25);
+      const shortlist = repos
+        .filter((r) => !r.fork && !r.archived)
+        .slice(0, prefs?.filter_max_repos || 25);
       if (shortlist.length < 2) throw new Error("Need at least 2 active repos to analyze.");
 
       const digests: string[] = [];
@@ -823,8 +840,10 @@ export const rerunAnalysis = createServerFn({ method: "POST" })
         .update({
           status: "complete",
           repo_count: shortlist.length,
+          analyzed_repo_names: shortlist.map((r: Repo) => r.full_name),
           summary_md: ai.summary_md,
           portfolio_stats: ai.portfolio_stats ?? {},
+          completed_at: new Date().toISOString(),
         })
         .eq("id", analysisId);
 
