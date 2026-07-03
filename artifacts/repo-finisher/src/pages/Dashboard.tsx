@@ -74,7 +74,7 @@ export default function Dashboard() {
   const runMut = useMutation({
     mutationFn: () => runAnalysis(),
     onSuccess: (res) => {
-      toast.success("Analysis complete");
+      toast.success("Analysis started — this can take a minute or two");
       queryClient.invalidateQueries({ queryKey: ["analyses"] });
       navigate(`/analysis/${res.id}`);
     },

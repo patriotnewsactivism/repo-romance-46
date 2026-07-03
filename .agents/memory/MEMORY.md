@@ -1,1 +1,2 @@
 - [Supabase URL secret missing scheme](supabase-secret-url-scheme.md) — SUPABASE_URL secret can lack `https://` while VITE_SUPABASE_URL is correct; server code should prefer the VITE_-prefixed var as fallback.
+- [Analysis pipeline reliability](analysis-pipeline-reliability.md) — long-running jobs must return immediately and run in the background, polled by clients, not blocked inside one HTTP request.

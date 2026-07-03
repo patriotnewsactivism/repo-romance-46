@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
@@ -13,6 +13,7 @@ import {
   generateVibeSpec,
   getAnalysis,
   getRepoHealth,
+  rerunAnalysis,
   toggleShare,
 } from "@/lib/api-client";
 
@@ -24,6 +25,7 @@ const KIND_COLOR: Record<string, "ship" | "combine" | "repurpose"> = {
 
 export default function AnalysisDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
   const colors = useColors();
   const { ready } = useProtectedRoute();
   const queryClient = useQueryClient();
@@ -34,6 +36,12 @@ export default function AnalysisDetail() {
     queryKey: ["analysis", id],
     queryFn: () => getAnalysis(id),
     enabled: ready && !!id,
+    refetchInterval: (q) => {
+      const status = (q.state.data?.analysis as Record<string, unknown> | undefined)?.status as
+        | string
+        | undefined;
+      return status === "running" ? 2500 : false;
+    },
   });
 
   const shareMut = useMutation({
@@ -72,6 +80,15 @@ export default function AnalysisDetail() {
     mutationFn: (repo: string) => getRepoHealth(repo),
   });
 
+  const rerunMut = useMutation({
+    mutationFn: () => rerunAnalysis(id),
+    onSuccess: (res) => {
+      const newId = (res as Record<string, unknown>).id as string | undefined;
+      queryClient.invalidateQueries({ queryKey: ["analyses"] });
+      router.replace(`/analysis/${newId || id}`);
+    },
+  });
+
   if (!ready || query.isLoading) {
     return (
       <View style={[styles.center, { backgroundColor: colors.background }]}>
@@ -90,6 +107,36 @@ export default function AnalysisDetail() {
 
   const analysis = query.data.analysis as Record<string, unknown>;
   const items = query.data.items as Record<string, unknown>[];
+  const status = analysis.status as string | undefined;
+  const progressMsg = analysis.error as string | null;
+
+  if (status === "running") {
+    return (
+      <View style={[styles.center, { backgroundColor: colors.background, padding: 20, gap: 12 }]}>
+        <ActivityIndicator color={colors.primary} />
+        <Text style={{ color: colors.foreground, fontFamily: "Inter_600SemiBold", fontSize: 15 }}>
+          Analyzing your repos…
+        </Text>
+        <Text style={{ color: colors.mutedForeground, fontSize: 13, textAlign: "center" }}>
+          {progressMsg || "This can take a minute or two for larger portfolios."}
+        </Text>
+      </View>
+    );
+  }
+
+  if (status === "failed") {
+    return (
+      <View style={[styles.center, { backgroundColor: colors.background, padding: 20, gap: 12 }]}>
+        <Text style={{ color: colors.destructive, fontFamily: "Inter_600SemiBold", fontSize: 15 }}>
+          Analysis failed
+        </Text>
+        <Text style={{ color: colors.mutedForeground, fontSize: 13, textAlign: "center" }}>
+          {progressMsg || "Something went wrong."}
+        </Text>
+        <PrimaryButton label="Try again" onPress={() => rerunMut.mutate()} loading={rerunMut.isPending} />
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={{ backgroundColor: colors.background }} contentContainerStyle={styles.content}>

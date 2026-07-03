@@ -536,28 +536,83 @@ Only include NEW recommendations not already in the list above. If no new opport
   }
 }
 
+function aiBatchConcurrency(provider: string): number {
+  // GitHub Models has aggressive per-minute rate limits (5-15 RPM), so keep it
+  // low there. Other providers can safely run several batches at once, which
+  // is what keeps large portfolios well under the overall time budget.
+  switch (provider) {
+    case "github_models":
+      return 2;
+    case "openai":
+    case "custom":
+      return 4;
+    default:
+      return 5;
+  }
+}
+
+async function callBatchedAIWithRetry(
+  batch: string[],
+  aiConfig: { provider: string; apiKey: string | null },
+): Promise<z.infer<typeof RecommendationSchema>> {
+  const maxAttempts = 2;
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await callBatchedAI(batch, aiConfig);
+    } catch (e) {
+      lastErr = e;
+      if (attempt < maxAttempts) await sleep(2000 * attempt);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error("AI batch failed");
+}
+
 async function runBatchedAI(
   digests: string[],
   aiConfig: { provider: string; apiKey: string | null },
   onProgress?: ProgressFn,
 ): Promise<z.infer<typeof RecommendationSchema>> {
   const budget = maxInputTokensForProvider(aiConfig.provider);
-  const batches = chunkDigests(digests, budget);
+  const batches = chunkDigests(digests, budget).filter((b) => b.length > 0);
   const hasMultipleBatches = batches.length > 1;
+  const concurrency = aiBatchConcurrency(aiConfig.provider);
+
+  let completed = 0;
+  let firstSummary = "";
+  let failedBatches = 0;
+
+  const results = await parallelMap(batches, concurrency, async (batch) => {
+    const result = await callBatchedAIWithRetry(batch, aiConfig);
+    completed++;
+    if (onProgress) {
+      await onProgress(`AI batch ${completed}/${batches.length} complete (${batch.length} repos)`);
+    }
+    return result;
+  });
 
   const allRecommendations: z.infer<typeof RecommendationSchema>["recommendations"] = [];
-  let summaryMd = "";
-
-  for (let i = 0; i < batches.length; i++) {
-    if (batches[i].length === 0) continue;
-    if (onProgress) await onProgress(`AI batch ${i + 1}/${batches.length} (${batches[i].length} repos)`);
-    const result = await callBatchedAI(batches[i], aiConfig);
-    allRecommendations.push(...result.recommendations);
-    if (i === 0) summaryMd = result.summary_md;
-    if (i < batches.length - 1) {
-      const delay = aiConfig.provider === "github_models" ? 5000 : 3000;
-      await sleep(delay);
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    if (r.status === "fulfilled") {
+      allRecommendations.push(...r.value.recommendations);
+      if (!firstSummary) firstSummary = r.value.summary_md;
+    } else {
+      failedBatches++;
+      console.error("[analysis] AI batch failed after retries", r.reason);
     }
+  }
+
+  if (allRecommendations.length === 0) {
+    throw new Error(
+      failedBatches > 0
+        ? `All ${failedBatches} AI batch(es) failed. The AI provider may be rate-limited or unavailable — try again or switch provider.`
+        : "AI analysis returned no recommendations.",
+    );
+  }
+
+  if (failedBatches > 0 && onProgress) {
+    await onProgress(`${failedBatches}/${batches.length} AI batches failed, continuing with partial results…`);
   }
 
   if (hasMultipleBatches && allRecommendations.length > 0 && onProgress) {
@@ -568,7 +623,7 @@ async function runBatchedAI(
 
   return RecommendationSchema.parse({
     recommendations: allRecommendations,
-    summary_md: summaryMd || "Analysis complete.",
+    summary_md: firstSummary || "Analysis complete.",
   });
 }
 
@@ -588,9 +643,8 @@ interface AnalysisContext {
   onProgress: ProgressFn;
 }
 
-async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: string }> {
-  const { supabase, userId, token, prefs, triggerType } = ctx;
-
+async function createAnalysisRow(ctx: AnalysisContext): Promise<string> {
+  const { supabase, userId, prefs, triggerType } = ctx;
   const { data: analysis, error: aErr } = await supabase
     .from("analyses")
     .insert({
@@ -603,7 +657,17 @@ async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: string }> {
     .select("id")
     .single();
   if (aErr || !analysis) throw new Error(aErr?.message ?? "Failed to create analysis");
-  const analysisId = analysis.id;
+  return analysis.id;
+}
+
+// Runs the actual (potentially multi-minute) analysis work. This is invoked
+// in the background so the HTTP request that kicked it off can return
+// immediately — long-running work should never be tied to a single HTTP
+// request's lifetime, since that invites proxy/client timeouts that have
+// nothing to do with whether the analysis itself is healthy. Progress and
+// the final result are persisted to the DB and polled by the client instead.
+async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise<void> {
+  const { supabase, userId, token, prefs } = ctx;
 
   const reportProgress: ProgressFn = async (msg: string) => {
     console.log(`[analysis ${analysisId}] ${msg}`);
@@ -680,9 +744,12 @@ async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: string }> {
 
     await reportProgress(`Running AI analysis on ${digests.length} repos…`);
 
+    // Batches now run with bounded concurrency (see runBatchedAI), so this
+    // budget is generous headroom rather than the primary pacing mechanism —
+    // it exists only to fail fast if a provider truly hangs.
     const ai = await withTimeout(
       runBatchedAI(digests, aiConfig, reportProgress),
-      Math.max(90000, Math.ceil(digests.length / 10) * 30000 + 90000),
+      Math.max(120000, Math.ceil(digests.length / 10) * 45000 + 120000),
       "AI analysis",
     );
     ai.portfolio_stats = computePortfolioStats(shortlist);
@@ -724,13 +791,20 @@ async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: string }> {
         error: null,
       })
       .eq("id", analysisId);
-
-    return { id: analysisId };
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Analysis failed";
+    console.error(`[analysis ${analysisId}] failed:`, msg);
     await supabase.from("analyses").update({ status: "failed", error: msg }).eq("id", analysisId);
-    throw new Error(msg);
   }
+}
+
+// Kicks off the background job without letting an unhandled rejection crash
+// the process — runAnalysisJob already persists failures to the DB, this is
+// just a last-resort safety net.
+function startAnalysisJob(ctx: AnalysisContext, analysisId: string): void {
+  runAnalysisJob(ctx, analysisId).catch((e) => {
+    console.error(`[analysis ${analysisId}] unexpected background error:`, e);
+  });
 }
 
 async function getAnalysisContext(supabase: SupabaseClient, userId: string, triggerType: string): Promise<AnalysisContext> {
@@ -764,7 +838,9 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const ctx = await getAnalysisContext(req.supabase!, req.userId!, "manual");
-    res.json(await executeAnalysis(ctx));
+    const analysisId = await createAnalysisRow(ctx);
+    startAnalysisJob(ctx, analysisId);
+    res.json({ id: analysisId });
   }),
 );
 
@@ -868,7 +944,9 @@ router.post(
     if (origErr) throw new Error(origErr.message);
     if (!original) throw Object.assign(new Error("Analysis not found"), { status: 404 });
 
-    res.json(await executeAnalysis(ctx));
+    const analysisId = await createAnalysisRow(ctx);
+    startAnalysisJob(ctx, analysisId);
+    res.json({ id: analysisId });
   }),
 );
 

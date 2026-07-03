@@ -87,6 +87,11 @@ export default function AnalysisPage() {
     queryKey: ["analysis", id],
     queryFn: () => getAnalysis(id!),
     enabled: !!id,
+    refetchInterval: (query) => {
+      const status = (query.state.data as { analysis?: Record<string, unknown> } | undefined)?.analysis
+        ?.status as string | undefined;
+      return status === "running" ? 2500 : false;
+    },
   });
   const [filter, setFilter] = useState<Kind | "all">("all");
   const [tab, setTab] = useState<"recommendations" | "actionPlan" | "valuation">(
@@ -112,7 +117,7 @@ export default function AnalysisPage() {
   const rerunMut = useMutation({
     mutationFn: () => rerunAnalysis(id!),
     onSuccess: (res) => {
-      toast.success("Re-analysis complete — new results ready");
+      toast.success("Re-analysis started");
       const newId = (res as Record<string, unknown>).id as string | undefined;
       navigate(`/analysis/${newId || id}`);
     },
@@ -149,6 +154,42 @@ export default function AnalysisPage() {
   const stats = (analysis.portfolio_stats as unknown as PortfolioStats) || {};
   const isPublic = analysis.is_public as boolean;
   const shareSlug = analysis.share_slug as string | null;
+  const status = analysis.status as string | undefined;
+  const isRunning = status === "running";
+  const isFailed = status === "failed";
+  const progressMsg = analysis.error as string | null;
+
+  if (isRunning) {
+    return (
+      <main className="mx-auto max-w-2xl px-6 py-16 text-center space-y-4">
+        <Loader2 className="mx-auto h-8 w-8 animate-spin text-muted-foreground" />
+        <h1 className="text-lg font-semibold">Analyzing your repos…</h1>
+        <p className="text-sm text-muted-foreground">
+          {progressMsg || "This can take a minute or two for larger portfolios."}
+        </p>
+        <Link href="/dashboard" className="inline-block text-sm underline text-muted-foreground">
+          Back to dashboard
+        </Link>
+      </main>
+    );
+  }
+
+  if (isFailed) {
+    return (
+      <main className="mx-auto max-w-2xl px-6 py-16 text-center space-y-4">
+        <h1 className="text-lg font-semibold text-destructive">Analysis failed</h1>
+        <p className="text-sm text-muted-foreground">{progressMsg || "Something went wrong."}</p>
+        <div className="flex justify-center gap-3">
+          <Button onClick={() => rerunMut.mutate()} disabled={rerunMut.isPending}>
+            {rerunMut.isPending ? "Starting…" : "Try again"}
+          </Button>
+          <Link href="/dashboard">
+            <Button variant="outline">Back to dashboard</Button>
+          </Link>
+        </div>
+      </main>
+    );
+  }
 
   function copyToClipboard(text: string, label: string) {
     navigator.clipboard.writeText(text);
