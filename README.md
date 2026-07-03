@@ -23,7 +23,6 @@ of your portfolio — which repos to finish, combine, or repurpose.
 
 ### AI Provider Options (BYOK)
 
-- **Lovable Gateway** (default)
 - **GitHub Models — GPT-4o** (free, uses your GitHub token, no API key needed)
 - **OpenAI** (bring your own key)
 - **Anthropic / Claude** (bring your own key)
@@ -50,7 +49,7 @@ of your portfolio — which repos to finish, combine, or repurpose.
 - TanStack Start (React + server functions)
 - Supabase (auth + Postgres + RLS)
 - GitHub OAuth (read repo access)
-- GitHub Models API or Lovable AI Gateway
+- OpenAI, Anthropic, Google, or GitHub Models API
 - Cloudflare Workers / Vercel deployment
 
 ## Setup
@@ -61,7 +60,6 @@ of your portfolio — which repos to finish, combine, or repurpose.
 SUPABASE_URL=...
 SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
-LOVABLE_API_KEY=...              # default AI provider
 CRON_SECRET=...                  # protects /api/cron/scheduled-analysis
 RESEND_API_KEY=...               # optional, for email notifications
 APP_URL=https://your-app.com     # used in email links

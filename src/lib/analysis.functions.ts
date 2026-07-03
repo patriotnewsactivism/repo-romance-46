@@ -162,7 +162,7 @@ function maxInputTokensForProvider(provider: string): number {
       return 150000;
     case "google":
       return 500000;
-    case "lovable":
+    case "custom":
     default:
       return 60000;
   }
@@ -249,7 +249,7 @@ async function runBatchedAI(
 
   for (let i = 0; i < batches.length; i++) {
     if (batches[i].length === 0) continue;
-    const result = await callLovableAI(batches[i], aiConfig);
+    const result = await callBatchedAI(batches[i], aiConfig);
     allRecommendations.push(...result.recommendations);
     if (i === 0) summaryMd = result.summary_md;
     // Pacing delay between batches — GitHub Models free tier allows ~15 RPM
@@ -304,7 +304,7 @@ const RecommendationSchema = z.object({
     }),
 });
 
-async function callLovableAI(
+async function callBatchedAI(
   digests: string[],
   aiConfig: { provider: string; apiKey: string | null },
 ): Promise<z.infer<typeof RecommendationSchema>> {
@@ -432,7 +432,7 @@ export const runAnalysis = createServerFn({ method: "POST" })
         user_id: userId,
         status: "running",
         trigger_type: "manual",
-        ai_provider: prefs?.custom_ai_provider || "lovable",
+        ai_provider: prefs?.custom_ai_provider || "openai",
         ai_model: prefs?.custom_ai_provider === "github_models" ? "gpt-4o-mini" : "gpt-4o",
       })
       .select("id")
@@ -455,7 +455,7 @@ export const runAnalysis = createServerFn({ method: "POST" })
       }
 
       // Digest each — use compact digests for providers with tight token budgets
-      const provider = prefs?.custom_ai_provider || "lovable";
+      const provider = prefs?.custom_ai_provider || "openai";
       const compactDigest = provider === "github_models";
       const digests: string[] = [];
       for (const repo of shortlist) {
@@ -657,7 +657,7 @@ export const generateActionPlan = createServerFn({ method: "POST" })
       .eq("user_id", context.userId)
       .maybeSingle();
     const aiConfig = {
-      provider: apPrefs?.custom_ai_provider || "lovable",
+      provider: apPrefs?.custom_ai_provider || "openai",
       apiKey: apPrefs?.custom_ai_key || null,
     };
 
@@ -924,7 +924,7 @@ export const rerunAnalysis = createServerFn({ method: "POST" })
         user_id: context.userId,
         status: "running",
         trigger_type: "rerun",
-        ai_provider: rerunPrefs?.custom_ai_provider || "lovable",
+        ai_provider: rerunPrefs?.custom_ai_provider || "openai",
         ai_model: rerunPrefs?.custom_ai_provider === "github_models" ? "gpt-4o-mini" : "gpt-4o",
       })
       .select("id")
@@ -943,7 +943,7 @@ export const rerunAnalysis = createServerFn({ method: "POST" })
       if (shortlist.length < 2) throw new Error("Need at least 2 active repos to analyze.");
 
       // Fixed bug: was referencing an out-of-scope `prefs` variable — now uses rerunPrefs
-      const rerunProvider = rerunPrefs?.custom_ai_provider || "lovable";
+      const rerunProvider = rerunPrefs?.custom_ai_provider || "openai";
       const rerunCompactDigest = rerunProvider === "github_models";
       const digests: string[] = [];
       for (const repo of shortlist) {

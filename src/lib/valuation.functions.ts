@@ -417,7 +417,7 @@ export const valuePortfolio = createServerFn({ method: "POST" })
           repo,
           metrics,
           analysisContext,
-          prefs?.custom_ai_provider || "lovable",
+          prefs?.custom_ai_provider || "openai",
           valAiKey,
         );
 

@@ -423,7 +423,7 @@ export const finishRepo = createServerFn({ method: "POST" })
       repoData,
       files,
       nextSteps,
-      prefs?.custom_ai_provider || "lovable",
+      prefs?.custom_ai_provider || "openai",
       rfAiKey,
     );
 

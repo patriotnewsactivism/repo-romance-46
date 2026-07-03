@@ -32,7 +32,7 @@ function SettingsPage() {
   const [emailNotif, setEmailNotif] = useState(false);
   const [scheduleEnabled, setScheduleEnabled] = useState(false);
   const [scheduleFreq, setScheduleFreq] = useState<"weekly" | "monthly">("weekly");
-  const [customProvider, setCustomProvider] = useState("lovable");
+  const [customProvider, setCustomProvider] = useState("openai");
   const [customKey, setCustomKey] = useState("");
   const [filterLanguages, setFilterLanguages] = useState("");
   const [filterMinStars, setFilterMinStars] = useState(0);
@@ -46,7 +46,7 @@ function SettingsPage() {
       setEmailNotif(p.email_notifications as boolean);
       setScheduleEnabled(p.schedule_enabled as boolean);
       setScheduleFreq(p.schedule_frequency as "weekly" | "monthly");
-      setCustomProvider((p.custom_ai_provider as string) || "lovable");
+      setCustomProvider((p.custom_ai_provider as string) || "openai");
       setCustomKey("");
       setFilterLanguages(((p.filter_languages as string[]) || []).join(", "));
       setFilterMinStars((p.filter_min_stars as number) || 0);
@@ -203,8 +203,7 @@ function SettingsPage() {
           <h2 className="font-mono text-sm font-semibold">AI provider (BYOK)</h2>
         </div>
         <p className="text-sm text-muted-foreground">
-          Bring your own AI API key to use instead of the default Lovable gateway. Your key is
-          stored securely and only used for your analyses.
+          Bring your own AI API key. Your key is stored securely and only used for your analyses.
         </p>
         <div className="space-y-3">
           <div>
@@ -214,7 +213,6 @@ function SettingsPage() {
               onChange={(e) => setCustomProvider(e.target.value)}
               className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm"
             >
-              <option value="lovable">Lovable Gateway (default)</option>
               <option value="github_models">
                 GitHub Models — GPT-4o (free, uses your GitHub token)
               </option>

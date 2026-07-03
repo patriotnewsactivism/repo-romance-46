@@ -234,7 +234,7 @@ ${files}`,
         }
 
         // Call AI via centralized provider router — supports all providers
-        // (OpenAI, Anthropic, Google, GitHub Models, Lovable fallback)
+        // (OpenAI, Anthropic, Google, GitHub Models)
         let aiKey = user.custom_ai_key || null;
         if (user.custom_ai_provider === "github_models" && !aiKey) {
           aiKey = conn.access_token; // reuse GitHub OAuth token
@@ -249,7 +249,7 @@ ${files}`,
               { role: "user", content: `Repos:\n\n${digests.join("\n\n---\n\n")}` },
             ],
           },
-          { provider: user.custom_ai_provider || "lovable", apiKey: aiKey },
+          { provider: user.custom_ai_provider || "openai", apiKey: aiKey },
         );
         const aiResult = JSON.parse(aiResponse.content || "{}") as {
           recommendations: Array<Record<string, unknown>>;

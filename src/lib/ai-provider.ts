@@ -1,7 +1,7 @@
-// Centralized AI provider routing — handles Lovable, GitHub Models, OpenAI, Anthropic, Google
+// Centralized AI provider routing — handles GitHub Models, OpenAI, Anthropic, Google
 
 export interface AIProviderConfig {
-  provider: string; // "lovable" | "github_models" | "openai" | "anthropic" | "google" | "custom"
+  provider: string; // "github_models" | "openai" | "anthropic" | "google" | "custom"
   apiKey: string | null; // user's custom key
 }
 
@@ -24,7 +24,6 @@ export interface AIResponse {
 
 // Default models per provider
 const DEFAULT_MODELS: Record<string, string> = {
-  lovable: "google/gemini-3-flash-preview",
   github_models: "gpt-4o-mini", // gpt-4o-mini has 15 RPM vs gpt-4o's 5 RPM on free tier
   openai: "gpt-4o",
   anthropic: "claude-sonnet-4-20250514",
@@ -85,8 +84,8 @@ const PROVIDER_ENDPOINTS: Record<string, string> = {
  * Routes to the appropriate endpoint based on provider setting.
  */
 export async function callAI(request: AIRequest, config: AIProviderConfig): Promise<AIResponse> {
-  const provider = config.provider || "lovable";
-  const model = request.model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.lovable;
+  const provider = config.provider || "openai";
+  const model = request.model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.openai;
 
   // ─── Anthropic (different API format) ─────────────────────
   if (provider === "anthropic" && config.apiKey) {
@@ -193,43 +192,8 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     return { content: json.choices?.[0]?.message?.content || "" };
   }
 
-  // ─── Fallback: Lovable gateway ────────────────────────────
-  const lovableKey = process.env.LOVABLE_API_KEY;
-  if (!lovableKey) {
-    throw new Error(
-      `No AI provider available. You selected "${provider}" but no API key is saved. Go to Settings and enter your API key, or set LOVABLE_API_KEY on the server.`,
-    );
-  }
-
-  const body: Record<string, unknown> = {
-    model: DEFAULT_MODELS.lovable,
-    messages: request.messages,
-  };
-
-  if (request.responseFormat) {
-    body.response_format = request.responseFormat;
-  }
-
-  const res = await fetchWithRetry(
-    "https://ai.gateway.lovable.dev/v1/chat/completions",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Lovable-API-Key": lovableKey,
-      },
-      body: JSON.stringify(body),
-    },
-    "lovable",
+  // No matching provider with a valid key
+  throw new Error(
+    `No AI provider available. You selected "${provider}" but no API key is saved. Go to Settings and enter your API key.`,
   );
-
-  if (!res.ok) {
-    const text = await res.text();
-    if (res.status === 402)
-      throw new Error("Lovable AI credits exhausted. Add a custom API key in Settings.");
-    throw new Error(`AI error ${res.status}: ${text.slice(0, 300)}`);
-  }
-
-  const json = (await res.json()) as { choices: { message: { content: string } }[] };
-  return { content: json.choices?.[0]?.message?.content || "" };
 }
