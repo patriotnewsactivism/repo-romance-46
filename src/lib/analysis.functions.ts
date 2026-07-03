@@ -679,6 +679,14 @@ export interface AnalysisContext {
 export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: string }> {
   const { supabase, userId, token, prefs, triggerType, onProgress } = ctx;
 
+  // Resolve AI provider early — server key overrides github_models default
+  const serverProvider = process.env.SERVER_AI_PROVIDER;
+  const serverKey = process.env.SERVER_AI_KEY;
+  const resolvedProvider =
+    prefs?.custom_ai_key ? (prefs.custom_ai_provider || "openai")
+    : serverProvider && serverKey ? serverProvider
+    : prefs?.custom_ai_provider || "github_models";
+
   // Insert pending analysis
   const { data: analysis, error: aErr } = await supabase
     .from("analyses")
@@ -686,8 +694,8 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
       user_id: userId,
       status: "running",
       trigger_type: triggerType,
-      ai_provider: prefs?.custom_ai_provider || "openai",
-      ai_model: prefs?.custom_ai_provider === "github_models" ? "gpt-4o-mini" : "gpt-4o",
+      ai_provider: resolvedProvider,
+      ai_model: resolvedProvider === "github_models" ? "gpt-4o-mini" : resolvedProvider === "google" ? "gemini-2.5-flash" : resolvedProvider === "anthropic" ? "claude-sonnet-4-20250514" : "gpt-4o",
     })
     .select("id")
     .single();
@@ -728,7 +736,7 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
 
     await reportProgress(`Digesting ${shortlist.length} repos (parallel)…`);
 
-    const provider = prefs?.custom_ai_provider || "openai";
+    const provider = resolvedProvider;
     const compactDigest = provider === "github_models";
 
     // Scale concurrency: GitHub Models has tighter rate limits
@@ -774,6 +782,9 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
 
     // Resolve AI key
     let aiKey = prefs?.custom_ai_key || null;
+    if (!aiKey && serverKey && serverProvider && provider === serverProvider) {
+      aiKey = serverKey;
+    }
     if (provider === "github_models" && !aiKey) {
       aiKey = token;
     }
@@ -1086,8 +1097,16 @@ export const generateActionPlan = createServerFn({ method: "POST" })
       .eq("user_id", userId)
       .maybeSingle();
 
-    const provider = prefs?.custom_ai_provider || "openai";
+    const srvProvider = process.env.SERVER_AI_PROVIDER;
+    const srvKey = process.env.SERVER_AI_KEY;
+    const provider =
+      prefs?.custom_ai_key ? (prefs.custom_ai_provider || "openai")
+      : srvProvider && srvKey ? srvProvider
+      : prefs?.custom_ai_provider || "github_models";
     let aiKey = prefs?.custom_ai_key || null;
+    if (!aiKey && srvKey && srvProvider && provider === srvProvider) {
+      aiKey = srvKey;
+    }
     if (provider === "github_models" && !aiKey) {
       const { data: conn } = await supabase
         .from("github_connections")
@@ -1175,8 +1194,16 @@ export const generateMergeInstructions = createServerFn({ method: "POST" })
       .eq("user_id", userId)
       .maybeSingle();
 
-    const provider = prefs?.custom_ai_provider || "openai";
+    const srvP = process.env.SERVER_AI_PROVIDER;
+    const srvK = process.env.SERVER_AI_KEY;
+    const provider =
+      prefs?.custom_ai_key ? (prefs.custom_ai_provider || "openai")
+      : srvP && srvK ? srvP
+      : prefs?.custom_ai_provider || "github_models";
     let aiKey = prefs?.custom_ai_key || null;
+    if (!aiKey && srvK && srvP && provider === srvP) {
+      aiKey = srvK;
+    }
     if (provider === "github_models" && !aiKey) {
       const { data: conn } = await supabase
         .from("github_connections")
