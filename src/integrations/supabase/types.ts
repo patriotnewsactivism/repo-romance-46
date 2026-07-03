@@ -16,28 +16,43 @@ export type Database = {
     Tables: {
       analyses: {
         Row: {
+          analyzed_repo_names: string[]
+          completed_at: string | null
           created_at: string
           error: string | null
           id: string
+          is_public: boolean
+          portfolio_stats: Json
           repo_count: number
+          share_slug: string | null
           status: string
           summary_md: string | null
           user_id: string
         }
         Insert: {
+          analyzed_repo_names?: string[]
+          completed_at?: string | null
           created_at?: string
           error?: string | null
           id?: string
+          is_public?: boolean
+          portfolio_stats?: Json
           repo_count?: number
+          share_slug?: string | null
           status?: string
           summary_md?: string | null
           user_id: string
         }
         Update: {
+          analyzed_repo_names?: string[]
+          completed_at?: string | null
           created_at?: string
           error?: string | null
           id?: string
+          is_public?: boolean
+          portfolio_stats?: Json
           repo_count?: number
+          share_slug?: string | null
           status?: string
           summary_md?: string | null
           user_id?: string
@@ -49,13 +64,17 @@ export type Database = {
           analysis_id: string
           created_at: string
           effort: number
+          estimated_hours: number | null
           id: string
           kind: string
           market_potential: number
+          marketing_linkedin: string | null
+          marketing_tweet: string | null
           next_steps: Json
           pitch: string
           rank: number
           repos: Json
+          tech_stack: string[]
           title: string
           user_id: string
         }
@@ -63,13 +82,17 @@ export type Database = {
           analysis_id: string
           created_at?: string
           effort?: number
+          estimated_hours?: number | null
           id?: string
           kind: string
           market_potential?: number
+          marketing_linkedin?: string | null
+          marketing_tweet?: string | null
           next_steps?: Json
           pitch: string
           rank?: number
           repos?: Json
+          tech_stack?: string[]
           title: string
           user_id: string
         }
@@ -77,13 +100,17 @@ export type Database = {
           analysis_id?: string
           created_at?: string
           effort?: number
+          estimated_hours?: number | null
           id?: string
           kind?: string
           market_potential?: number
+          marketing_linkedin?: string | null
+          marketing_tweet?: string | null
           next_steps?: Json
           pitch?: string
           rank?: number
           repos?: Json
+          tech_stack?: string[]
           title?: string
           user_id?: string
         }
