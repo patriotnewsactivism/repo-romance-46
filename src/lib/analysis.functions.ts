@@ -252,9 +252,12 @@ async function runBatchedAI(
     const result = await callLovableAI(batches[i], aiConfig);
     allRecommendations.push(...result.recommendations);
     if (i === 0) summaryMd = result.summary_md;
-    // Small pacing delay between calls to avoid free-tier rate limits
+    // Pacing delay between batches — GitHub Models free tier allows ~15 RPM
+    // for gpt-4o-mini (4s between calls) and only 5 RPM for gpt-4o (12s).
+    // The fetchWithRetry in ai-provider.ts handles 429s with backoff, but
+    // we proactively pace here to minimize retries.
     if (i < batches.length - 1 && aiConfig.provider === "github_models") {
-      await sleep(1200);
+      await sleep(5000);
     }
   }
 
@@ -430,7 +433,7 @@ export const runAnalysis = createServerFn({ method: "POST" })
         status: "running",
         trigger_type: "manual",
         ai_provider: prefs?.custom_ai_provider || "lovable",
-        ai_model: prefs?.custom_ai_provider === "github_models" ? "openai/gpt-4o" : "gpt-4o",
+        ai_model: prefs?.custom_ai_provider === "github_models" ? "gpt-4o-mini" : "gpt-4o",
       })
       .select("id")
       .single();
@@ -922,7 +925,7 @@ export const rerunAnalysis = createServerFn({ method: "POST" })
         status: "running",
         trigger_type: "rerun",
         ai_provider: rerunPrefs?.custom_ai_provider || "lovable",
-        ai_model: rerunPrefs?.custom_ai_provider === "github_models" ? "openai/gpt-4o" : "gpt-4o",
+        ai_model: rerunPrefs?.custom_ai_provider === "github_models" ? "gpt-4o-mini" : "gpt-4o",
       })
       .select("id")
       .single();

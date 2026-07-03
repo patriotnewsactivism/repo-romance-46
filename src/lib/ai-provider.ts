@@ -25,12 +25,51 @@ export interface AIResponse {
 // Default models per provider
 const DEFAULT_MODELS: Record<string, string> = {
   lovable: "google/gemini-3-flash-preview",
-  github_models: "gpt-4o",
+  github_models: "gpt-4o-mini", // gpt-4o-mini has 15 RPM vs gpt-4o's 5 RPM on free tier
   openai: "gpt-4o",
   anthropic: "claude-sonnet-4-20250514",
   google: "gemini-2.5-flash",
   custom: "gpt-4o",
 };
+
+// Rate-limit retry config — GitHub Models free tier is very aggressive (5 RPM
+// for gpt-4o, 15 RPM for gpt-4o-mini). We retry with exponential backoff.
+const MAX_RETRIES = 4;
+const INITIAL_BACKOFF_MS = 5000; // 5s — must be >= the provider's rate window
+
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  provider: string,
+): Promise<Response> {
+  let lastError = "";
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const res = await fetch(url, options);
+
+    if (res.status !== 429) return res;
+
+    // Rate limited — parse Retry-After header if present, otherwise back off
+    const retryAfter = res.headers.get("Retry-After");
+    let waitMs: number;
+    if (retryAfter) {
+      waitMs = parseInt(retryAfter, 10) * 1000 + 500; // pad by 500ms
+    } else {
+      waitMs = INITIAL_BACKOFF_MS * Math.pow(2, attempt); // 5s, 10s, 20s, 40s
+    }
+
+    if (attempt < MAX_RETRIES) {
+      console.warn(
+        `[ai-provider] ${provider} rate limited (429), retry ${attempt + 1}/${MAX_RETRIES} after ${waitMs}ms`,
+      );
+      await new Promise((r) => setTimeout(r, waitMs));
+    } else {
+      lastError = `Rate limit hit after ${MAX_RETRIES + 1} attempts. Last response: ${(await res.text()).slice(0, 200)}`;
+    }
+  }
+  throw new Error(
+    `AI rate limit exhausted for ${provider}. ${lastError}. Try again in a minute, or switch to a provider with higher limits (OpenAI, Anthropic, Google).`,
+  );
+}
 
 // API endpoints per provider
 const PROVIDER_ENDPOINTS: Record<string, string> = {
@@ -61,19 +100,22 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       messages: userMessages.map((m) => ({ role: m.role, content: m.content })),
     };
 
-    const res = await fetch(PROVIDER_ENDPOINTS.anthropic, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": config.apiKey,
-        "anthropic-version": "2023-06-01",
+    const res = await fetchWithRetry(
+      PROVIDER_ENDPOINTS.anthropic,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": config.apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify(body),
       },
-      body: JSON.stringify(body),
-    });
+      "anthropic",
+    );
 
     if (!res.ok) {
       const text = await res.text();
-      if (res.status === 429) throw new Error("AI rate limit hit — try again in a minute.");
       throw new Error(`Anthropic API error ${res.status}: ${text.slice(0, 300)}`);
     }
 
@@ -96,15 +138,18 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
 
     const url = `${PROVIDER_ENDPOINTS.google}/${model}:generateContent?key=${config.apiKey}`;
 
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const res = await fetchWithRetry(
+      url,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+      "google",
+    );
 
     if (!res.ok) {
       const text = await res.text();
-      if (res.status === 429) throw new Error("AI rate limit hit — try again in a minute.");
       throw new Error(`Google AI error ${res.status}: ${text.slice(0, 300)}`);
     }
 
@@ -126,18 +171,21 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       body.response_format = request.responseFormat;
     }
 
-    const res = await fetch(PROVIDER_ENDPOINTS[provider], {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.apiKey}`,
+    const res = await fetchWithRetry(
+      PROVIDER_ENDPOINTS[provider],
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.apiKey}`,
+        },
+        body: JSON.stringify(body),
       },
-      body: JSON.stringify(body),
-    });
+      provider,
+    );
 
     if (!res.ok) {
       const text = await res.text();
-      if (res.status === 429) throw new Error("AI rate limit hit — try again in a minute.");
       throw new Error(`AI error ${res.status}: ${text.slice(0, 300)}`);
     }
 
@@ -162,18 +210,21 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     body.response_format = request.responseFormat;
   }
 
-  const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Lovable-API-Key": lovableKey,
+  const res = await fetchWithRetry(
+    "https://ai.gateway.lovable.dev/v1/chat/completions",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Lovable-API-Key": lovableKey,
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
+    "lovable",
+  );
 
   if (!res.ok) {
     const text = await res.text();
-    if (res.status === 429) throw new Error("AI rate limit hit — try again in a minute.");
     if (res.status === 402)
       throw new Error("Lovable AI credits exhausted. Add a custom API key in Settings.");
     throw new Error(`AI error ${res.status}: ${text.slice(0, 300)}`);
