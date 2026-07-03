@@ -29,6 +29,7 @@ import { useState } from "react";
 import { ActionPlan } from "@/components/ActionPlan";
 import { RepoHealthCheck } from "@/components/RepoHealth";
 import { MergeInstructions } from "@/components/MergeInstructions";
+import { RepoFinisher } from "@/components/RepoFinisher";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/analysis/$id")({
@@ -480,6 +481,19 @@ function AnalysisPage() {
                   {it.repos.length > 0 && (
                     <div className="pt-2 border-t border-border">
                       <RepoHealthCheck repo={it.repos[0]} />
+                    </div>
+                  )}
+
+                  {/* Auto-finish button for finish recommendations */}
+                  {it.kind === "finish" && it.repos.length > 0 && (
+                    <div className="pt-2 border-t border-border">
+                      <RepoFinisher
+                        repo={it.repos[0]}
+                        nextSteps={it.next_steps}
+                        analysisId={id}
+                        itemRank={it.rank}
+                        kind={it.kind}
+                      />
                     </div>
                   )}
 

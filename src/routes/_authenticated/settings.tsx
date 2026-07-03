@@ -36,7 +36,7 @@ function SettingsPage() {
   const [customKey, setCustomKey] = useState("");
   const [filterLanguages, setFilterLanguages] = useState("");
   const [filterMinStars, setFilterMinStars] = useState(0);
-  const [filterMaxRepos, setFilterMaxRepos] = useState(25);
+  const [filterMaxRepos, setFilterMaxRepos] = useState(50);
   const [excludeArchived, setExcludeArchived] = useState(true);
 
   // Sync from server

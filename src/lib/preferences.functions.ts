@@ -77,7 +77,7 @@ export const updatePreferences = createServerFn({ method: "POST" })
         filter_languages: z.array(z.string()).optional(),
         filter_exclude_archived: z.boolean().optional(),
         filter_min_stars: z.number().int().min(0).optional(),
-        filter_max_repos: z.number().int().min(2).max(100).optional(),
+        filter_max_repos: z.number().int().min(2).max(500).optional(),
       })
       .parse(d),
   )
