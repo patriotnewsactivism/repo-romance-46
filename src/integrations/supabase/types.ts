@@ -28,6 +28,7 @@ export type Database = {
           status: string
           summary_md: string | null
           user_id: string
+          valuation: Json | null
         }
         Insert: {
           analyzed_repo_names?: string[]
@@ -42,6 +43,7 @@ export type Database = {
           status?: string
           summary_md?: string | null
           user_id: string
+          valuation?: Json | null
         }
         Update: {
           analyzed_repo_names?: string[]
@@ -56,6 +58,7 @@ export type Database = {
           status?: string
           summary_md?: string | null
           user_id?: string
+          valuation?: Json | null
         }
         Relationships: []
       }
@@ -67,6 +70,7 @@ export type Database = {
           effort: number
           estimated_hours: number | null
           finish_history: Json | null
+          finish_result: Json | null
           id: string
           is_starred: boolean
           iteration_count: number
@@ -93,6 +97,7 @@ export type Database = {
           effort?: number
           estimated_hours?: number | null
           finish_history?: Json | null
+          finish_result?: Json | null
           id?: string
           is_starred?: boolean
           iteration_count?: number
@@ -119,6 +124,7 @@ export type Database = {
           effort?: number
           estimated_hours?: number | null
           finish_history?: Json | null
+          finish_result?: Json | null
           id?: string
           is_starred?: boolean
           iteration_count?: number
