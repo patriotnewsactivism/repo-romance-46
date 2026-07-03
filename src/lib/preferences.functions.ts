@@ -82,11 +82,16 @@ export const updatePreferences = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ context, data }) => {
-    const { error } = await context.supabase.from("user_preferences").upsert({
-      user_id: context.userId,
-      ...data,
-      updated_at: new Date().toISOString(),
-    });
+    // Use update() not upsert() — upsert replaces the whole row and would
+    // null out any column not explicitly in the payload (e.g. custom_ai_key
+    // when the user leaves the field blank to keep their saved key).
+    const { error } = await context.supabase
+      .from("user_preferences")
+      .update({
+        ...data,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", context.userId);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
