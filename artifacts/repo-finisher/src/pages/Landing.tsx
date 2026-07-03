@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { Link } from "wouter";
 import {
   Github,
   GitMerge,
@@ -11,11 +11,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 
-export const Route = createFileRoute("/")({
-  component: Landing,
-});
-
-function Landing() {
+export default function Landing() {
   return (
     <div className="min-h-screen grid-bg">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
@@ -33,7 +29,7 @@ function Landing() {
             source
           </a>
           <Link
-            to="/auth"
+            href="/auth"
             className="rounded-md border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-accent"
           >
             Sign in
@@ -58,7 +54,7 @@ function Landing() {
         </p>
         <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
           <Link
-            to="/auth"
+            href="/auth"
             className="inline-flex items-center gap-2 rounded-md bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:opacity-90 glow-primary"
           >
             <Github className="h-4 w-4" /> Get started
@@ -71,7 +67,6 @@ function Landing() {
           </a>
         </div>
 
-        {/* Example output */}
         <div id="how" className="mt-24 text-left">
           <h2 className="text-center text-2xl font-bold tracking-tight mb-2">What you get</h2>
           <p className="text-center text-sm text-muted-foreground mb-8">
@@ -116,7 +111,6 @@ function Landing() {
           </div>
         </div>
 
-        {/* Feature grid */}
         <div className="mt-20 text-left">
           <h2 className="text-center text-2xl font-bold tracking-tight mb-8">Full toolkit</h2>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -153,7 +147,6 @@ function Landing() {
           </div>
         </div>
 
-        {/* How it works steps */}
         <div className="mt-20 text-left">
           <h2 className="text-center text-2xl font-bold tracking-tight mb-8">How it works</h2>
           <div className="grid gap-6 md:grid-cols-4">
@@ -176,14 +169,13 @@ function Landing() {
           </div>
         </div>
 
-        {/* CTA */}
         <div className="mt-24 rounded-lg border border-border bg-card p-12 text-center">
           <h2 className="text-2xl font-bold tracking-tight">Stop letting good code rot</h2>
           <p className="mt-3 text-muted-foreground">
             Your next product is already 80% written. Let's find it.
           </p>
           <Link
-            to="/auth"
+            href="/auth"
             className="mt-6 inline-flex items-center gap-2 rounded-md bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:opacity-90 glow-primary"
           >
             Get your audit <ArrowRight className="h-4 w-4" />
@@ -194,7 +186,7 @@ function Landing() {
       <footer className="border-t border-border">
         <div className="mx-auto max-w-6xl px-6 py-6 flex items-center justify-between text-xs text-muted-foreground font-mono">
           <span>repo_finisher — ship what you started</span>
-          <span>built with TanStack Start + Supabase</span>
+          <span>built on Replit</span>
         </div>
       </footer>
     </div>

@@ -6,7 +6,7 @@ import {
   generateVibeSpec,
   combineRepos,
   iterativeFinish,
-} from "@/lib/vibe-tools.functions";
+} from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -99,7 +99,7 @@ export function VibeTools({ analysisId, itemRank, kind, repos, existing }: Props
   );
 
   const marketMut = useMutation({
-    mutationFn: () => assessMarketAndValue({ data: { analysisId, itemRank } }),
+    mutationFn: () => assessMarketAndValue(analysisId, itemRank),
     onSuccess: (d) => {
       const r = d as { market: MarketData; valuation: ValuationData };
       setMarket(r.market);
@@ -110,7 +110,7 @@ export function VibeTools({ analysisId, itemRank, kind, repos, existing }: Props
   });
 
   const specMut = useMutation({
-    mutationFn: () => generateVibeSpec({ data: { analysisId, itemRank } }),
+    mutationFn: () => generateVibeSpec(analysisId, itemRank),
     onSuccess: (d) => {
       setSpec(d as VibeSpec);
       toast.success("Vibe spec generated");
@@ -119,7 +119,7 @@ export function VibeTools({ analysisId, itemRank, kind, repos, existing }: Props
   });
 
   const combineMut = useMutation({
-    mutationFn: () => combineRepos({ data: { analysisId, itemRank } }),
+    mutationFn: () => combineRepos(analysisId, itemRank),
     onSuccess: (d) => {
       setCombine(d as CombineResult);
       toast.success("Combined repo created");
@@ -128,10 +128,9 @@ export function VibeTools({ analysisId, itemRank, kind, repos, existing }: Props
   });
 
   const iterMut = useMutation({
-    mutationFn: () =>
-      iterativeFinish({ data: { analysisId, itemRank, repo: repos[0], passes: 3 } }),
+    mutationFn: () => iterativeFinish(analysisId, itemRank, repos[0], 3),
     onSuccess: (d) => {
-      const r = d as { history: FinishHistoryEntry[] };
+      const r = d as unknown as { history: FinishHistoryEntry[] };
       setHistory(r.history);
       toast.success(`Ran ${r.history.filter((h) => h.pr_url).length} finish passes`);
     },

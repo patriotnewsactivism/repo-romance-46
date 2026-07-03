@@ -1,6 +1,5 @@
-import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { valuePortfolio, getValuation } from "@/lib/valuation.functions";
+import { valuePortfolio, getValuation } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -68,12 +67,12 @@ export function PortfolioValuation({ analysisId }: { analysisId: string }) {
 
   const existing = useQuery({
     queryKey: ["valuation", analysisId],
-    queryFn: () => getValuation({ data: { analysisId } }),
+    queryFn: () => getValuation(analysisId),
     enabled: !!analysisId,
   });
 
   const valueMut = useMutation({
-    mutationFn: () => valuePortfolio({ data: { analysisId } }),
+    mutationFn: () => valuePortfolio(analysisId),
     onSuccess: () => {
       toast.success("Portfolio valued!");
       existing.refetch();

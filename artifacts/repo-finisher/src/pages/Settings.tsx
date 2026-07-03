@@ -1,5 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
+import { Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,25 +9,14 @@ import { Switch } from "@/components/ui/switch";
 import { ArrowLeft, Mail, Clock, Key, Filter, Star, Loader2, Check } from "lucide-react";
 import { toast } from "sonner";
 import { useState, useEffect } from "react";
-import { getConnectionStatus, disconnectGithub } from "@/lib/github.functions";
-import { getPreferences, updatePreferences, getStarredItems } from "@/lib/preferences.functions";
+import { getConnectionStatus, disconnectGithub } from "@/lib/api-client";
+import { getPreferences, updatePreferences, getStarredItems } from "@/lib/api-client";
 
-export const Route = createFileRoute("/_authenticated/settings")({
-  component: SettingsPage,
-});
+export default function SettingsPage() {
+  const status = useQuery({ queryKey: ["gh-status"], queryFn: () => getConnectionStatus() });
+  const prefs = useQuery({ queryKey: ["prefs"], queryFn: () => getPreferences() });
+  const starred = useQuery({ queryKey: ["starred"], queryFn: () => getStarredItems() });
 
-function SettingsPage() {
-  const statusFn = useServerFn(getConnectionStatus);
-  const disconnectFn = useServerFn(disconnectGithub);
-  const prefFn = useServerFn(getPreferences);
-  const updateFn = useServerFn(updatePreferences);
-  const starredFn = useServerFn(getStarredItems);
-
-  const status = useQuery({ queryKey: ["gh-status"], queryFn: () => statusFn() });
-  const prefs = useQuery({ queryKey: ["prefs"], queryFn: () => prefFn() });
-  const starred = useQuery({ queryKey: ["starred"], queryFn: () => starredFn() });
-
-  // Local state for form
   const [emailNotif, setEmailNotif] = useState(false);
   const [scheduleEnabled, setScheduleEnabled] = useState(false);
   const [scheduleFreq, setScheduleFreq] = useState<"weekly" | "monthly">("weekly");
@@ -39,7 +27,6 @@ function SettingsPage() {
   const [filterMaxRepos, setFilterMaxRepos] = useState(50);
   const [excludeArchived, setExcludeArchived] = useState(true);
 
-  // Sync from server
   useEffect(() => {
     if (prefs.data) {
       const p = prefs.data as unknown as Record<string, unknown>;
@@ -57,32 +44,30 @@ function SettingsPage() {
 
   const updateMut = useMutation({
     mutationFn: () =>
-      updateFn({
-        data: {
-          email_notifications: emailNotif,
-          schedule_enabled: scheduleEnabled,
-          schedule_frequency: scheduleFreq,
-          custom_ai_provider: customProvider,
-          ...(customKey ? { custom_ai_key: customKey } : {}),
-          filter_languages: filterLanguages
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean),
-          filter_exclude_archived: excludeArchived,
-          filter_min_stars: filterMinStars,
-          filter_max_repos: filterMaxRepos,
-        },
+      updatePreferences({
+        email_notifications: emailNotif,
+        schedule_enabled: scheduleEnabled,
+        schedule_frequency: scheduleFreq,
+        custom_ai_provider: customProvider,
+        ...(customKey ? { custom_ai_key: customKey } : {}),
+        filter_languages: filterLanguages
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        filter_exclude_archived: excludeArchived,
+        filter_min_stars: filterMinStars,
+        filter_max_repos: filterMaxRepos,
       }),
     onSuccess: () => {
       toast.success("Settings saved");
       prefs.refetch();
-      setCustomKey(""); // Clear after save
+      setCustomKey("");
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const disconnectMut = useMutation({
-    mutationFn: () => disconnectFn(),
+    mutationFn: () => disconnectGithub(),
     onSuccess: () => {
       toast.success("GitHub disconnected");
       status.refetch();
@@ -94,7 +79,7 @@ function SettingsPage() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-10 space-y-8">
       <Link
-        to="/dashboard"
+        href="/dashboard"
         className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-4 w-4" /> Dashboard
@@ -104,7 +89,6 @@ function SettingsPage() {
         <span className="text-primary">$</span> settings
       </h1>
 
-      {/* Starred recommendations */}
       <Card className="p-6 space-y-4">
         <div className="flex items-center gap-2">
           <Star className="h-4 w-4 text-primary" />
@@ -112,13 +96,13 @@ function SettingsPage() {
         </div>
         {starred.isLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : !starred.data?.length ? (
+        ) : !starred.data?.items?.length ? (
           <p className="text-sm text-muted-foreground">
             No starred recommendations yet. Star items from an analysis to track them here.
           </p>
         ) : (
           <div className="space-y-2">
-            {(starred.data as Array<Record<string, unknown>>).map((item) => (
+            {starred.data.items.map((item) => (
               <div key={item.id as string} className="rounded-md border border-border p-3">
                 <div className="flex items-center gap-2">
                   <Badge variant="outline" className="text-[10px] font-mono">
@@ -133,7 +117,6 @@ function SettingsPage() {
         )}
       </Card>
 
-      {/* Scheduled re-analysis */}
       <Card className="p-6 space-y-4">
         <div className="flex items-center gap-2">
           <Clock className="h-4 w-4 text-primary" />
@@ -179,7 +162,6 @@ function SettingsPage() {
         )}
       </Card>
 
-      {/* Email notifications */}
       <Card className="p-6 space-y-4">
         <div className="flex items-center gap-2">
           <Mail className="h-4 w-4 text-primary" />
@@ -196,7 +178,6 @@ function SettingsPage() {
         </div>
       </Card>
 
-      {/* BYOK: Bring Your Own AI Key */}
       <Card className="p-6 space-y-4">
         <div className="flex items-center gap-2">
           <Key className="h-4 w-4 text-primary" />
@@ -240,9 +221,7 @@ function SettingsPage() {
                 type="button"
                 onClick={() => {
                   setCustomKey("");
-                  updateFn({
-                    data: { custom_ai_key: null },
-                  }).then(() => {
+                  updatePreferences({ custom_ai_key: null }).then(() => {
                     toast.success("API key removed");
                     prefs.refetch();
                   });
@@ -269,7 +248,6 @@ function SettingsPage() {
         </div>
       </Card>
 
-      {/* Analysis filters */}
       <Card className="p-6 space-y-4">
         <div className="flex items-center gap-2">
           <Filter className="h-4 w-4 text-primary" />
@@ -307,7 +285,6 @@ function SettingsPage() {
         </div>
       </Card>
 
-      {/* GitHub connection */}
       <Card className="p-6 space-y-4">
         <h2 className="font-mono text-sm font-semibold">GitHub connection</h2>
         <div className="flex items-center justify-between">
@@ -327,7 +304,6 @@ function SettingsPage() {
         </div>
       </Card>
 
-      {/* Save button */}
       <div className="flex justify-end">
         <Button
           onClick={() => updateMut.mutate()}

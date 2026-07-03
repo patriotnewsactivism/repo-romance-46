@@ -1,6 +1,5 @@
-import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useLocation, Link } from "wouter";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -22,15 +21,10 @@ import {
   startGithubOAuth,
   disconnectGithub,
   getPortfolioSummary,
-} from "@/lib/github.functions";
-import { listAnalyses, runAnalysis, deleteAnalysis } from "@/lib/analysis.functions";
-import { getPreferences, getStarredItems } from "@/lib/preferences.functions";
-import { Link as TanLink } from "@tanstack/react-router";
+} from "@/lib/api-client";
+import { listAnalyses, runAnalysis, deleteAnalysis } from "@/lib/api-client";
+import { getPreferences } from "@/lib/api-client";
 import { formatDistanceToNow } from "date-fns";
-
-export const Route = createFileRoute("/_authenticated/dashboard")({
-  component: Dashboard,
-});
 
 interface PortfolioSummary {
   login: string;
@@ -42,33 +36,26 @@ interface PortfolioSummary {
   mostRecentPush: string;
 }
 
-function Dashboard() {
-  const router = useRouter();
-  const statusFn = useServerFn(getConnectionStatus);
-  const startFn = useServerFn(startGithubOAuth);
-  const disconnectFn = useServerFn(disconnectGithub);
-  const summaryFn = useServerFn(getPortfolioSummary);
-  const listFn = useServerFn(listAnalyses);
-  const runFn = useServerFn(runAnalysis);
-  const prefFn = useServerFn(getPreferences);
-  const starredFn = useServerFn(getStarredItems);
-  const deleteFn = useServerFn(deleteAnalysis);
+export default function Dashboard() {
+  const [, navigate] = useLocation();
+  const queryClient = useQueryClient();
 
-  const status = useQuery({ queryKey: ["gh-status"], queryFn: () => statusFn() });
+  const status = useQuery({ queryKey: ["gh-status"], queryFn: () => getConnectionStatus() });
   const portfolio = useQuery({
     queryKey: ["gh-portfolio"],
-    queryFn: () => summaryFn(),
+    queryFn: () => getPortfolioSummary(),
     enabled: !!status.data?.connected,
   });
-  const analyses = useQuery({ queryKey: ["analyses"], queryFn: () => listFn() });
-  const prefs = useQuery({
+  const analysesQuery = useQuery({ queryKey: ["analyses"], queryFn: () => listAnalyses() });
+  const analysesList = (analysesQuery.data?.analyses ?? []) as Record<string, unknown>[];
+  useQuery({
     queryKey: ["prefs"],
-    queryFn: () => prefFn(),
+    queryFn: () => getPreferences(),
     enabled: !!status.data?.connected,
   });
 
   const connectMut = useMutation({
-    mutationFn: () => startFn(),
+    mutationFn: () => startGithubOAuth(),
     onSuccess: (res) => {
       window.location.href = res.url;
     },
@@ -76,7 +63,7 @@ function Dashboard() {
   });
 
   const disconnectMut = useMutation({
-    mutationFn: () => disconnectFn(),
+    mutationFn: () => disconnectGithub(),
     onSuccess: () => {
       toast.success("GitHub disconnected");
       status.refetch();
@@ -85,26 +72,26 @@ function Dashboard() {
   });
 
   const runMut = useMutation({
-    mutationFn: () => runFn(),
+    mutationFn: () => runAnalysis(),
     onSuccess: (res) => {
       toast.success("Analysis complete");
-      analyses.refetch();
-      router.navigate({ to: "/analysis/$id", params: { id: res.id } });
+      queryClient.invalidateQueries({ queryKey: ["analyses"] });
+      navigate(`/analysis/${res.id}`);
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const deleteMut = useMutation({
-    mutationFn: (id: string) => deleteFn({ data: { id } }),
+    mutationFn: (id: string) => deleteAnalysis(id),
     onSuccess: () => {
       toast.success("Analysis deleted");
-      analyses.refetch();
+      analysesQuery.refetch();
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const connected = status.data?.connected;
-  const summary = (portfolio.data as { connected: boolean; summary: PortfolioSummary | null })
+  const summary = (portfolio.data as { connected: boolean; summary: PortfolioSummary | null } | undefined)
     ?.summary;
 
   return (
@@ -118,7 +105,6 @@ function Dashboard() {
         </p>
       </section>
 
-      {/* GitHub Connection */}
       <Card className="p-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3">
@@ -156,7 +142,6 @@ function Dashboard() {
         </div>
       </Card>
 
-      {/* Portfolio Preview */}
       {connected && summary && (
         <Card className="p-6">
           <h2 className="font-mono text-sm text-muted-foreground mb-4">// portfolio preview</h2>
@@ -204,7 +189,6 @@ function Dashboard() {
         </Card>
       )}
 
-      {/* Run Analysis */}
       <Card className="p-6">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
@@ -233,7 +217,7 @@ function Dashboard() {
         </div>
         {connected && (
           <Link
-            to="/settings"
+            href="/settings"
             className="text-xs font-mono text-muted-foreground hover:text-foreground mt-2 inline-block"
           >
             Configure filters & schedule →
@@ -246,36 +230,39 @@ function Dashboard() {
         )}
       </Card>
 
-      {/* Past Analyses */}
       <section>
         <h2 className="font-mono text-sm text-muted-foreground mb-3">// past analyses</h2>
-        {analyses.isLoading ? (
+        {analysesQuery.isLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : !analyses.data?.length ? (
+        ) : !analysesList.length ? (
           <Card className="p-6 text-center text-sm text-muted-foreground">
             No analyses yet. Run your first analysis above.
           </Card>
         ) : (
           <div className="space-y-2">
-            {analyses.data.map((a) => (
-              <Link key={a.id} to="/analysis/$id" params={{ id: a.id }} className="block">
+            {analysesList.map((a) => (
+              <Link key={a.id as string} href={`/analysis/${a.id}`} className="block">
                 <Card className="p-4 hover:border-primary/50 transition">
                   <div className="flex items-center justify-between gap-4">
                     <div>
-                      <div className="font-mono text-sm">analysis_{a.id.slice(0, 8)}</div>
+                      <div className="font-mono text-sm">
+                        analysis_{(a.id as string).slice(0, 8)}
+                      </div>
                       <div className="text-xs text-muted-foreground mt-1">
-                        {formatDistanceToNow(new Date(a.created_at), { addSuffix: true })} ·{" "}
-                        {a.repo_count} repos
+                        {formatDistanceToNow(new Date(a.created_at as string), {
+                          addSuffix: true,
+                        })}{" "}
+                        · {a.repo_count as number} repos
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <Badge variant={a.status === "complete" ? "default" : "secondary"}>
-                        {a.status}
+                        {a.status as string}
                       </Badge>
                       <button
                         onClick={(e) => {
                           e.preventDefault();
-                          if (confirm("Delete this analysis?")) deleteMut.mutate(a.id);
+                          if (confirm("Delete this analysis?")) deleteMut.mutate(a.id as string);
                         }}
                         className="text-muted-foreground hover:text-destructive transition"
                       >

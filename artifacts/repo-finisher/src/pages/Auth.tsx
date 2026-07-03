@@ -1,5 +1,5 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { useLocation } from "wouter";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,12 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
 
-export const Route = createFileRoute("/auth")({
-  component: AuthPage,
-});
-
-function AuthPage() {
-  const navigate = useNavigate();
+export default function AuthPage() {
+  const [, navigate] = useLocation();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -20,7 +16,7 @@ function AuthPage() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) navigate({ to: "/dashboard" });
+      if (data.session) navigate("/dashboard");
     });
   }, [navigate]);
 
@@ -42,7 +38,7 @@ function AuthPage() {
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        navigate({ to: "/dashboard" });
+        navigate("/dashboard");
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Something went wrong";

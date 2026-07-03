@@ -1,10 +1,11 @@
-import { createServerFn } from "@tanstack/react-start";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { callAI } from "@/lib/ai-provider";
+import { Router, type IRouter } from "express";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "@/integrations/supabase/types";
+import { requireAuth } from "../middlewares/auth";
+import { asyncHandler } from "../lib/async-handler";
+import { callAI } from "../lib/ai-provider";
 
+const router: IRouter = Router();
 
 const GH_API = "https://api.github.com";
 
@@ -85,24 +86,9 @@ const KEY_FILES = [
 ];
 
 const SAMPLE_EXT = new Set([
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".py",
-  ".go",
-  ".rs",
-  ".rb",
-  ".java",
-  ".swift",
-  ".kt",
-  ".vue",
-  ".svelte",
-  ".css",
-  ".sql",
+  ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".rb", ".java", ".swift", ".kt", ".vue", ".svelte", ".css", ".sql",
 ]);
 
-// ─── Concurrency-limited parallel runner ───────────────────────
 async function parallelMap<T, R>(
   items: T[],
   concurrency: number,
@@ -129,14 +115,10 @@ async function parallelMap<T, R>(
 
 type ProgressFn = (msg: string) => Promise<void>;
 
-// ─── Parse package.json / pyproject.toml for dependencies ──────
 function extractDepsFromPackageJson(text: string): string[] {
   try {
     const pkg = JSON.parse(text);
-    const deps = {
-      ...pkg.dependencies,
-      ...pkg.devDependencies,
-    };
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
     return Object.keys(deps || {}).slice(0, 30);
   } catch {
     return [];
@@ -149,20 +131,13 @@ function extractDepsFromPyproject(text: string): string[] {
   if (inDeps) {
     const matches = inDeps.match(/["']([a-zA-Z0-9_-]+)["']/g);
     if (matches) {
-      for (const m of matches.slice(0, 30)) {
-        deps.push(m.replace(/["']/g, ""));
-      }
+      for (const m of matches.slice(0, 30)) deps.push(m.replace(/["']/g, ""));
     }
   }
   return deps;
 }
 
-// ─── Digest a single repo into a text summary for the AI ───────
-async function digestRepo(
-  repo: Repo,
-  token: string,
-  compact = false,
-): Promise<string> {
+async function digestRepo(repo: Repo, token: string, compact = false): Promise<string> {
   const parts: string[] = [];
   parts.push(`REPO: ${repo.full_name}`);
   if (repo.description) parts.push(`DESC: ${repo.description}`);
@@ -173,12 +148,10 @@ async function digestRepo(
   if (repo.homepage) parts.push(`HOMEPAGE: ${repo.homepage}`);
   if (repo.license?.name) parts.push(`LICENSE: ${repo.license.name}`);
 
-  // README
   const readmeChars = compact ? 500 : 3000;
   const readme = await ghText(`/repos/${repo.full_name}/readme`, token);
   if (readme) parts.push(`README (truncated):\n${readme.slice(0, readmeChars)}`);
 
-  // File tree — handle truncated trees
   let tree: TreeEntry[] = [];
   let treeTruncated = false;
   try {
@@ -189,15 +162,11 @@ async function digestRepo(
     tree = treeRes.tree.filter((t) => t.type === "blob");
     treeTruncated = treeRes.truncated;
   } catch {
-    // Skip on error — try non-recursive as fallback
     try {
-      const treeRes = await gh<{ tree: TreeEntry[] }>(
-        `/repos/${repo.full_name}/git/trees/${repo.default_branch}`,
-        token,
-      );
+      const treeRes = await gh<{ tree: TreeEntry[] }>(`/repos/${repo.full_name}/git/trees/${repo.default_branch}`, token);
       tree = treeRes.tree.filter((t) => t.type === "blob");
     } catch {
-      // give up on tree
+      /* give up on tree */
     }
   }
 
@@ -207,15 +176,11 @@ async function digestRepo(
     `FILES (${paths.length} total${treeTruncated ? " — TRUNCATED, showing partial" : ""}, top ${Math.min(topFiles, paths.length)}):\n${paths.slice(0, topFiles).join("\n")}`,
   );
 
-  // Detect key files to sample
   const toSample = new Set<string>();
-
-  // Always include package.json / pyproject.toml for dependency detection
   for (const kf of KEY_FILES) {
     if (paths.includes(kf)) toSample.add(kf);
   }
 
-  // Sample largest source files
   const sourceFiles = tree
     .filter((t) => {
       const ext = t.path.slice(t.path.lastIndexOf("."));
@@ -235,7 +200,6 @@ async function digestRepo(
 
   const samplePaths = Array.from(toSample).slice(0, compact ? 4 : 10);
 
-  // Parallel fetch of key files
   const fileResults = await Promise.all(
     samplePaths.map((p) => ghText(`/repos/${repo.full_name}/contents/${encodeURIComponent(p)}`, token)),
   );
@@ -250,12 +214,10 @@ async function digestRepo(
     if (!text) continue;
     const fname = samplePaths[i];
 
-    // Parse dependencies from package.json / pyproject.toml
     if (fname === "package.json") {
       const deps = extractDepsFromPackageJson(text);
       if (deps.length) {
         parts.push(`DEPENDENCIES (package.json): ${deps.join(", ")}`);
-        // Still include a slice but smaller since we extracted deps
         const snippet = text.slice(0, 300);
         parts.push(`--- FILE: ${fname} ---\n${snippet}`);
         sampledBytes += 300;
@@ -280,8 +242,6 @@ async function digestRepo(
 
   return parts.join("\n\n");
 }
-
-// ─── Token budgeting / chunking ────────────────────────────────
 
 function estimateTokens(s: string): number {
   return Math.ceil(s.length / 4);
@@ -342,13 +302,9 @@ function computePortfolioStats(shortlist: Repo[]) {
     .slice(0, 5);
 
   const totalStars = shortlist.reduce((sum, r) => sum + (r.stargazers_count || 0), 0);
-  const mostActive = [...shortlist].sort(
-    (a, b) => new Date(b.pushed_at).getTime() - new Date(a.pushed_at).getTime(),
-  )[0];
+  const mostActive = [...shortlist].sort((a, b) => new Date(b.pushed_at).getTime() - new Date(a.pushed_at).getTime())[0];
   const sixMonthsAgo = Date.now() - 1000 * 60 * 60 * 24 * 30 * 6;
-  const dormant = shortlist
-    .filter((r) => new Date(r.pushed_at).getTime() < sixMonthsAgo)
-    .map((r) => r.full_name);
+  const dormant = shortlist.filter((r) => new Date(r.pushed_at).getTime() < sixMonthsAgo).map((r) => r.full_name);
   const avgSize = shortlist.reduce((sum, r) => sum + (r.size || 0), 0) / total;
 
   return {
@@ -377,7 +333,6 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   ]);
 }
 
-// ─── Apply user filters to the repo shortlist ──────────────────
 interface FilterPrefs {
   filter_languages: string[] | null;
   filter_min_stars: number;
@@ -393,9 +348,7 @@ function applyFilters(repos: Repo[], prefs: FilterPrefs | null): Repo[] {
     shortlist = shortlist.filter((r) => !r.archived);
   }
   if (prefs.filter_languages && prefs.filter_languages.length > 0) {
-    shortlist = shortlist.filter(
-      (r) => r.language && prefs.filter_languages!.includes(r.language),
-    );
+    shortlist = shortlist.filter((r) => r.language && prefs.filter_languages!.includes(r.language));
   }
   if (prefs.filter_min_stars > 0) {
     shortlist = shortlist.filter((r) => r.stargazers_count >= prefs.filter_min_stars);
@@ -403,12 +356,10 @@ function applyFilters(repos: Repo[], prefs: FilterPrefs | null): Repo[] {
   return shortlist.slice(0, prefs.filter_max_repos || 50);
 }
 
-// ─── Fetch repos with pagination ───────────────────────────────
 async function fetchAllRepos(token: string, maxRepos: number): Promise<Repo[]> {
   const allRepos: Repo[] = [];
   let page = 1;
   const perPage = 100;
-  // Cap pages to avoid excessive API calls — 5 pages = 500 repos max
   const maxPages = Math.min(Math.ceil(maxRepos / perPage) + 1, 5);
 
   while (page <= maxPages) {
@@ -419,13 +370,12 @@ async function fetchAllRepos(token: string, maxRepos: number): Promise<Repo[]> {
     );
     if (!batch || batch.length === 0) break;
     allRepos.push(...batch);
-    if (batch.length < perPage) break; // no more pages
+    if (batch.length < perPage) break;
     page++;
   }
   return allRepos;
 }
 
-// ─── Zod schema for AI recommendations ─────────────────────────
 const RecommendationSchema = z.object({
   recommendations: z.array(
     z.object({
@@ -436,10 +386,7 @@ const RecommendationSchema = z.object({
       effort: z.number().int(),
       market_potential: z.number().int(),
       next_steps: z.array(z.string()),
-      tech_stack: z
-        .array(z.string())
-        .nullish()
-        .transform((v) => v ?? []),
+      tech_stack: z.array(z.string()).nullish().transform((v) => v ?? []),
       marketing_tweet: z.string().nullish(),
       marketing_linkedin: z.string().nullish(),
       estimated_hours: z.number().int().nullish(),
@@ -455,15 +402,9 @@ const RecommendationSchema = z.object({
       dormant_repos: z.array(z.string()).optional().default([]),
       average_repo_size_kb: z.number().optional(),
     })
-    .default({
-      total_repos: 0,
-      languages: [],
-      total_stars: 0,
-      dormant_repos: [],
-    }),
+    .default({ total_repos: 0, languages: [], total_stars: 0, dormant_repos: [] }),
 });
 
-// ─── AI system prompt ──────────────────────────────────────────
 const AI_SYSTEM_PROMPT = `You are an expert product strategist and technical marketer reviewing a developer's GitHub portfolio.
 You analyze repos to find opportunities to FINISH, COMBINE, or REPURPOSE them into shippable products.
 
@@ -490,7 +431,6 @@ Also produce:
 Return 5-12 recommendations. Rank by (market_potential * 2 - effort) desc.
 Be specific and reference actual code, files, and features you see in the digests. Generic advice is useless.`;
 
-// JSON schema for structured output (OpenAI-compatible providers)
 const AI_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -536,14 +476,7 @@ async function callBatchedAI(
         { role: "system", content: AI_SYSTEM_PROMPT },
         { role: "user", content: user },
       ],
-      responseFormat: {
-        type: "json_schema",
-        json_schema: {
-          name: "recommendations",
-          strict: true,
-          schema: AI_JSON_SCHEMA,
-        },
-      },
+      responseFormat: { type: "json_schema", json_schema: { name: "recommendations", strict: true, schema: AI_JSON_SCHEMA } },
     },
     aiConfig,
   );
@@ -551,17 +484,14 @@ async function callBatchedAI(
   return RecommendationSchema.parse(parsed);
 }
 
-// ─── Cross-batch synthesis: find combine opportunities across batches ──
 async function synthesizeCrossBatch(
   allRecommendations: z.infer<typeof RecommendationSchema>["recommendations"],
   digests: string[],
   aiConfig: { provider: string; apiKey: string | null },
 ): Promise<z.infer<typeof RecommendationSchema>["recommendations"]> {
-  // Only run synthesis if there are existing combine recs or if we had multiple batches
-  // Build a compact index of all repos for the AI to reference
   const repoIndex = digests
     .map((d) => {
-      const repoLine = d.split("\n")[0]; // REPO: owner/name
+      const repoLine = d.split("\n")[0];
       const descLine = d.split("\n").find((l) => l.startsWith("DESC:"));
       const langLine = d.split("\n").find((l) => l.startsWith("LANG:"));
       return `${repoLine} ${descLine || ""} ${langLine || ""}`;
@@ -593,14 +523,7 @@ Only include NEW recommendations not already in the list above. If no new opport
           { role: "system", content: "You are a product strategist. Always respond with valid JSON." },
           { role: "user", content: synthPrompt },
         ],
-        responseFormat: {
-          type: "json_schema",
-          json_schema: {
-            name: "synthesis",
-            strict: true,
-            schema: AI_JSON_SCHEMA,
-          },
-        },
+        responseFormat: { type: "json_schema", json_schema: { name: "synthesis", strict: true, schema: AI_JSON_SCHEMA } },
       },
       aiConfig,
     );
@@ -608,13 +531,11 @@ Only include NEW recommendations not already in the list above. If no new opport
     const validated = RecommendationSchema.parse(parsed);
     return validated.recommendations;
   } catch {
-    // Synthesis is best-effort — don't fail the whole analysis if it errors
     console.warn("[analysis] Cross-batch synthesis failed, continuing with batch results");
     return [];
   }
 }
 
-// ─── Batched AI runner with synthesis ──────────────────────────
 async function runBatchedAI(
   digests: string[],
   aiConfig: { provider: string; apiKey: string | null },
@@ -633,20 +554,16 @@ async function runBatchedAI(
     const result = await callBatchedAI(batches[i], aiConfig);
     allRecommendations.push(...result.recommendations);
     if (i === 0) summaryMd = result.summary_md;
-    // Reduced inter-batch pacing — 3s for most providers, 5s for GitHub Models
     if (i < batches.length - 1) {
       const delay = aiConfig.provider === "github_models" ? 5000 : 3000;
       await sleep(delay);
     }
   }
 
-  // Cross-batch synthesis: find combine opportunities across batches
   if (hasMultipleBatches && allRecommendations.length > 0 && onProgress) {
     await onProgress("Synthesizing cross-batch opportunities…");
     const crossBatchRecs = await synthesizeCrossBatch(allRecommendations, digests, aiConfig);
-    if (crossBatchRecs.length > 0) {
-      allRecommendations.push(...crossBatchRecs);
-    }
+    if (crossBatchRecs.length > 0) allRecommendations.push(...crossBatchRecs);
   }
 
   return RecommendationSchema.parse({
@@ -655,9 +572,8 @@ async function runBatchedAI(
   });
 }
 
-// ─── Shared analysis core (used by runAnalysis + rerunAnalysis) ─
-export interface AnalysisContext {
-  supabase: SupabaseClient<Database>;
+interface AnalysisContext {
+  supabase: SupabaseClient;
   userId: string;
   token: string;
   prefs: {
@@ -672,10 +588,9 @@ export interface AnalysisContext {
   onProgress: ProgressFn;
 }
 
-export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: string }> {
-  const { supabase, userId, token, prefs, triggerType, onProgress } = ctx;
+async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: string }> {
+  const { supabase, userId, token, prefs, triggerType } = ctx;
 
-  // Insert pending analysis
   const { data: analysis, error: aErr } = await supabase
     .from("analyses")
     .insert({
@@ -690,13 +605,9 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
   if (aErr || !analysis) throw new Error(aErr?.message ?? "Failed to create analysis");
   const analysisId = analysis.id;
 
-  // Wrap progress to also persist to DB
   const reportProgress: ProgressFn = async (msg: string) => {
     console.log(`[analysis ${analysisId}] ${msg}`);
-    await supabase
-      .from("analyses")
-      .update({ error: msg })
-      .eq("id", analysisId);
+    await supabase.from("analyses").update({ error: msg }).eq("id", analysisId);
   };
 
   try {
@@ -705,15 +616,16 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
     await reportProgress("Fetching repos from GitHub…");
     const repos = await fetchAllRepos(token, maxRepos);
 
-    // Apply user filters (language, stars, archived)
-    const shortlist = applyFilters(repos, prefs
-      ? {
-          filter_languages: prefs.filter_languages,
-          filter_min_stars: prefs.filter_min_stars,
-          filter_exclude_archived: prefs.filter_exclude_archived,
-          filter_max_repos: maxRepos,
-        }
-      : null,
+    const shortlist = applyFilters(
+      repos,
+      prefs
+        ? {
+            filter_languages: prefs.filter_languages,
+            filter_min_stars: prefs.filter_min_stars,
+            filter_exclude_archived: prefs.filter_exclude_archived,
+            filter_max_repos: maxRepos,
+          }
+        : null,
     );
 
     if (shortlist.length < 2) {
@@ -726,8 +638,6 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
 
     const provider = prefs?.custom_ai_provider || "openai";
     const compactDigest = provider === "github_models";
-
-    // Scale concurrency: GitHub Models has tighter rate limits
     const concurrency = provider === "github_models" ? 5 : 8;
 
     let digested = 0;
@@ -740,7 +650,6 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
         }
         return digest;
       }),
-      // Scale timeout: 2s per repo + 10s baseline
       Math.max(30000, shortlist.length * 2000 + 10000),
       "Repo digestion",
     );
@@ -757,35 +666,27 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
       }
     }
 
-
     if (digests.length < 2) {
-      throw new Error(
-        `Only ${digests.length} repos could be digested (${failedDigests} failed). Check GitHub API rate limits.`,
-      );
+      throw new Error(`Only ${digests.length} repos could be digested (${failedDigests} failed). Check GitHub API rate limits.`);
     }
 
     if (failedDigests > 0) {
       await reportProgress(`${failedDigests} repos failed digestion, continuing with ${digests.length}…`);
     }
 
-    // Resolve AI key
     let aiKey = prefs?.custom_ai_key || null;
-    if (provider === "github_models" && !aiKey) {
-      aiKey = token;
-    }
+    if (provider === "github_models" && !aiKey) aiKey = token;
     const aiConfig = { provider, apiKey: aiKey };
 
     await reportProgress(`Running AI analysis on ${digests.length} repos…`);
 
     const ai = await withTimeout(
       runBatchedAI(digests, aiConfig, reportProgress),
-      // Scale timeout: 30s per batch estimate + 60s baseline + 30s for synthesis
       Math.max(90000, Math.ceil(digests.length / 10) * 30000 + 90000),
       "AI analysis",
     );
     ai.portfolio_stats = computePortfolioStats(shortlist);
 
-    // Rank and persist
     const ranked = [...ai.recommendations].sort(
       (a, b) => b.market_potential * 2 - b.effort - (a.market_potential * 2 - a.effort),
     );
@@ -832,29 +733,20 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
   }
 }
 
-// ─── Helper: get GitHub connection + prefs for a user ───────────
-async function getAnalysisContext(
-  supabase: SupabaseClient<Database>,
-  userId: string,
-  triggerType: string,
-
-): Promise<AnalysisContext> {
+async function getAnalysisContext(supabase: SupabaseClient, userId: string, triggerType: string): Promise<AnalysisContext> {
   const { data: conn } = await supabase
     .from("github_connections")
     .select("access_token, github_login")
     .eq("user_id", userId)
     .maybeSingle();
-  if (!conn) throw new Error("Connect GitHub first.");
+  if (!conn) throw Object.assign(new Error("Connect GitHub first."), { status: 400 });
 
   const { data: prefs } = await supabase
     .from("user_preferences")
-    .select(
-      "custom_ai_provider, custom_ai_key, filter_max_repos, filter_languages, filter_min_stars, filter_exclude_archived",
-    )
+    .select("custom_ai_provider, custom_ai_key, filter_max_repos, filter_languages, filter_min_stars, filter_exclude_archived")
     .eq("user_id", userId)
     .maybeSingle();
 
-  // Placeholder onProgress — replaced in executeAnalysis
   const noopProgress: ProgressFn = async () => {};
 
   return {
@@ -867,215 +759,136 @@ async function getAnalysisContext(
   };
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  SERVER FUNCTIONS (exports)
-// ═══════════════════════════════════════════════════════════════
+router.post(
+  "/analysis/run",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ctx = await getAnalysisContext(req.supabase!, req.userId!, "manual");
+    res.json(await executeAnalysis(ctx));
+  }),
+);
 
-// ─── runAnalysis ────────────────────────────────────────────────
-export const runAnalysis = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const ctx = await getAnalysisContext(context.supabase, context.userId, "manual");
-    return executeAnalysis(ctx);
-  });
-
-// ─── listAnalyses ───────────────────────────────────────────────
-export const listAnalyses = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+router.get(
+  "/analysis",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { data, error } = await req.supabase!
       .from("analyses")
       .select("id, status, repo_count, created_at, error, trigger_type, ai_provider")
-      .eq("user_id", context.userId)
+      .eq("user_id", req.userId!)
       .order("created_at", { ascending: false })
       .limit(50);
     if (error) throw new Error(error.message);
-    return data ?? [];
-  });
+    res.json(data ?? []);
+  }),
+);
 
-// ─── getAnalysis ────────────────────────────────────────────────
-export const getAnalysis = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
-  .handler(async ({ context, data }) => {
-    const { data: analysis, error } = await context.supabase
+router.get(
+  "/analysis/:id",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { data: analysis, error } = await req.supabase!
       .from("analyses")
       .select("*")
-      .eq("id", data.id)
-      .eq("user_id", context.userId)
+      .eq("id", id)
+      .eq("user_id", req.userId!)
       .maybeSingle();
     if (error) throw new Error(error.message);
-    if (!analysis) throw new Error("Analysis not found");
+    if (!analysis) throw Object.assign(new Error("Analysis not found"), { status: 404 });
 
-    const { data: items } = await context.supabase
+    const { data: items } = await req.supabase!
       .from("analysis_items")
       .select("*")
-      .eq("analysis_id", data.id)
+      .eq("analysis_id", id)
       .order("rank", { ascending: true });
 
-    return { analysis, items: items ?? [] };
-  });
+    res.json({ analysis, items: items ?? [] });
+  }),
+);
 
-// ─── deleteAnalysis ─────────────────────────────────────────────
-export const deleteAnalysis = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
-  .handler(async ({ context, data }) => {
-    const { supabase, userId } = context;
+router.delete(
+  "/analysis/:id",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const userId = req.userId!;
 
-    const { error: itemsErr } = await supabase
-      .from("analysis_items")
-      .delete()
-      .eq("analysis_id", data.id)
-      .eq("user_id", userId);
+    const { error: itemsErr } = await req.supabase!.from("analysis_items").delete().eq("analysis_id", id).eq("user_id", userId);
     if (itemsErr) throw new Error(itemsErr.message);
 
-    const { error: aErr } = await supabase
-      .from("analyses")
-      .delete()
-      .eq("id", data.id)
-      .eq("user_id", userId);
+    const { error: aErr } = await req.supabase!.from("analyses").delete().eq("id", id).eq("user_id", userId);
     if (aErr) throw new Error(aErr.message);
 
-    return { success: true };
-  });
+    res.json({ success: true });
+  }),
+);
 
-// ─── toggleShare ────────────────────────────────────────────────
-export const toggleShare = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator(
-    (d: { id: string; isPublic: boolean }) =>
-      z.object({ id: z.string().uuid(), isPublic: z.boolean() }).parse(d),
-  )
-  .handler(async ({ context, data }) => {
-    const { supabase, userId } = context;
+router.post(
+  "/analysis/:id/share",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { isPublic } = z.object({ isPublic: z.boolean() }).parse(req.body);
+    const userId = req.userId!;
 
     let slug: string | null = null;
-
-    if (data.isPublic) {
-      slug = Array.from({ length: 10 }, () =>
-        "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 36)],
-      ).join("");
+    if (isPublic) {
+      slug = Array.from({ length: 10 }, () => "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 36)]).join("");
     }
 
-    const { data: updated, error } = await supabase
+    const { data: updated, error } = await req.supabase!
       .from("analyses")
-      .update({
-        is_public: data.isPublic,
-        share_slug: data.isPublic ? slug : null,
-        share_expires_at: null,
-      })
-      .eq("id", data.id)
+      .update({ is_public: isPublic, share_slug: isPublic ? slug : null, share_expires_at: null })
+      .eq("id", id)
       .eq("user_id", userId)
       .select("id, is_public, share_slug")
       .maybeSingle();
 
     if (error) throw new Error(error.message);
-    if (!updated) throw new Error("Analysis not found");
+    if (!updated) throw Object.assign(new Error("Analysis not found"), { status: 404 });
 
-    return {
-      isPublic: updated.is_public as boolean,
-      slug: updated.share_slug as string | null,
-    };
-  });
+    res.json({ isPublic: updated.is_public as boolean, slug: updated.share_slug as string | null });
+  }),
+);
 
-// ─── rerunAnalysis ──────────────────────────────────────────────
-export const rerunAnalysis = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator(
-    (d: { analysisId: string }) =>
-      z.object({ analysisId: z.string().uuid() }).parse(d),
-  )
-  .handler(async ({ context, data }) => {
-    const ctx = await getAnalysisContext(context.supabase, context.userId, "rerun");
+router.post(
+  "/analysis/:id/rerun",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const ctx = await getAnalysisContext(req.supabase!, req.userId!, "rerun");
 
-    // Verify the original analysis exists
-    const { data: original, error: origErr } = await context.supabase
+    const { data: original, error: origErr } = await req.supabase!
       .from("analyses")
       .select("id")
-      .eq("id", data.analysisId)
-      .eq("user_id", context.userId)
+      .eq("id", id)
+      .eq("user_id", req.userId!)
       .maybeSingle();
     if (origErr) throw new Error(origErr.message);
-    if (!original) throw new Error("Analysis not found");
+    if (!original) throw Object.assign(new Error("Analysis not found"), { status: 404 });
 
-    return executeAnalysis(ctx);
-  });
+    res.json(await executeAnalysis(ctx));
+  }),
+);
 
-// ─── getPublicAnalysis ──────────────────────────────────────────
-export const getPublicAnalysis = createServerFn({ method: "GET" })
-  .inputValidator((d: { slug: string }) => z.object({ slug: z.string().min(1) }).parse(d))
-  .handler(async ({ data }) => {
-    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-    const supabaseKey =
-      process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+router.post(
+  "/analysis/:id/action-plan",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const userId = req.userId!;
 
-    if (!supabaseUrl || !supabaseKey) {
-      throw new Error("Server is not configured for Supabase access.");
-    }
-
-    const analysisRes = await fetch(
-      `${supabaseUrl}/rest/v1/analyses?select=*&share_slug=eq.${encodeURIComponent(
-        data.slug,
-      )}&is_public=eq.true`,
-      {
-        headers: {
-          apikey: supabaseKey,
-          Authorization: `Bearer ${supabaseKey}`,
-        },
-      },
-    );
-    if (!analysisRes.ok) throw new Error("Failed to fetch analysis");
-    const analyses = await analysisRes.json();
-    if (!analyses || analyses.length === 0) {
-      throw new Error("Analysis not found or no longer shared.");
-    }
-    const analysis = analyses[0];
-
-    if (analysis.share_expires_at) {
-      const expires = new Date(analysis.share_expires_at).getTime();
-      if (Date.now() > expires) {
-        throw new Error("This shared analysis has expired.");
-      }
-    }
-
-    const itemsRes = await fetch(
-      `${supabaseUrl}/rest/v1/analysis_items?select=*&analysis_id=eq.${encodeURIComponent(
-        analysis.id,
-      )}&order=rank.asc`,
-      {
-        headers: {
-          apikey: supabaseKey,
-          Authorization: `Bearer ${supabaseKey}`,
-        },
-      },
-    );
-    if (!itemsRes.ok) throw new Error("Failed to fetch analysis items");
-    const items = await itemsRes.json();
-
-    return { analysis, items: items ?? [] };
-  });
-
-// ─── generateActionPlan ─────────────────────────────────────────
-export const generateActionPlan = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator(
-    (d: { analysisId: string }) =>
-      z.object({ analysisId: z.string().uuid() }).parse(d),
-  )
-  .handler(async ({ context, data }) => {
-    const { supabase, userId } = context;
-
-    const { data: items, error: itemsErr } = await supabase
+    const { data: items, error: itemsErr } = await req.supabase!
       .from("analysis_items")
       .select("title, kind, repos, pitch, effort, market_potential, next_steps, tech_stack, rank")
-      .eq("analysis_id", data.analysisId)
+      .eq("analysis_id", id)
       .eq("user_id", userId)
       .order("rank", { ascending: true });
     if (itemsErr) throw new Error(itemsErr.message);
-    if (!items || items.length === 0) throw new Error("No recommendations found for this analysis.");
+    if (!items || items.length === 0) throw Object.assign(new Error("No recommendations found for this analysis."), { status: 400 });
 
-    const { data: prefs } = await supabase
+    const { data: prefs } = await req.supabase!
       .from("user_preferences")
       .select("custom_ai_provider, custom_ai_key")
       .eq("user_id", userId)
@@ -1084,11 +897,7 @@ export const generateActionPlan = createServerFn({ method: "POST" })
     const provider = prefs?.custom_ai_provider || "openai";
     let aiKey = prefs?.custom_ai_key || null;
     if (provider === "github_models" && !aiKey) {
-      const { data: conn } = await supabase
-        .from("github_connections")
-        .select("access_token")
-        .eq("user_id", userId)
-        .maybeSingle();
+      const { data: conn } = await req.supabase!.from("github_connections").select("access_token").eq("user_id", userId).maybeSingle();
       aiKey = conn?.access_token || null;
     }
     const aiConfig = { provider, apiKey: aiKey };
@@ -1113,20 +922,13 @@ Return JSON with this exact shape:
       "name": string,
       "duration_weeks": number,
       "items": [
-        {
-          "title": string,
-          "recommendation_index": number (0-based),
-          "why_now": string,
-          "key_deliverable": string
-        }
+        { "title": string, "recommendation_index": number, "why_now": string, "key_deliverable": string }
       ]
     }
   ],
   "quick_wins": [string],
   "moonshots": [string],
-  "dependencies": [
-    { "from_title": string, "to_title": string, "reason": string }
-  ]
+  "dependencies": [ { "from_title": string, "to_title": string, "reason": string } ]
 }
 
 Sequence phases from quick wins (low effort, high impact) to moonshots. Group related items. Be practical.`;
@@ -1141,30 +943,29 @@ Sequence phases from quick wins (low effort, high impact) to moonshots. Group re
       aiConfig,
     );
 
-    return JSON.parse(result.content || "{}");
-  });
+    res.json(JSON.parse(result.content || "{}"));
+  }),
+);
 
-// ─── generateMergeInstructions ──────────────────────────────────
-export const generateMergeInstructions = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator(
-    (d: { analysisId: string; itemRank: number }) =>
-      z.object({ analysisId: z.string().uuid(), itemRank: z.number().int().min(0) }).parse(d),
-  )
-  .handler(async ({ context, data }) => {
-    const { supabase, userId } = context;
+router.post(
+  "/analysis/:id/merge-instructions",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { itemRank } = z.object({ itemRank: z.number().int().min(0) }).parse(req.body);
+    const userId = req.userId!;
 
-    const { data: item, error: itemErr } = await supabase
+    const { data: item, error: itemErr } = await req.supabase!
       .from("analysis_items")
       .select("title, repos, pitch, next_steps, tech_stack")
-      .eq("analysis_id", data.analysisId)
+      .eq("analysis_id", id)
       .eq("user_id", userId)
-      .eq("rank", data.itemRank)
+      .eq("rank", itemRank)
       .maybeSingle();
     if (itemErr) throw new Error(itemErr.message);
-    if (!item) throw new Error("Recommendation not found.");
+    if (!item) throw Object.assign(new Error("Recommendation not found."), { status: 404 });
 
-    const { data: prefs } = await supabase
+    const { data: prefs } = await req.supabase!
       .from("user_preferences")
       .select("custom_ai_provider, custom_ai_key")
       .eq("user_id", userId)
@@ -1173,11 +974,7 @@ export const generateMergeInstructions = createServerFn({ method: "POST" })
     const provider = prefs?.custom_ai_provider || "openai";
     let aiKey = prefs?.custom_ai_key || null;
     if (provider === "github_models" && !aiKey) {
-      const { data: conn } = await supabase
-        .from("github_connections")
-        .select("access_token")
-        .eq("user_id", userId)
-        .maybeSingle();
+      const { data: conn } = await req.supabase!.from("github_connections").select("access_token").eq("user_id", userId).maybeSingle();
       aiKey = conn?.access_token || null;
     }
     const aiConfig = { provider, apiKey: aiKey };
@@ -1213,5 +1010,8 @@ Include actual git commands (clone, remote add, merge --allow-unrelated-historie
       aiConfig,
     );
 
-    return JSON.parse(result.content || "{}");
-  });
+    res.json(JSON.parse(result.content || "{}"));
+  }),
+);
+
+export default router;

@@ -41,6 +41,8 @@
     "@replit/vite-plugin-cartographer": "catalog:",
     "@replit/vite-plugin-dev-banner": "catalog:",
     "@replit/vite-plugin-runtime-error-modal": "catalog:",
+    "@fontsource/inter": "^5.2.6",
+    "@fontsource/jetbrains-mono": "^5.2.6",
     "@tailwindcss/typography": "^0.5.15",
     "@tailwindcss/vite": "catalog:",
     "@tanstack/react-query": "catalog:",
@@ -75,11 +77,6 @@
     "zod": "catalog:"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.110.0",
-    "@tanstack/react-router": "^1.170.17",
-    "@tanstack/react-start": "^1.168.27",
-    "code": "^5.2.4",
-    "done": "^1.1.8",
-    "finish": "^0.6.3"
+    "@supabase/supabase-js": "^2.110.0"
   }
 }

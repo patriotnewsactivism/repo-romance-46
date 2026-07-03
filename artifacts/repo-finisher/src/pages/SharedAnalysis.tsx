@@ -1,7 +1,6 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
+import { Link, useParams } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { getPublicAnalysis } from "@/lib/analysis.functions";
+import { getPublicAnalysis } from "@/lib/api-client";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -15,10 +14,6 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { useState } from "react";
-
-export const Route = createFileRoute("/shared/$slug")({
-  component: SharedAnalysisPage,
-});
 
 type Kind = "finish" | "combine" | "repurpose";
 
@@ -50,12 +45,12 @@ interface SharedItem {
   rank: number;
 }
 
-function SharedAnalysisPage() {
-  const { slug } = Route.useParams();
-  const fn = useServerFn(getPublicAnalysis);
+export default function SharedAnalysisPage() {
+  const { slug } = useParams<{ slug: string }>();
   const q = useQuery({
     queryKey: ["public-analysis", slug],
-    queryFn: () => fn({ data: { slug } }),
+    queryFn: () => getPublicAnalysis(slug!),
+    enabled: !!slug,
   });
   const [filter, setFilter] = useState<Kind | "all">("all");
 
@@ -74,7 +69,7 @@ function SharedAnalysisPage() {
             This share link may have been revoked.
           </p>
           <Link
-            to="/"
+            href="/"
             className="mt-6 inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
           >
             RepoFinisher <ArrowRight className="h-4 w-4" />
@@ -100,12 +95,12 @@ function SharedAnalysisPage() {
     <div className="min-h-screen">
       <header className="border-b border-border bg-card/60 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <Link to="/" className="flex items-center gap-2 font-mono text-sm">
+          <Link href="/" className="flex items-center gap-2 font-mono text-sm">
             <span className="inline-block h-2 w-2 rounded-full bg-primary glow-primary" />
             <span className="font-bold tracking-tight">repo_finisher</span>
           </Link>
           <Link
-            to="/auth"
+            href="/auth"
             className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-accent"
           >
             <Github className="h-4 w-4" /> Get your own audit

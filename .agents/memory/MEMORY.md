@@ -1,0 +1,1 @@
+- [Supabase URL secret missing scheme](supabase-secret-url-scheme.md) — SUPABASE_URL secret can lack `https://` while VITE_SUPABASE_URL is correct; server code should prefer the VITE_-prefixed var as fallback.

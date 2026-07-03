@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { useServerFn } from "@tanstack/react-start";
 import { useMutation } from "@tanstack/react-query";
-import { generateActionPlan } from "@/lib/analysis.functions";
+import { generateActionPlan } from "@/lib/api-client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, Zap, Rocket, GitBranch, Target, Calendar } from "lucide-react";
@@ -25,12 +24,11 @@ interface ActionPlanData {
 }
 
 export function ActionPlan({ analysisId }: { analysisId: string }) {
-  const fn = useServerFn(generateActionPlan);
   const [plan, setPlan] = useState<ActionPlanData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const mut = useMutation({
-    mutationFn: () => fn({ data: { analysisId } }),
+    mutationFn: () => generateActionPlan(analysisId),
     onSuccess: (data) => {
       setPlan(data as unknown as ActionPlanData);
       setError(null);

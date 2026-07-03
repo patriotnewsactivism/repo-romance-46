@@ -1,6 +1,5 @@
-import { useServerFn } from "@tanstack/react-start";
 import { useMutation } from "@tanstack/react-query";
-import { finishRepo, getFinishStatus } from "@/lib/repo-finisher.functions";
+import { finishRepo } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -37,12 +36,10 @@ export function RepoFinisher({ repo, nextSteps, analysisId, itemRank, kind }: Re
   const finishMut = useMutation({
     mutationFn: () =>
       finishRepo({
-        data: {
-          repo,
-          nextSteps,
-          analysisId,
-          itemRank,
-        },
+        repo,
+        nextSteps,
+        analysisId,
+        itemRank,
       }),
     onSuccess: (data) => {
       const r = data as unknown as FinishResult;

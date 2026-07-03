@@ -1,4 +1,5 @@
-// Centralized AI provider routing — handles GitHub Models, OpenAI, Anthropic, Google
+// Centralized AI provider routing — handles GitHub Models, OpenAI, Anthropic, Google.
+// Ported as-is from the original TanStack Start backend.
 
 export interface AIProviderConfig {
   provider: string; // "github_models" | "openai" | "anthropic" | "google" | "custom"
@@ -36,24 +37,19 @@ const DEFAULT_MODELS: Record<string, string> = {
 const MAX_RETRIES = 4;
 const INITIAL_BACKOFF_MS = 5000; // 5s — must be >= the provider's rate window
 
-async function fetchWithRetry(
-  url: string,
-  options: RequestInit,
-  provider: string,
-): Promise<Response> {
+async function fetchWithRetry(url: string, options: RequestInit, provider: string): Promise<Response> {
   let lastError = "";
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const res = await fetch(url, options);
 
     if (res.status !== 429) return res;
 
-    // Rate limited — parse Retry-After header if present, otherwise back off
     const retryAfter = res.headers.get("Retry-After");
     let waitMs: number;
     if (retryAfter) {
-      waitMs = parseInt(retryAfter, 10) * 1000 + 500; // pad by 500ms
+      waitMs = parseInt(retryAfter, 10) * 1000 + 500;
     } else {
-      waitMs = INITIAL_BACKOFF_MS * Math.pow(2, attempt); // 5s, 10s, 20s, 40s
+      waitMs = INITIAL_BACKOFF_MS * Math.pow(2, attempt);
     }
 
     if (attempt < MAX_RETRIES) {
@@ -70,7 +66,6 @@ async function fetchWithRetry(
   );
 }
 
-// API endpoints per provider
 const PROVIDER_ENDPOINTS: Record<string, string> = {
   github_models: "https://models.inference.ai.azure.com/chat/completions",
   openai: "https://api.openai.com/v1/chat/completions",
@@ -79,15 +74,10 @@ const PROVIDER_ENDPOINTS: Record<string, string> = {
   custom: "https://api.openai.com/v1/chat/completions",
 };
 
-/**
- * Call the AI provider based on the user's configuration.
- * Routes to the appropriate endpoint based on provider setting.
- */
 export async function callAI(request: AIRequest, config: AIProviderConfig): Promise<AIResponse> {
   const provider = config.provider || "openai";
   const model = request.model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.openai;
 
-  // ─── Anthropic (different API format) ─────────────────────
   if (provider === "anthropic" && config.apiKey) {
     const systemMsg = request.messages.find((m) => m.role === "system")?.content || "";
     const userMessages = request.messages.filter((m) => m.role !== "system");
@@ -122,7 +112,6 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     return { content: json.content?.[0]?.text || "" };
   }
 
-  // ─── Google Gemini (different API format) ─────────────────
   if (provider === "google" && config.apiKey) {
     const systemMsg = request.messages.find((m) => m.role === "system")?.content || "";
     const userMsg = request.messages.find((m) => m.role === "user")?.content || "";
@@ -156,7 +145,6 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     return { content: json.candidates?.[0]?.content?.parts?.[0]?.text || "" };
   }
 
-  // ─── OpenAI-compatible (GitHub Models, OpenAI, custom) ────
   if (
     (provider === "github_models" || provider === "openai" || provider === "custom") &&
     config.apiKey
@@ -192,7 +180,6 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     return { content: json.choices?.[0]?.message?.content || "" };
   }
 
-  // No matching provider with a valid key
   throw new Error(
     `No AI provider available. You selected "${provider}" but no API key is saved. Go to Settings and enter your API key.`,
   );

@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
-import { getRepoHealth } from "@/lib/github.functions";
+import { getRepoHealth } from "@/lib/api-client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +22,6 @@ export function RepoHealthCheck({
   repo: string;
   defaultOpen?: boolean;
 }) {
-  const fn = useServerFn(getRepoHealth);
   const [open, setOpen] = useState(defaultOpen);
 
   type HealthData = {
@@ -41,7 +39,7 @@ export function RepoHealthCheck({
   };
   const q = useQuery<HealthData>({
     queryKey: ["repo-health", repo],
-    queryFn: () => fn({ data: { repo } }) as Promise<HealthData>,
+    queryFn: () => getRepoHealth(repo) as Promise<HealthData>,
     enabled: open,
   });
 

@@ -1,8 +1,6 @@
-import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
+import { Link, useLocation, useParams } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { getAnalysis, toggleShare, rerunAnalysis, deleteAnalysis } from "@/lib/analysis.functions";
-import { toggleStar } from "@/lib/preferences.functions";
+import { getAnalysis, toggleShare, rerunAnalysis, deleteAnalysis, toggleStar } from "@/lib/api-client";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,21 +22,15 @@ import {
   Loader2,
   RefreshCw,
   Trash2,
-  DollarSign,
 } from "lucide-react";
 import { useState } from "react";
 import { ActionPlan } from "@/components/ActionPlan";
 import { RepoHealthCheck } from "@/components/RepoHealth";
 import { MergeInstructions } from "@/components/MergeInstructions";
 import { RepoFinisher } from "@/components/RepoFinisher";
-import { PortfolioValuation } from "@/components/PortfolioValuation";
 import { VibeTools } from "@/components/VibeTools";
 
 import { toast } from "sonner";
-
-export const Route = createFileRoute("/_authenticated/analysis/$id")({
-  component: AnalysisPage,
-});
 
 type Kind = "finish" | "combine" | "repurpose";
 
@@ -79,7 +71,6 @@ interface AnalysisItem {
   iteration_count?: number;
 }
 
-
 interface PortfolioStats {
   total_repos?: number;
   total_stars?: number;
@@ -89,21 +80,22 @@ interface PortfolioStats {
   languages?: { name: string; count: number; pct: number }[];
 }
 
-function AnalysisPage() {
-  const { id } = Route.useParams();
-  const router = useRouter();
-  const fn = useServerFn(getAnalysis);
-  const shareFn = useServerFn(toggleShare);
-  const rerunFn = useServerFn(rerunAnalysis);
-  const deleteFn = useServerFn(deleteAnalysis);
-  const starFn = useServerFn(toggleStar);
-  const q = useQuery({ queryKey: ["analysis", id], queryFn: () => fn({ data: { id } }) });
+export default function AnalysisPage() {
+  const { id } = useParams<{ id: string }>();
+  const [, navigate] = useLocation();
+  const q = useQuery({
+    queryKey: ["analysis", id],
+    queryFn: () => getAnalysis(id!),
+    enabled: !!id,
+  });
   const [filter, setFilter] = useState<Kind | "all">("all");
-  const [tab, setTab] = useState<"recommendations" | "actionPlan" | "valuation">("recommendations");
+  const [tab, setTab] = useState<"recommendations" | "actionPlan" | "valuation">(
+    "recommendations",
+  );
   const [expandedMarketing, setExpandedMarketing] = useState<string | null>(null);
 
   const shareMut = useMutation({
-    mutationFn: (isPublic: boolean) => shareFn({ data: { id, isPublic } }),
+    mutationFn: (isPublic: boolean) => toggleShare(id!, isPublic),
     onSuccess: (res) => {
       if (res.isPublic && res.slug) {
         const url = `${window.location.origin}/shared/${res.slug}`;
@@ -118,40 +110,45 @@ function AnalysisPage() {
   });
 
   const rerunMut = useMutation({
-    mutationFn: () => rerunFn({ data: { analysisId: id } }),
+    mutationFn: () => rerunAnalysis(id!),
     onSuccess: (res) => {
       toast.success("Re-analysis complete — new results ready");
-      router.navigate({ to: "/analysis/$id", params: { id: res.id } });
+      const newId = (res as Record<string, unknown>).id as string | undefined;
+      navigate(`/analysis/${newId || id}`);
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const deleteMut = useMutation({
-    mutationFn: () => deleteFn({ data: { id } }),
+    mutationFn: () => deleteAnalysis(id!),
     onSuccess: () => {
       toast.success("Analysis deleted");
-      router.navigate({ to: "/dashboard" });
+      navigate("/dashboard");
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const starMut = useMutation({
     mutationFn: ({ itemId, starred }: { itemId: string; starred: boolean }) =>
-      starFn({ data: { itemId, starred } }),
+      toggleStar(itemId, starred),
     onSuccess: () => q.refetch(),
     onError: (e: Error) => toast.error(e.message),
   });
+  void starMut;
 
   if (q.isLoading) return <div className="p-10 text-sm text-muted-foreground">Loading…</div>;
   if (q.isError)
     return <div className="p-10 text-sm text-destructive">{(q.error as Error).message}</div>;
 
-  const { analysis, items } = q.data!;
+  const { analysis, items } = q.data! as unknown as {
+    analysis: Record<string, unknown>;
+    items: unknown[];
+  };
   const typedItems = items as unknown as AnalysisItem[];
   const filtered = filter === "all" ? typedItems : typedItems.filter((i) => i.kind === filter);
   const stats = (analysis.portfolio_stats as unknown as PortfolioStats) || {};
-  const isPublic = (analysis as Record<string, unknown>).is_public as boolean;
-  const shareSlug = (analysis as Record<string, unknown>).share_slug as string | null;
+  const isPublic = analysis.is_public as boolean;
+  const shareSlug = analysis.share_slug as string | null;
 
   function copyToClipboard(text: string, label: string) {
     navigator.clipboard.writeText(text);
@@ -160,11 +157,11 @@ function AnalysisPage() {
 
   function downloadMd() {
     const lines: string[] = [];
-    lines.push(`# RepoFinisher analysis — ${new Date(analysis.created_at).toLocaleString()}`);
+    lines.push(`# RepoFinisher analysis — ${new Date(analysis.created_at as string).toLocaleString()}`);
     lines.push("");
     if (analysis.summary_md) {
       lines.push("## Summary");
-      lines.push(analysis.summary_md);
+      lines.push(analysis.summary_md as string);
       lines.push("");
     }
     if (stats.languages?.length) {
@@ -202,7 +199,7 @@ function AnalysisPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `repo-finisher-${id.slice(0, 8)}.md`;
+    a.download = `repo-finisher-${id!.slice(0, 8)}.md`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -235,7 +232,7 @@ function AnalysisPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `repo-finisher-${id.slice(0, 8)}.json`;
+    a.download = `repo-finisher-${id!.slice(0, 8)}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -244,7 +241,7 @@ function AnalysisPage() {
     <main className="mx-auto max-w-5xl px-6 py-10 space-y-8">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <Link
-          to="/dashboard"
+          href="/dashboard"
           className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" /> Dashboard
@@ -316,17 +313,16 @@ function AnalysisPage() {
 
       <section>
         <div className="font-mono text-xs text-muted-foreground">
-          analysis_{id.slice(0, 8)} · {analysis.repo_count} repos
+          analysis_{id!.slice(0, 8)} · {analysis.repo_count as number} repos
         </div>
         <h1 className="mt-2 text-3xl font-bold tracking-tight">Portfolio audit</h1>
-        {analysis.summary_md && (
+        {!!analysis.summary_md && (
           <p className="mt-4 whitespace-pre-wrap text-sm text-muted-foreground leading-relaxed">
-            {analysis.summary_md}
+            {analysis.summary_md as string}
           </p>
         )}
       </section>
 
-      {/* Portfolio Stats */}
       {stats.languages?.length ? (
         <Card className="p-5">
           <h2 className="font-mono text-sm text-muted-foreground mb-4">// portfolio stats</h2>
@@ -387,7 +383,6 @@ function AnalysisPage() {
         </Card>
       ) : null}
 
-      {/* Tab switcher */}
       <div className="flex gap-1 border-b border-border">
         <button
           onClick={() => setTab("recommendations")}
@@ -498,14 +493,12 @@ function AnalysisPage() {
                       </ul>
                     </div>
                   )}
-                  {/* Health check for each repo */}
                   {it.repos.length > 0 && (
                     <div className="pt-2 border-t border-border">
                       <RepoHealthCheck repo={it.repos[0]} />
                     </div>
                   )}
 
-                  {/* Auto-finish button for finish recommendations */}
                   {it.kind === "finish" && it.repos.length > 0 && (
                     <div className="pt-2 border-t border-border">
                       <RepoFinisher
@@ -518,13 +511,12 @@ function AnalysisPage() {
                     </div>
                   )}
 
-                  {/* Merge instructions for combine recommendations */}
                   {it.kind === "combine" && (
-                    <MergeInstructions analysisId={id} itemRank={it.rank} />
+                    <MergeInstructions analysisId={id!} itemRank={it.rank} />
                   )}
 
                   <VibeTools
-                    analysisId={id}
+                    analysisId={id!}
                     itemRank={it.rank}
                     kind={it.kind}
                     repos={it.repos}
@@ -538,8 +530,6 @@ function AnalysisPage() {
                     }}
                   />
 
-
-                  {/* Marketing copy */}
                   {(it.marketing_tweet || it.marketing_linkedin) && (
                     <div className="pt-2 border-t border-border">
                       <button
@@ -603,7 +593,7 @@ function AnalysisPage() {
         </>
       )}
 
-      {tab === "actionPlan" && <ActionPlan analysisId={id} />}
+      {tab === "actionPlan" && <ActionPlan analysisId={id!} />}
     </main>
   );
 }

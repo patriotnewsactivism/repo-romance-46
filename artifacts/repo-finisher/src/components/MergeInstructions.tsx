@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { useServerFn } from "@tanstack/react-start";
 import { useMutation } from "@tanstack/react-query";
-import { generateMergeInstructions } from "@/lib/analysis.functions";
+import { generateMergeInstructions } from "@/lib/api-client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { GitMerge, Loader2, Copy, Terminal, ArrowRight } from "lucide-react";
@@ -22,12 +21,11 @@ export function MergeInstructions({
   analysisId: string;
   itemRank: number;
 }) {
-  const fn = useServerFn(generateMergeInstructions);
   const [result, setResult] = useState<MergeResult | null>(null);
   const [open, setOpen] = useState(false);
 
   const mut = useMutation({
-    mutationFn: () => fn({ data: { analysisId, itemRank } }),
+    mutationFn: () => generateMergeInstructions(analysisId, itemRank),
     onSuccess: (data) => {
       setResult(data as unknown as MergeResult);
     },
