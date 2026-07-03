@@ -85,7 +85,7 @@ const SAMPLE_EXT = new Set([
   ".kt",
 ]);
 
-async function digestRepo(repo: Repo, token: string): Promise<string> {
+async function digestRepo(repo: Repo, token: string, compact = false): Promise<string> {
   const parts: string[] = [];
   parts.push(`REPO: ${repo.full_name}`);
   if (repo.description) parts.push(`DESC: ${repo.description}`);
@@ -94,9 +94,10 @@ async function digestRepo(repo: Repo, token: string): Promise<string> {
   );
   if (repo.topics?.length) parts.push(`TOPICS: ${repo.topics.join(", ")}`);
 
-  // README
+  // README — smaller slice for providers with tight token budgets (e.g. GitHub Models free tier)
+  const readmeChars = compact ? 400 : 2500;
   const readme = await ghText(`/repos/${repo.full_name}/readme`, token);
-  if (readme) parts.push(`README (truncated):\n${readme.slice(0, 2500)}`);
+  if (readme) parts.push(`README (truncated):\n${readme.slice(0, readmeChars)}`);
 
   // File tree
   let tree: TreeEntry[] = [];
@@ -110,7 +111,10 @@ async function digestRepo(repo: Repo, token: string): Promise<string> {
     // Skip on error
   }
   const paths = tree.map((t) => t.path);
-  parts.push(`FILES (${paths.length} total, top 60):\n${paths.slice(0, 60).join("\n")}`);
+  const topFiles = compact ? 20 : 60;
+  parts.push(
+    `FILES (${paths.length} total, top ${topFiles}):\n${paths.slice(0, topFiles).join("\n")}`,
+  );
 
   // Sample key files
   const toSample = new Set<string>();
@@ -122,21 +126,142 @@ async function digestRepo(repo: Repo, token: string): Promise<string> {
       return SAMPLE_EXT.has(ext) && !t.path.includes("node_modules") && !t.path.includes("dist");
     })
     .sort((a, b) => (b.size ?? 0) - (a.size ?? 0))
-    .slice(0, 4)
+    .slice(0, compact ? 2 : 4)
     .map((t) => t.path);
   for (const p of sourceFiles) toSample.add(p);
 
   let sampledBytes = 0;
-  const BUDGET = 8000;
-  for (const p of Array.from(toSample).slice(0, 8)) {
+  const BUDGET = compact ? 1200 : 8000;
+  const maxFileSlice = compact ? 500 : 1500;
+  for (const p of Array.from(toSample).slice(0, compact ? 3 : 8)) {
     if (sampledBytes >= BUDGET) break;
     const text = await ghText(`/repos/${repo.full_name}/contents/${encodeURIComponent(p)}`, token);
     if (!text) continue;
-    const snippet = text.slice(0, Math.min(1500, BUDGET - sampledBytes));
+    const snippet = text.slice(0, Math.min(maxFileSlice, BUDGET - sampledBytes));
     parts.push(`--- FILE: ${p} ---\n${snippet}`);
     sampledBytes += snippet.length;
   }
   return parts.join("\n\n");
+}
+
+// ─── Token budgeting / chunking for AI requests ─────────────────
+
+function estimateTokens(s: string): number {
+  return Math.ceil(s.length / 4);
+}
+
+// Conservative input-token ceilings per provider (leaves room for system
+// prompt, JSON schema, and output tokens within each provider's real limit).
+function maxInputTokensForProvider(provider: string): number {
+  switch (provider) {
+    case "github_models":
+      return 4500; // free tier hard-caps gpt-4o at 8000 total tokens
+    case "openai":
+      return 90000;
+    case "anthropic":
+      return 150000;
+    case "google":
+      return 500000;
+    case "lovable":
+    default:
+      return 60000;
+  }
+}
+
+// Groups repo digests into batches that fit under a provider's token budget.
+// A single oversized digest gets truncated rather than blowing the budget.
+function chunkDigests(digests: string[], maxTokens: number): string[][] {
+  const OVERHEAD_TOKENS = 1200; // system prompt + json schema overhead
+  const budget = Math.max(maxTokens - OVERHEAD_TOKENS, 800);
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  let currentTokens = 0;
+
+  for (let d of digests) {
+    let t = estimateTokens(d);
+    if (t > budget) {
+      // Single digest too big even alone — hard truncate it
+      d = d.slice(0, budget * 4);
+      t = estimateTokens(d);
+    }
+    if (current.length > 0 && currentTokens + t > budget) {
+      chunks.push(current);
+      current = [];
+      currentTokens = 0;
+    }
+    current.push(d);
+    currentTokens += t;
+  }
+  if (current.length) chunks.push(current);
+  return chunks.length ? chunks : [[]];
+}
+
+// Deterministic portfolio stats computed from repo metadata directly —
+// no AI call needed, so it stays accurate and free of token-budget conflicts
+// when multiple AI batches are merged.
+function computePortfolioStats(shortlist: Repo[]) {
+  const langCounts = new Map<string, number>();
+  for (const r of shortlist) {
+    const lang = r.language || "Other";
+    langCounts.set(lang, (langCounts.get(lang) || 0) + 1);
+  }
+  const total = shortlist.length || 1;
+  const languages = Array.from(langCounts.entries())
+    .map(([name, count]) => ({ name, count, pct: Math.round((count / total) * 1000) / 10 }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
+  const totalStars = shortlist.reduce((sum, r) => sum + (r.stargazers_count || 0), 0);
+  const mostActive = [...shortlist].sort(
+    (a, b) => new Date(b.pushed_at).getTime() - new Date(a.pushed_at).getTime(),
+  )[0];
+  const sixMonthsAgo = Date.now() - 1000 * 60 * 60 * 24 * 30 * 6;
+  const dormant = shortlist
+    .filter((r) => new Date(r.pushed_at).getTime() < sixMonthsAgo)
+    .map((r) => r.full_name);
+  const avgSize = shortlist.reduce((sum, r) => sum + (r.size || 0), 0) / total;
+
+  return {
+    total_repos: shortlist.length,
+    languages,
+    total_stars: totalStars,
+    most_active_repo: mostActive?.full_name,
+    dormant_repos: dormant,
+    average_repo_size_kb: Math.round(avgSize),
+  };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Runs the AI recommendation call across as many batches as needed to stay
+// under the provider's token budget, then merges + re-ranks the results.
+async function runBatchedAI(
+  digests: string[],
+  aiConfig: { provider: string; apiKey: string | null },
+): Promise<z.infer<typeof RecommendationSchema>> {
+  const budget = maxInputTokensForProvider(aiConfig.provider);
+  const batches = chunkDigests(digests, budget);
+
+  const allRecommendations: z.infer<typeof RecommendationSchema>["recommendations"] = [];
+  let summaryMd = "";
+
+  for (let i = 0; i < batches.length; i++) {
+    if (batches[i].length === 0) continue;
+    const result = await callLovableAI(batches[i], aiConfig);
+    allRecommendations.push(...result.recommendations);
+    if (i === 0) summaryMd = result.summary_md;
+    // Small pacing delay between calls to avoid free-tier rate limits
+    if (i < batches.length - 1 && aiConfig.provider === "github_models") {
+      await sleep(1200);
+    }
+  }
+
+  return RecommendationSchema.parse({
+    recommendations: allRecommendations,
+    summary_md: summaryMd || "Analysis complete.",
+  });
 }
 
 const RecommendationSchema = z.object({
@@ -338,21 +463,28 @@ export const runAnalysis = createServerFn({ method: "POST" })
         throw new Error("Need at least 2 active repos to analyze. Push some code first!");
       }
 
-      // Digest each
+      // Digest each — use compact digests for providers with tight token budgets
+      const provider = prefs?.custom_ai_provider || "lovable";
+      const compactDigest = provider === "github_models";
       const digests: string[] = [];
       for (const repo of shortlist) {
         try {
-          digests.push(await digestRepo(repo, token));
+          digests.push(await digestRepo(repo, token, compactDigest));
         } catch (e) {
           console.error("digest failed", repo.full_name, e);
         }
       }
 
-      // Call AI
-      const ai = await callLovableAI(digests, {
-        provider: prefs?.custom_ai_provider || "lovable",
-        apiKey: prefs?.custom_ai_key || null,
-      });
+      // For GitHub Models, fall back to the GitHub connection token if no dedicated AI key is set
+      let aiKey = prefs?.custom_ai_key || null;
+      if (provider === "github_models" && !aiKey) {
+        aiKey = conn.access_token; // reuse GitHub OAuth token
+      }
+      const aiConfig = { provider, apiKey: aiKey };
+
+      // Call AI — batched to stay under each provider's token budget
+      const ai = await runBatchedAI(digests, aiConfig);
+      ai.portfolio_stats = computePortfolioStats(shortlist);
 
       // Rank and persist items
       const ranked = [...ai.recommendations].sort(
@@ -819,19 +951,26 @@ export const rerunAnalysis = createServerFn({ method: "POST" })
         .slice(0, rerunPrefs?.filter_max_repos || 50);
       if (shortlist.length < 2) throw new Error("Need at least 2 active repos to analyze.");
 
+      // Fixed bug: was referencing an out-of-scope `prefs` variable — now uses rerunPrefs
+      const rerunProvider = rerunPrefs?.custom_ai_provider || "lovable";
+      const rerunCompactDigest = rerunProvider === "github_models";
       const digests: string[] = [];
       for (const repo of shortlist) {
         try {
-          digests.push(await digestRepo(repo, token));
+          digests.push(await digestRepo(repo, token, rerunCompactDigest));
         } catch (e) {
           console.error("digest failed", repo.full_name, e);
         }
       }
 
-      const ai = await callLovableAI(digests, {
-        provider: prefs?.custom_ai_provider || "lovable",
-        apiKey: prefs?.custom_ai_key || null,
-      });
+      // For GitHub Models, fall back to the GitHub connection token
+      let rerunAiKey = rerunPrefs?.custom_ai_key || null;
+      if (rerunProvider === "github_models" && !rerunAiKey) {
+        rerunAiKey = conn.access_token;
+      }
+
+      const ai = await runBatchedAI(digests, { provider: rerunProvider, apiKey: rerunAiKey });
+      ai.portfolio_stats = computePortfolioStats(shortlist);
       const ranked = [...ai.recommendations].sort(
         (a, b) => b.market_potential * 2 - b.effort - (a.market_potential * 2 - a.effort),
       );
