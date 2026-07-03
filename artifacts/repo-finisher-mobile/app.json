@@ -15,10 +15,12 @@
       "backgroundColor": "#0a0d12"
     },
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "bundleIdentifier": "com.replit.repofinishermobile"
     },
     "android": {
-      "backgroundColor": "#0a0d12"
+      "backgroundColor": "#0a0d12",
+      "package": "com.replit.repofinishermobile"
     },
     "web": {
       "favicon": "./assets/images/icon.png"
