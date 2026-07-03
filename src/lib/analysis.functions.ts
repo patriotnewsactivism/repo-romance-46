@@ -290,7 +290,7 @@ function estimateTokens(s: string): number {
 function maxInputTokensForProvider(provider: string): number {
   switch (provider) {
     case "github_models":
-      return 4500;
+      return 12000; // gpt-4o-mini supports 128k — 4500 was too conservative, caused 17+ batches
     case "openai":
       return 12000;
     case "anthropic":
@@ -633,9 +633,9 @@ async function runBatchedAI(
     const result = await callBatchedAI(batches[i], aiConfig);
     allRecommendations.push(...result.recommendations);
     if (i === 0) summaryMd = result.summary_md;
-    // Reduced inter-batch pacing — 3s for most providers, 5s for GitHub Models
+    // Inter-batch pacing — 4s for GitHub Models (balances rate limits vs timeout), 3s others
     if (i < batches.length - 1) {
-      const delay = aiConfig.provider === "github_models" ? 5000 : 3000;
+      const delay = aiConfig.provider === "github_models" ? 4000 : 3000;
       await sleep(delay);
     }
   }
@@ -779,8 +779,9 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
 
     const ai = await withTimeout(
       runBatchedAI(digests, aiConfig, reportProgress),
-      // Scale timeout: 30s per batch estimate + 60s baseline + 30s for synthesis
-      Math.max(90000, Math.ceil(digests.length / 10) * 30000 + 90000),
+      // Scale timeout: GitHub Models free tier is rate-limited (15 RPM for gpt-4o-mini)
+      // so needs generous timeout. 45s per batch + 120s baseline + 60s for synthesis.
+      Math.max(180000, Math.ceil(digests.length / 3) * 45000 + 180000),
       "AI analysis",
     );
     ai.portfolio_stats = computePortfolioStats(shortlist);
