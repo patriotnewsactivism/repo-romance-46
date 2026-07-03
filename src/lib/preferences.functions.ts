@@ -73,7 +73,7 @@ export const updatePreferences = createServerFn({ method: "POST" })
         schedule_enabled: z.boolean().optional(),
         schedule_frequency: z.enum(["weekly", "monthly"]).optional(),
         custom_ai_provider: z.string().optional(),
-        custom_ai_key: z.string().optional(),
+        custom_ai_key: z.string().nullable().optional(),
         filter_languages: z.array(z.string()).optional(),
         filter_exclude_archived: z.boolean().optional(),
         filter_min_stars: z.number().int().min(0).optional(),
