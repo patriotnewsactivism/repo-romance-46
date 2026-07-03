@@ -66,6 +66,7 @@ export type Database = {
           effort: number
           estimated_hours: number | null
           id: string
+          is_starred: boolean
           kind: string
           market_potential: number
           marketing_linkedin: string | null
@@ -74,6 +75,7 @@ export type Database = {
           pitch: string
           rank: number
           repos: Json
+          starred_at: string | null
           tech_stack: string[]
           title: string
           user_id: string
@@ -84,6 +86,7 @@ export type Database = {
           effort?: number
           estimated_hours?: number | null
           id?: string
+          is_starred?: boolean
           kind: string
           market_potential?: number
           marketing_linkedin?: string | null
@@ -92,6 +95,7 @@ export type Database = {
           pitch: string
           rank?: number
           repos?: Json
+          starred_at?: string | null
           tech_stack?: string[]
           title: string
           user_id: string
@@ -102,6 +106,7 @@ export type Database = {
           effort?: number
           estimated_hours?: number | null
           id?: string
+          is_starred?: boolean
           kind?: string
           market_potential?: number
           marketing_linkedin?: string | null
@@ -110,6 +115,7 @@ export type Database = {
           pitch?: string
           rank?: number
           repos?: Json
+          starred_at?: string | null
           tech_stack?: string[]
           title?: string
           user_id?: string
@@ -144,6 +150,123 @@ export type Database = {
           connected_at?: string
           github_login?: string
           scope?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      notification_log: {
+        Row: {
+          analysis_id: string | null
+          created_at: string
+          id: string
+          recipient: string
+          status: string
+          subject: string | null
+          type: string
+          user_id: string
+        }
+        Insert: {
+          analysis_id?: string | null
+          created_at?: string
+          id?: string
+          recipient: string
+          status?: string
+          subject?: string | null
+          type: string
+          user_id: string
+        }
+        Update: {
+          analysis_id?: string | null
+          created_at?: string
+          id?: string
+          recipient?: string
+          status?: string
+          subject?: string | null
+          type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      repo_cache: {
+        Row: {
+          expires_at: string
+          fetched_at: string
+          file_tree: string[] | null
+          full_name: string
+          github_repo_id: number
+          id: string
+          readme_text: string | null
+          repo_data: Json
+          user_id: string
+        }
+        Insert: {
+          expires_at?: string
+          fetched_at?: string
+          file_tree?: string[] | null
+          full_name: string
+          github_repo_id: number
+          id?: string
+          readme_text?: string | null
+          repo_data?: Json
+          user_id: string
+        }
+        Update: {
+          expires_at?: string
+          fetched_at?: string
+          file_tree?: string[] | null
+          full_name?: string
+          github_repo_id?: number
+          id?: string
+          readme_text?: string | null
+          repo_data?: Json
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_preferences: {
+        Row: {
+          created_at: string
+          custom_ai_key: string | null
+          custom_ai_provider: string
+          email_notifications: boolean
+          filter_exclude_archived: boolean
+          filter_languages: string[]
+          filter_max_repos: number
+          filter_min_stars: number
+          last_scheduled_run: string | null
+          schedule_enabled: boolean
+          schedule_frequency: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          custom_ai_key?: string | null
+          custom_ai_provider?: string
+          email_notifications?: boolean
+          filter_exclude_archived?: boolean
+          filter_languages?: string[]
+          filter_max_repos?: number
+          filter_min_stars?: number
+          last_scheduled_run?: string | null
+          schedule_enabled?: boolean
+          schedule_frequency?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          custom_ai_key?: string | null
+          custom_ai_provider?: string
+          email_notifications?: boolean
+          filter_exclude_archived?: boolean
+          filter_languages?: string[]
+          filter_max_repos?: number
+          filter_min_stars?: number
+          last_scheduled_run?: string | null
+          schedule_enabled?: boolean
+          schedule_frequency?: string
+          updated_at?: string
           user_id?: string
         }
         Relationships: []
