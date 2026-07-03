@@ -309,6 +309,15 @@ export const runAnalysis = createServerFn({ method: "POST" })
 
     const token = conn.access_token;
 
+    // Fetch user preferences
+    const { data: prefs } = await supabase
+      .from("user_preferences")
+      .select(
+        "custom_ai_provider, custom_ai_key, filter_max_repos, filter_languages, filter_min_stars, filter_exclude_archived",
+      )
+      .eq("user_id", userId)
+      .maybeSingle();
+
     // Insert pending analysis
     const { data: analysis, error: aErr } = await supabase
       .from("analyses")
@@ -332,7 +341,7 @@ export const runAnalysis = createServerFn({ method: "POST" })
       );
       const shortlist = repos
         .filter((r) => !r.fork && !r.archived)
-        .slice(0, prefs?.filter_max_repos || 25);
+        .slice(0, prefs?.filter_max_repos || 50);
 
       if (shortlist.length < 2) {
         throw new Error("Need at least 2 active repos to analyze. Push some code first!");
@@ -776,6 +785,15 @@ export const rerunAnalysis = createServerFn({ method: "POST" })
     if (!conn) throw new Error("Connect GitHub first.");
     const token = conn.access_token;
 
+    // Fetch user preferences
+    const { data: rerunPrefs } = await context.supabase
+      .from("user_preferences")
+      .select(
+        "custom_ai_provider, custom_ai_key, filter_max_repos, filter_languages, filter_min_stars, filter_exclude_archived",
+      )
+      .eq("user_id", context.userId)
+      .maybeSingle();
+
     const { data: analysis, error: aErr } = await context.supabase
       .from("analyses")
       .insert({
@@ -797,7 +815,7 @@ export const rerunAnalysis = createServerFn({ method: "POST" })
       );
       const shortlist = repos
         .filter((r) => !r.fork && !r.archived)
-        .slice(0, prefs?.filter_max_repos || 25);
+        .slice(0, rerunPrefs?.filter_max_repos || 50);
       if (shortlist.length < 2) throw new Error("Need at least 2 active repos to analyze.");
 
       const digests: string[] = [];
