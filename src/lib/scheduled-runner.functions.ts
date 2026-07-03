@@ -161,7 +161,7 @@ export const runScheduledAnalyses = createServerFn({ method: "GET" }).handler(
             if (fp.filter_min_stars > 0)
               shortlist = shortlist.filter((r) => r.stargazers_count >= fp.filter_min_stars);
           }
-          shortlist = shortlist.slice(0, 25);
+          shortlist = shortlist.slice(0, filterPrefs?.filter_max_repos || 25);
 
           if (shortlist.length < 2) {
             await admin
@@ -325,8 +325,10 @@ ${files}`,
             .update({
               status: "complete",
               repo_count: shortlist.length,
+              analyzed_repo_names: shortlist.map((r) => r.full_name),
               summary_md: aiResult.summary_md,
               portfolio_stats: aiResult.portfolio_stats || {},
+              completed_at: new Date().toISOString(),
             })
             .eq("id", analysisId);
 
@@ -368,6 +370,15 @@ ${files}`,
                     }),
                   });
                   console.log(`[scheduled] Email sent to ${email}`);
+                  // Log the notification
+                  await admin.from("notification_log").insert({
+                    user_id: user.user_id,
+                    analysis_id: analysisId,
+                    type: "email",
+                    recipient: email,
+                    subject: `Portfolio analysis complete — ${shortlist.length} repos scanned`,
+                    status: "sent",
+                  });
                 } else {
                   console.log(
                     `[scheduled] Email notification skipped (RESEND_API_KEY not set) for ${email}`,

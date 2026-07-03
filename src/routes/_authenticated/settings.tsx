@@ -36,6 +36,7 @@ function SettingsPage() {
   const [customKey, setCustomKey] = useState("");
   const [filterLanguages, setFilterLanguages] = useState("");
   const [filterMinStars, setFilterMinStars] = useState(0);
+  const [filterMaxRepos, setFilterMaxRepos] = useState(25);
   const [excludeArchived, setExcludeArchived] = useState(true);
 
   // Sync from server
@@ -69,6 +70,7 @@ function SettingsPage() {
             .filter(Boolean),
           filter_exclude_archived: excludeArchived,
           filter_min_stars: filterMinStars,
+          filter_max_repos: filterMaxRepos,
         },
       }),
     onSuccess: () => {

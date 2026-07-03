@@ -1,0 +1,27 @@
+-- Full schema v2 — improved with better types, indexes, triggers, and new tables
+-- Applied directly via Supabase Management API on 2026-07-02
+
+-- Tables created:
+-- 1. github_connections (OAuth tokens)
+-- 2. user_preferences (scheduling, BYOK, filters, notifications)
+-- 3. analyses (analysis runs with status tracking, sharing, trigger type)
+-- 4. analysis_items (recommendations with star tracking, status workflow)
+-- 5. notification_log (email/webhook notification history)
+-- 6. repo_cache (cached GitHub repo data to speed up analyses)
+
+-- Key improvements over v1:
+-- - user_id is UUID everywhere (was TEXT in user_preferences — caused FK issues)
+-- - Added updated_at auto-trigger on user_preferences and analyses
+-- - Added completed_at timestamp on analyses
+-- - Added trigger_type (manual/scheduled/rerun) on analyses
+-- - Added ai_provider and ai_model tracking on analyses
+-- - Added token_usage JSONB on analyses for cost tracking
+-- - Added share_expires_at on analyses for time-limited sharing
+-- - Added user_notes and status (new/in_progress/completed/archived) on analysis_items
+-- - Added status_updated_at on analysis_items
+-- - Added notification_log table for email/webhook tracking
+-- - Added repo_cache table for 24h GitHub data caching
+-- - Added filter_max_repos to user_preferences (configurable, default 25)
+-- - CHECK constraints on all enum-like columns
+-- - Better indexes (partial indexes for starred, status, share_slug)
+-- - analyzed_repo_names array on analyses for audit trail
