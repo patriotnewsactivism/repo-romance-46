@@ -32,6 +32,8 @@ import { RepoHealthCheck } from "@/components/RepoHealth";
 import { MergeInstructions } from "@/components/MergeInstructions";
 import { RepoFinisher } from "@/components/RepoFinisher";
 import { PortfolioValuation } from "@/components/PortfolioValuation";
+import { VibeTools } from "@/components/VibeTools";
+
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/analysis/$id")({
