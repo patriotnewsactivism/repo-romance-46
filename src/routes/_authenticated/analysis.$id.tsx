@@ -71,7 +71,14 @@ interface AnalysisItem {
   estimated_hours?: number | null;
   is_starred?: boolean;
   rank: number;
+  market_analysis?: unknown;
+  valuation?: unknown;
+  vibe_spec?: unknown;
+  combine_result?: unknown;
+  finish_history?: unknown;
+  iteration_count?: number;
 }
+
 
 interface PortfolioStats {
   total_repos?: number;
