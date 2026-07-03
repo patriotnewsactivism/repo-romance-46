@@ -24,12 +24,14 @@ import {
   Loader2,
   RefreshCw,
   Trash2,
+  DollarSign,
 } from "lucide-react";
 import { useState } from "react";
 import { ActionPlan } from "@/components/ActionPlan";
 import { RepoHealthCheck } from "@/components/RepoHealth";
 import { MergeInstructions } from "@/components/MergeInstructions";
 import { RepoFinisher } from "@/components/RepoFinisher";
+import { PortfolioValuation } from "@/components/PortfolioValuation";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/analysis/$id")({
@@ -88,7 +90,7 @@ function AnalysisPage() {
   const starFn = useServerFn(toggleStar);
   const q = useQuery({ queryKey: ["analysis", id], queryFn: () => fn({ data: { id } }) });
   const [filter, setFilter] = useState<Kind | "all">("all");
-  const [tab, setTab] = useState<"recommendations" | "actionPlan">("recommendations");
+  const [tab, setTab] = useState<"recommendations" | "actionPlan" | "valuation">("recommendations");
   const [expandedMarketing, setExpandedMarketing] = useState<string | null>(null);
 
   const shareMut = useMutation({
@@ -397,6 +399,16 @@ function AnalysisPage() {
           }`}
         >
           Action Plan
+        </button>
+        <button
+          onClick={() => setTab("valuation")}
+          className={`px-4 py-2 text-sm font-mono border-b-2 transition ${
+            tab === "valuation"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Valuation
         </button>
       </div>
 
