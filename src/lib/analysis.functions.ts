@@ -748,13 +748,15 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
     const digests: string[] = [];
     let failedDigests = 0;
     for (let i = 0; i < digestResults.length; i++) {
-      if (digestResults[i].status === "fulfilled") {
-        digests.push(digestResults[i].value);
+      const r = digestResults[i];
+      if (r.status === "fulfilled") {
+        digests.push(r.value);
       } else {
         failedDigests++;
-        console.error("digest failed", shortlist[i].full_name, (digestResults[i] as PromiseRejectedResult).reason);
+        console.error("digest failed", shortlist[i].full_name, r.reason);
       }
     }
+
 
     if (digests.length < 2) {
       throw new Error(
