@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "RepoFinisher"
+version = "1.0.0"
+id = "artifacts/repo-finisher"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24489
+
+[services.development]
+run = "pnpm --filter @workspace/repo-finisher run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/repo-finisher", "run", "build" ]
+publicDir = "artifacts/repo-finisher/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24489"
+BASE_PATH = "/"
