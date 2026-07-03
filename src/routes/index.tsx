@@ -194,7 +194,7 @@ function Landing() {
       <footer className="border-t border-border">
         <div className="mx-auto max-w-6xl px-6 py-6 flex items-center justify-between text-xs text-muted-foreground font-mono">
           <span>repo_finisher — ship what you started</span>
-          <span>built with TanStack Start + Supabase + Lovable AI</span>
+          <span>built with TanStack Start + Supabase</span>
         </div>
       </footer>
     </div>

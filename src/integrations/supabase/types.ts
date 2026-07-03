@@ -144,6 +144,7 @@ export type Database = {
           created_at?: string;
           updated_at?: string;
           completed_at?: string | null;
+          valuation?: Json | null;
         };
       };
 
@@ -169,6 +170,7 @@ export type Database = {
           user_notes: string | null;
           status: string | null;
           status_updated_at: string | null;
+          finish_result: Json | null;
           created_at: string;
         };
         Insert: {
@@ -215,6 +217,7 @@ export type Database = {
           user_notes?: string | null;
           status?: string;
           status_updated_at?: string | null;
+          finish_result?: Json | null;
           created_at?: string;
         };
       };

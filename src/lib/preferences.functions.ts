@@ -73,20 +73,25 @@ export const updatePreferences = createServerFn({ method: "POST" })
         schedule_enabled: z.boolean().optional(),
         schedule_frequency: z.enum(["weekly", "monthly"]).optional(),
         custom_ai_provider: z.string().optional(),
-        custom_ai_key: z.string().optional(),
+        custom_ai_key: z.string().nullable().optional(),
         filter_languages: z.array(z.string()).optional(),
         filter_exclude_archived: z.boolean().optional(),
         filter_min_stars: z.number().int().min(0).optional(),
-        filter_max_repos: z.number().int().min(2).max(100).optional(),
+        filter_max_repos: z.number().int().min(2).max(500).optional(),
       })
       .parse(d),
   )
   .handler(async ({ context, data }) => {
-    const { error } = await context.supabase.from("user_preferences").upsert({
-      user_id: context.userId,
-      ...data,
-      updated_at: new Date().toISOString(),
-    });
+    // Use update() not upsert() — upsert replaces the whole row and would
+    // null out any column not explicitly in the payload (e.g. custom_ai_key
+    // when the user leaves the field blank to keep their saved key).
+    const { error } = await context.supabase
+      .from("user_preferences")
+      .update({
+        ...data,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", context.userId);
     if (error) throw new Error(error.message);
     return { ok: true };
   });

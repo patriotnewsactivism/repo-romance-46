@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { getPreferences } from "@/lib/preferences.functions";
+import { getAIProviderConfig, callAI } from "@/lib/ai-provider";
 import { z } from "zod";
 
 const GH_API = "https://api.github.com";
@@ -84,7 +85,7 @@ const SAMPLE_EXT = new Set([
   ".kt",
 ]);
 
-async function digestRepo(repo: Repo, token: string): Promise<string> {
+async function digestRepo(repo: Repo, token: string, compact = false): Promise<string> {
   const parts: string[] = [];
   parts.push(`REPO: ${repo.full_name}`);
   if (repo.description) parts.push(`DESC: ${repo.description}`);
@@ -93,9 +94,10 @@ async function digestRepo(repo: Repo, token: string): Promise<string> {
   );
   if (repo.topics?.length) parts.push(`TOPICS: ${repo.topics.join(", ")}`);
 
-  // README
+  // README — smaller slice for providers with tight token budgets (e.g. GitHub Models free tier)
+  const readmeChars = compact ? 400 : 2500;
   const readme = await ghText(`/repos/${repo.full_name}/readme`, token);
-  if (readme) parts.push(`README (truncated):\n${readme.slice(0, 2500)}`);
+  if (readme) parts.push(`README (truncated):\n${readme.slice(0, readmeChars)}`);
 
   // File tree
   let tree: TreeEntry[] = [];
@@ -109,7 +111,10 @@ async function digestRepo(repo: Repo, token: string): Promise<string> {
     // Skip on error
   }
   const paths = tree.map((t) => t.path);
-  parts.push(`FILES (${paths.length} total, top 60):\n${paths.slice(0, 60).join("\n")}`);
+  const topFiles = compact ? 20 : 60;
+  parts.push(
+    `FILES (${paths.length} total, top ${topFiles}):\n${paths.slice(0, topFiles).join("\n")}`,
+  );
 
   // Sample key files
   const toSample = new Set<string>();
@@ -121,21 +126,145 @@ async function digestRepo(repo: Repo, token: string): Promise<string> {
       return SAMPLE_EXT.has(ext) && !t.path.includes("node_modules") && !t.path.includes("dist");
     })
     .sort((a, b) => (b.size ?? 0) - (a.size ?? 0))
-    .slice(0, 4)
+    .slice(0, compact ? 2 : 4)
     .map((t) => t.path);
   for (const p of sourceFiles) toSample.add(p);
 
   let sampledBytes = 0;
-  const BUDGET = 8000;
-  for (const p of Array.from(toSample).slice(0, 8)) {
+  const BUDGET = compact ? 1200 : 8000;
+  const maxFileSlice = compact ? 500 : 1500;
+  for (const p of Array.from(toSample).slice(0, compact ? 3 : 8)) {
     if (sampledBytes >= BUDGET) break;
     const text = await ghText(`/repos/${repo.full_name}/contents/${encodeURIComponent(p)}`, token);
     if (!text) continue;
-    const snippet = text.slice(0, Math.min(1500, BUDGET - sampledBytes));
+    const snippet = text.slice(0, Math.min(maxFileSlice, BUDGET - sampledBytes));
     parts.push(`--- FILE: ${p} ---\n${snippet}`);
     sampledBytes += snippet.length;
   }
   return parts.join("\n\n");
+}
+
+// ─── Token budgeting / chunking for AI requests ─────────────────
+
+function estimateTokens(s: string): number {
+  return Math.ceil(s.length / 4);
+}
+
+// Conservative input-token ceilings per provider (leaves room for system
+// prompt, JSON schema, and output tokens within each provider's real limit).
+function maxInputTokensForProvider(provider: string): number {
+  switch (provider) {
+    case "github_models":
+      return 4500; // free tier hard-caps gpt-4o at 8000 total tokens
+    case "openai":
+      return 90000;
+    case "anthropic":
+      return 150000;
+    case "google":
+      return 500000;
+    case "custom":
+    default:
+      return 60000;
+  }
+}
+
+// Groups repo digests into batches that fit under a provider's token budget.
+// A single oversized digest gets truncated rather than blowing the budget.
+function chunkDigests(digests: string[], maxTokens: number): string[][] {
+  const OVERHEAD_TOKENS = 1200; // system prompt + json schema overhead
+  const budget = Math.max(maxTokens - OVERHEAD_TOKENS, 800);
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  let currentTokens = 0;
+
+  for (let d of digests) {
+    let t = estimateTokens(d);
+    if (t > budget) {
+      // Single digest too big even alone — hard truncate it
+      d = d.slice(0, budget * 4);
+      t = estimateTokens(d);
+    }
+    if (current.length > 0 && currentTokens + t > budget) {
+      chunks.push(current);
+      current = [];
+      currentTokens = 0;
+    }
+    current.push(d);
+    currentTokens += t;
+  }
+  if (current.length) chunks.push(current);
+  return chunks.length ? chunks : [[]];
+}
+
+// Deterministic portfolio stats computed from repo metadata directly —
+// no AI call needed, so it stays accurate and free of token-budget conflicts
+// when multiple AI batches are merged.
+function computePortfolioStats(shortlist: Repo[]) {
+  const langCounts = new Map<string, number>();
+  for (const r of shortlist) {
+    const lang = r.language || "Other";
+    langCounts.set(lang, (langCounts.get(lang) || 0) + 1);
+  }
+  const total = shortlist.length || 1;
+  const languages = Array.from(langCounts.entries())
+    .map(([name, count]) => ({ name, count, pct: Math.round((count / total) * 1000) / 10 }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
+  const totalStars = shortlist.reduce((sum, r) => sum + (r.stargazers_count || 0), 0);
+  const mostActive = [...shortlist].sort(
+    (a, b) => new Date(b.pushed_at).getTime() - new Date(a.pushed_at).getTime(),
+  )[0];
+  const sixMonthsAgo = Date.now() - 1000 * 60 * 60 * 24 * 30 * 6;
+  const dormant = shortlist
+    .filter((r) => new Date(r.pushed_at).getTime() < sixMonthsAgo)
+    .map((r) => r.full_name);
+  const avgSize = shortlist.reduce((sum, r) => sum + (r.size || 0), 0) / total;
+
+  return {
+    total_repos: shortlist.length,
+    languages,
+    total_stars: totalStars,
+    most_active_repo: mostActive?.full_name,
+    dormant_repos: dormant,
+    average_repo_size_kb: Math.round(avgSize),
+  };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Runs the AI recommendation call across as many batches as needed to stay
+// under the provider's token budget, then merges + re-ranks the results.
+async function runBatchedAI(
+  digests: string[],
+  aiConfig: { provider: string; apiKey: string | null },
+): Promise<z.infer<typeof RecommendationSchema>> {
+  const budget = maxInputTokensForProvider(aiConfig.provider);
+  const batches = chunkDigests(digests, budget);
+
+  const allRecommendations: z.infer<typeof RecommendationSchema>["recommendations"] = [];
+  let summaryMd = "";
+
+  for (let i = 0; i < batches.length; i++) {
+    if (batches[i].length === 0) continue;
+    const result = await callBatchedAI(batches[i], aiConfig);
+    allRecommendations.push(...result.recommendations);
+    if (i === 0) summaryMd = result.summary_md;
+    // Pacing delay between batches — GitHub Models free tier allows ~15 RPM
+    // for gpt-4o-mini (4s between calls) and only 5 RPM for gpt-4o (12s).
+    // The fetchWithRetry in ai-provider.ts handles 429s with backoff, but
+    // we proactively pace here to minimize retries.
+    if (i < batches.length - 1 && aiConfig.provider === "github_models") {
+      await sleep(5000);
+    }
+  }
+
+  return RecommendationSchema.parse({
+    recommendations: allRecommendations,
+    summary_md: summaryMd || "Analysis complete.",
+  });
 }
 
 const RecommendationSchema = z.object({
@@ -148,10 +277,13 @@ const RecommendationSchema = z.object({
       effort: z.number().int(),
       market_potential: z.number().int(),
       next_steps: z.array(z.string()),
-      tech_stack: z.array(z.string()).optional().default([]),
-      marketing_tweet: z.string().optional(),
-      marketing_linkedin: z.string().optional(),
-      estimated_hours: z.number().int().optional(),
+      tech_stack: z
+        .array(z.string())
+        .nullish()
+        .transform((v) => v ?? []),
+      marketing_tweet: z.string().nullish(),
+      marketing_linkedin: z.string().nullish(),
+      estimated_hours: z.number().int().nullish(),
     }),
   ),
   summary_md: z.string(),
@@ -164,13 +296,18 @@ const RecommendationSchema = z.object({
       dormant_repos: z.array(z.string()).optional().default([]),
       average_repo_size_kb: z.number().optional(),
     })
-    .optional(),
+    .default({
+      total_repos: 0,
+      languages: [],
+      total_stars: 0,
+      dormant_repos: [],
+    }),
 });
 
-async function callLovableAI(digests: string[]): Promise<z.infer<typeof RecommendationSchema>> {
-  const apiKey = process.env.LOVABLE_API_KEY;
-  if (!apiKey) throw new Error("LOVABLE_API_KEY missing");
-
+async function callBatchedAI(
+  digests: string[],
+  aiConfig: { provider: string; apiKey: string | null },
+): Promise<z.infer<typeof RecommendationSchema>> {
   const system = `You are an expert product strategist and technical marketer reviewing a developer's GitHub portfolio.
 For each repo digest, identify:
 - FINISH: repos that are close to shippable — describe exactly what's missing.
@@ -191,7 +328,6 @@ For every recommendation give:
 
 Also produce:
 - summary_md (markdown, ~200 words) covering the portfolio
-- portfolio_stats object with: total_repos, languages (array of {name, count, pct} — top 5 languages), total_stars, most_active_repo (full_name of most recently pushed), dormant_repos (array of repos not pushed in 6+ months), average_repo_size_kb
 
 Return 5-12 recommendations. Rank by (market_potential * 2 - effort) desc.`;
 
@@ -213,31 +349,6 @@ Return 5-12 recommendations. Rank by (market_potential * 2 - effort) desc.`;
           additionalProperties: false,
           properties: {
             summary_md: { type: "string" },
-            portfolio_stats: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                total_repos: { type: "integer" },
-                total_stars: { type: "integer" },
-                most_active_repo: { type: "string" },
-                dormant_repos: { type: "array", items: { type: "string" } },
-                average_repo_size_kb: { type: "number" },
-                languages: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    additionalProperties: false,
-                    properties: {
-                      name: { type: "string" },
-                      count: { type: "integer" },
-                      pct: { type: "number" },
-                    },
-                    required: ["name", "count", "pct"],
-                  },
-                },
-              },
-              required: ["total_repos", "languages", "total_stars"],
-            },
             recommendations: {
               type: "array",
               items: {
@@ -252,10 +363,12 @@ Return 5-12 recommendations. Rank by (market_potential * 2 - effort) desc.`;
                   market_potential: { type: "integer" },
                   next_steps: { type: "array", items: { type: "string" } },
                   tech_stack: { type: "array", items: { type: "string" } },
-                  marketing_tweet: { type: "string" },
-                  marketing_linkedin: { type: "string" },
-                  estimated_hours: { type: "integer" },
+                  marketing_tweet: { type: ["string", "null"] },
+                  marketing_linkedin: { type: ["string", "null"] },
+                  estimated_hours: { type: ["integer", "null"] },
                 },
+                // OpenAI/GitHub Models strict mode requires every property to be
+                // listed here — truly-optional fields are made nullable above instead.
                 required: [
                   "kind",
                   "title",
@@ -264,6 +377,10 @@ Return 5-12 recommendations. Rank by (market_potential * 2 - effort) desc.`;
                   "effort",
                   "market_potential",
                   "next_steps",
+                  "tech_stack",
+                  "marketing_tweet",
+                  "marketing_linkedin",
+                  "estimated_hours",
                 ],
               },
             },
@@ -274,24 +391,14 @@ Return 5-12 recommendations. Rank by (market_potential * 2 - effort) desc.`;
     },
   };
 
-  const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Lovable-API-Key": apiKey,
+  const aiResult = await callAI(
+    {
+      messages: body.messages,
+      responseFormat: body.response_format,
     },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    if (res.status === 429) throw new Error("AI rate limit hit — please try again in a minute.");
-    if (res.status === 402)
-      throw new Error("Lovable AI credits exhausted. Add credits in workspace billing.");
-    throw new Error(`AI error ${res.status}: ${text.slice(0, 300)}`);
-  }
-  const json = (await res.json()) as { choices: { message: { content: string } }[] };
-  const content = json.choices?.[0]?.message?.content ?? "{}";
-  const parsed = JSON.parse(content);
+    aiConfig,
+  );
+  const parsed = JSON.parse(aiResult.content || "{}");
   return RecommendationSchema.parse(parsed);
 }
 
@@ -309,6 +416,15 @@ export const runAnalysis = createServerFn({ method: "POST" })
 
     const token = conn.access_token;
 
+    // Fetch user preferences
+    const { data: prefs } = await supabase
+      .from("user_preferences")
+      .select(
+        "custom_ai_provider, custom_ai_key, filter_max_repos, filter_languages, filter_min_stars, filter_exclude_archived",
+      )
+      .eq("user_id", userId)
+      .maybeSingle();
+
     // Insert pending analysis
     const { data: analysis, error: aErr } = await supabase
       .from("analyses")
@@ -316,8 +432,8 @@ export const runAnalysis = createServerFn({ method: "POST" })
         user_id: userId,
         status: "running",
         trigger_type: "manual",
-        ai_provider: prefs?.custom_ai_provider || "lovable",
-        ai_model: prefs?.custom_ai_provider === "github_models" ? "openai/gpt-4o" : "gpt-4o",
+        ai_provider: prefs?.custom_ai_provider || "openai",
+        ai_model: prefs?.custom_ai_provider === "github_models" ? "gpt-4o-mini" : "gpt-4o",
       })
       .select("id")
       .single();
@@ -332,24 +448,34 @@ export const runAnalysis = createServerFn({ method: "POST" })
       );
       const shortlist = repos
         .filter((r) => !r.fork && !r.archived)
-        .slice(0, prefs?.filter_max_repos || 25);
+        .slice(0, prefs?.filter_max_repos || 50);
 
       if (shortlist.length < 2) {
         throw new Error("Need at least 2 active repos to analyze. Push some code first!");
       }
 
-      // Digest each
+      // Digest each — use compact digests for providers with tight token budgets
+      const provider = prefs?.custom_ai_provider || "openai";
+      const compactDigest = provider === "github_models";
       const digests: string[] = [];
       for (const repo of shortlist) {
         try {
-          digests.push(await digestRepo(repo, token));
+          digests.push(await digestRepo(repo, token, compactDigest));
         } catch (e) {
           console.error("digest failed", repo.full_name, e);
         }
       }
 
-      // Call AI
-      const ai = await callLovableAI(digests);
+      // For GitHub Models, fall back to the GitHub connection token if no dedicated AI key is set
+      let aiKey = prefs?.custom_ai_key || null;
+      if (provider === "github_models" && !aiKey) {
+        aiKey = conn.access_token; // reuse GitHub OAuth token
+      }
+      const aiConfig = { provider, apiKey: aiKey };
+
+      // Call AI — batched to stay under each provider's token budget
+      const ai = await runBatchedAI(digests, aiConfig);
+      ai.portfolio_stats = computePortfolioStats(shortlist);
 
       // Rank and persist items
       const ranked = [...ai.recommendations].sort(
@@ -384,7 +510,7 @@ export const runAnalysis = createServerFn({ method: "POST" })
           repo_count: shortlist.length,
           analyzed_repo_names: shortlist.map((r: Repo) => r.full_name),
           summary_md: ai.summary_md,
-          portfolio_stats: ai.portfolio_stats ?? {},
+          portfolio_stats: ai.portfolio_stats,
           completed_at: new Date().toISOString(),
         })
         .eq("id", analysisId);
@@ -524,8 +650,16 @@ export const generateActionPlan = createServerFn({ method: "POST" })
       })
       .join("\n");
 
-    const apiKey = process.env.LOVABLE_API_KEY;
-    if (!apiKey) throw new Error("LOVABLE_API_KEY missing");
+    // Get user's AI provider config
+    const { data: apPrefs } = await context.supabase
+      .from("user_preferences")
+      .select("custom_ai_provider, custom_ai_key")
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    const aiConfig = {
+      provider: apPrefs?.custom_ai_provider || "openai",
+      apiKey: apPrefs?.custom_ai_key || null,
+    };
 
     const system = `You are a technical product manager creating a sequenced action plan from a portfolio analysis.
 Given a set of recommendations (finish/combine/repurpose), create a realistic execution roadmap.
@@ -602,18 +736,17 @@ Return a JSON object with:
       },
     };
 
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Lovable-API-Key": apiKey },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      if (res.status === 429) throw new Error("AI rate limit hit — try again in a minute.");
-      throw new Error(`AI error ${res.status}: ${text.slice(0, 300)}`);
-    }
-    const json = (await res.json()) as { choices: { message: { content: string } }[] };
-    const plan = JSON.parse(json.choices?.[0]?.message?.content ?? "{}");
+    const aiResult = await callAI(
+      {
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+        responseFormat: body.response_format,
+      },
+      aiConfig,
+    );
+    const plan = JSON.parse(aiResult.content || "{}");
     return plan;
   });
 
@@ -776,14 +909,23 @@ export const rerunAnalysis = createServerFn({ method: "POST" })
     if (!conn) throw new Error("Connect GitHub first.");
     const token = conn.access_token;
 
+    // Fetch user preferences
+    const { data: rerunPrefs } = await context.supabase
+      .from("user_preferences")
+      .select(
+        "custom_ai_provider, custom_ai_key, filter_max_repos, filter_languages, filter_min_stars, filter_exclude_archived",
+      )
+      .eq("user_id", context.userId)
+      .maybeSingle();
+
     const { data: analysis, error: aErr } = await context.supabase
       .from("analyses")
       .insert({
         user_id: context.userId,
         status: "running",
         trigger_type: "rerun",
-        ai_provider: rerunPrefs?.custom_ai_provider || "lovable",
-        ai_model: rerunPrefs?.custom_ai_provider === "github_models" ? "openai/gpt-4o" : "gpt-4o",
+        ai_provider: rerunPrefs?.custom_ai_provider || "openai",
+        ai_model: rerunPrefs?.custom_ai_provider === "github_models" ? "gpt-4o-mini" : "gpt-4o",
       })
       .select("id")
       .single();
@@ -797,19 +939,29 @@ export const rerunAnalysis = createServerFn({ method: "POST" })
       );
       const shortlist = repos
         .filter((r) => !r.fork && !r.archived)
-        .slice(0, prefs?.filter_max_repos || 25);
+        .slice(0, rerunPrefs?.filter_max_repos || 50);
       if (shortlist.length < 2) throw new Error("Need at least 2 active repos to analyze.");
 
+      // Fixed bug: was referencing an out-of-scope `prefs` variable — now uses rerunPrefs
+      const rerunProvider = rerunPrefs?.custom_ai_provider || "openai";
+      const rerunCompactDigest = rerunProvider === "github_models";
       const digests: string[] = [];
       for (const repo of shortlist) {
         try {
-          digests.push(await digestRepo(repo, token));
+          digests.push(await digestRepo(repo, token, rerunCompactDigest));
         } catch (e) {
           console.error("digest failed", repo.full_name, e);
         }
       }
 
-      const ai = await callLovableAI(digests);
+      // For GitHub Models, fall back to the GitHub connection token
+      let rerunAiKey = rerunPrefs?.custom_ai_key || null;
+      if (rerunProvider === "github_models" && !rerunAiKey) {
+        rerunAiKey = conn.access_token;
+      }
+
+      const ai = await runBatchedAI(digests, { provider: rerunProvider, apiKey: rerunAiKey });
+      ai.portfolio_stats = computePortfolioStats(shortlist);
       const ranked = [...ai.recommendations].sort(
         (a, b) => b.market_potential * 2 - b.effort - (a.market_potential * 2 - a.effort),
       );
@@ -842,7 +994,7 @@ export const rerunAnalysis = createServerFn({ method: "POST" })
           repo_count: shortlist.length,
           analyzed_repo_names: shortlist.map((r: Repo) => r.full_name),
           summary_md: ai.summary_md,
-          portfolio_stats: ai.portfolio_stats ?? {},
+          portfolio_stats: ai.portfolio_stats,
           completed_at: new Date().toISOString(),
         })
         .eq("id", analysisId);

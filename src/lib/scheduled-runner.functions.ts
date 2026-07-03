@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { callAI } from "@/lib/ai-provider";
 import { getRequest } from "@tanstack/react-start/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -232,64 +233,29 @@ ${files}`,
           }
         }
 
-        // Call AI (GitHub Models or Lovable gateway)
-        let aiResult: {
+        // Call AI via centralized provider router — supports all providers
+        // (OpenAI, Anthropic, Google, GitHub Models)
+        let aiKey = user.custom_ai_key || null;
+        if (user.custom_ai_provider === "github_models" && !aiKey) {
+          aiKey = conn.access_token; // reuse GitHub OAuth token
+        }
+        const aiResponse = await callAI(
+          {
+            messages: [
+              {
+                role: "system",
+                content: `You are a senior product strategist. Given GitHub repos, produce 5-10 ranked recommendations (kind: finish/combine/repurpose). Each: title, repos, pitch, next_steps, effort (1-5), market_potential (1-5), tech_stack, marketing_tweet, marketing_linkedin, estimated_hours. Also: summary_md. Return JSON.`,
+              },
+              { role: "user", content: `Repos:\n\n${digests.join("\n\n---\n\n")}` },
+            ],
+          },
+          { provider: user.custom_ai_provider || "openai", apiKey: aiKey },
+        );
+        const aiResult = JSON.parse(aiResponse.content || "{}") as {
           recommendations: Array<Record<string, unknown>>;
           summary_md: string;
           portfolio_stats: Record<string, unknown>;
         };
-
-        if (user.custom_ai_provider === "github_models") {
-          // Use GitHub Models with the user's token
-          const aiRes = await fetch("https://models.github.ai/inference/chat/completions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${conn.access_token}`,
-            },
-            body: JSON.stringify({
-              model: "openai/gpt-4o",
-              messages: [
-                {
-                  role: "system",
-                  content: `You are a senior product strategist. Given GitHub repos, produce 5-10 ranked recommendations (kind: finish/combine/repurpose). Each: title, repos, pitch, next_steps, effort (1-5), market_potential (1-5), tech_stack, marketing_tweet, marketing_linkedin, estimated_hours. Also: summary_md, portfolio_stats {language_breakdown, total_stars, dormant_repos, avg_repo_size_kb, most_active_repo}. Return JSON.`,
-                },
-                { role: "user", content: `Repos:\n\n${digests.join("\n\n---\n\n")}` },
-              ],
-              temperature: 0.7,
-              max_tokens: 8000,
-            }),
-          });
-          if (!aiRes.ok) throw new Error(`GitHub Models error: ${aiRes.status}`);
-          const aiJson = (await aiRes.json()) as { choices: { message: { content: string } }[] };
-          aiResult = JSON.parse(aiJson.choices[0].message.content);
-        } else {
-          // Use Lovable gateway
-          const lovableKey = user.custom_ai_key || process.env.LOVABLE_API_KEY;
-          if (!lovableKey) throw new Error("No AI key available");
-          const aiRes = await fetch("https://api.lovable.dev/chat/completions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${lovableKey}`,
-            },
-            body: JSON.stringify({
-              model: "gpt-4o",
-              messages: [
-                {
-                  role: "system",
-                  content: `You are a senior product strategist. Given GitHub repos, produce 5-10 ranked recommendations (kind: finish/combine/repurpose). Each: title, repos, pitch, next_steps, effort (1-5), market_potential (1-5), tech_stack, marketing_tweet, marketing_linkedin, estimated_hours. Also: summary_md, portfolio_stats. Return JSON.`,
-                },
-                { role: "user", content: `Repos:\n\n${digests.join("\n\n---\n\n")}` },
-              ],
-              temperature: 0.7,
-              max_tokens: 8000,
-            }),
-          });
-          if (!aiRes.ok) throw new Error(`AI error: ${aiRes.status}`);
-          const aiJson = (await aiRes.json()) as { choices: { message: { content: string } }[] };
-          aiResult = JSON.parse(aiJson.choices[0].message.content);
-        }
 
         // Sort recommendations
         const ranked = [...(aiResult.recommendations || [])].sort(

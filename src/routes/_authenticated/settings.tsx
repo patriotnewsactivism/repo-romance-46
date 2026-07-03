@@ -32,11 +32,11 @@ function SettingsPage() {
   const [emailNotif, setEmailNotif] = useState(false);
   const [scheduleEnabled, setScheduleEnabled] = useState(false);
   const [scheduleFreq, setScheduleFreq] = useState<"weekly" | "monthly">("weekly");
-  const [customProvider, setCustomProvider] = useState("lovable");
+  const [customProvider, setCustomProvider] = useState("openai");
   const [customKey, setCustomKey] = useState("");
   const [filterLanguages, setFilterLanguages] = useState("");
   const [filterMinStars, setFilterMinStars] = useState(0);
-  const [filterMaxRepos, setFilterMaxRepos] = useState(25);
+  const [filterMaxRepos, setFilterMaxRepos] = useState(50);
   const [excludeArchived, setExcludeArchived] = useState(true);
 
   // Sync from server
@@ -46,11 +46,12 @@ function SettingsPage() {
       setEmailNotif(p.email_notifications as boolean);
       setScheduleEnabled(p.schedule_enabled as boolean);
       setScheduleFreq(p.schedule_frequency as "weekly" | "monthly");
-      setCustomProvider((p.custom_ai_provider as string) || "lovable");
+      setCustomProvider((p.custom_ai_provider as string) || "openai");
       setCustomKey("");
       setFilterLanguages(((p.filter_languages as string[]) || []).join(", "));
       setFilterMinStars((p.filter_min_stars as number) || 0);
       setExcludeArchived(p.filter_exclude_archived as boolean);
+      setFilterMaxRepos((p.filter_max_repos as number) || 50);
     }
   }, [prefs.data]);
 
@@ -63,7 +64,6 @@ function SettingsPage() {
           schedule_frequency: scheduleFreq,
           custom_ai_provider: customProvider,
           ...(customKey ? { custom_ai_key: customKey } : {}),
-          ...(customProvider === "github_models" ? { custom_ai_key: null } : {}),
           filter_languages: filterLanguages
             .split(",")
             .map((s) => s.trim())
@@ -203,8 +203,7 @@ function SettingsPage() {
           <h2 className="font-mono text-sm font-semibold">AI provider (BYOK)</h2>
         </div>
         <p className="text-sm text-muted-foreground">
-          Bring your own AI API key to use instead of the default Lovable gateway. Your key is
-          stored securely and only used for your analyses.
+          Bring your own AI API key. Your key is stored securely and only used for your analyses.
         </p>
         <div className="space-y-3">
           <div>
@@ -214,7 +213,6 @@ function SettingsPage() {
               onChange={(e) => setCustomProvider(e.target.value)}
               className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm"
             >
-              <option value="lovable">Lovable Gateway (default)</option>
               <option value="github_models">
                 GitHub Models — GPT-4o (free, uses your GitHub token)
               </option>
@@ -230,6 +228,30 @@ function SettingsPage() {
                 ? "(saved — leave blank to keep)"
                 : ""}
             </Label>
+            {customProvider === "github_models" && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Create a GitHub token at Settings → Developer settings → Personal access tokens
+                (needs <code>read:user</code> scope). Or leave blank to use your connected GitHub
+                account.
+              </p>
+            )}
+            {(prefs.data as unknown as Record<string, unknown> | undefined)?.custom_ai_key && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomKey("");
+                  updateFn({
+                    data: { custom_ai_key: null },
+                  }).then(() => {
+                    toast.success("API key removed");
+                    prefs.refetch();
+                  });
+                }}
+                className="text-xs text-destructive hover:underline mt-1"
+              >
+                Remove saved key
+              </button>
+            )}
             <Input
               type="password"
               value={customKey}
@@ -237,7 +259,9 @@ function SettingsPage() {
               placeholder={
                 prefs.data && (prefs.data as unknown as Record<string, unknown>).custom_ai_key
                   ? "••••••••••••"
-                  : "sk-..."
+                  : customProvider === "github_models"
+                    ? "ghp_... (your GitHub Personal Access Token)"
+                    : "sk-..."
               }
               className="mt-1 font-mono"
             />

@@ -1,4 +1,4 @@
-// Managed by Lovable Cloud auth pattern.
+// Supabase auth pattern.
 import { createFileRoute, Outlet, redirect, Link, useRouter } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
