@@ -267,7 +267,15 @@ export const getRepoHealth = createServerFn({ method: "GET" })
     return {
       repo: data.repo,
       healthScore: score,
-      grade: (score >= 80 ? "A" : score >= 60 ? "B" : score >= 40 ? "C" : score >= 20 ? "D" : "F") as string,
+      grade: (score >= 80
+        ? "A"
+        : score >= 60
+          ? "B"
+          : score >= 40
+            ? "C"
+            : score >= 20
+              ? "D"
+              : "F") as string,
       factors,
       ciProvider,
       license,

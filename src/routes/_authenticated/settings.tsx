@@ -226,9 +226,9 @@ function SettingsPage() {
           <div>
             <Label className="text-sm">
               API Key{" "}
-              {((prefs.data as unknown as Record<string, unknown> | undefined)?.custom_ai_key
+              {(prefs.data as unknown as Record<string, unknown> | undefined)?.custom_ai_key
                 ? "(saved — leave blank to keep)"
-                : "")}
+                : ""}
             </Label>
             <Input
               type="password"
