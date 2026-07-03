@@ -551,7 +551,7 @@ export const getFinishStatus = createServerFn({ method: "GET" })
     return {
       repo: data.repo,
       hasBeenFinished: finished.length > 0,
-      finishes: finished.map((i) => (i as Record<string, unknown>).finish_result) as Record<string, unknown>[],
+      finishes: JSON.parse(JSON.stringify(finished.map((i) => (i as Record<string, unknown>).finish_result))) as unknown[],
     };
   });
 
