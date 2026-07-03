@@ -473,7 +473,7 @@ export const valuePortfolio = createServerFn({ method: "POST" })
     };
 
     // Save valuation to the analysis record
-    await context.supabase.from("analyses").update({ valuation: result }).eq("id", data.analysisId);
+    await context.supabase.from("analyses").update({ valuation: result as unknown as import("@/integrations/supabase/types").Json }).eq("id", data.analysisId);
 
     return result;
   });
