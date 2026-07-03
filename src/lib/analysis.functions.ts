@@ -290,7 +290,12 @@ const RecommendationSchema = z.object({
       dormant_repos: z.array(z.string()).optional().default([]),
       average_repo_size_kb: z.number().optional(),
     })
-    .optional(),
+    .default({
+      total_repos: 0,
+      languages: [],
+      total_stars: 0,
+      dormant_repos: [],
+    }),
 });
 
 async function callLovableAI(
@@ -519,7 +524,7 @@ export const runAnalysis = createServerFn({ method: "POST" })
           repo_count: shortlist.length,
           analyzed_repo_names: shortlist.map((r: Repo) => r.full_name),
           summary_md: ai.summary_md,
-          portfolio_stats: ai.portfolio_stats ?? {},
+          portfolio_stats: ai.portfolio_stats,
           completed_at: new Date().toISOString(),
         })
         .eq("id", analysisId);
@@ -1003,7 +1008,7 @@ export const rerunAnalysis = createServerFn({ method: "POST" })
           repo_count: shortlist.length,
           analyzed_repo_names: shortlist.map((r: Repo) => r.full_name),
           summary_md: ai.summary_md,
-          portfolio_stats: ai.portfolio_stats ?? {},
+          portfolio_stats: ai.portfolio_stats,
           completed_at: new Date().toISOString(),
         })
         .eq("id", analysisId);
