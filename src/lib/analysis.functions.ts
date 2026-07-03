@@ -290,7 +290,7 @@ function estimateTokens(s: string): number {
 function maxInputTokensForProvider(provider: string): number {
   switch (provider) {
     case "github_models":
-      return 12000; // gpt-4o-mini supports 128k — 4500 was too conservative, caused 17+ batches
+      return 50000; // gpt-4o-mini supports 128k — keep batches minimal to avoid rate-limit timeouts
     case "openai":
       return 12000;
     case "anthropic":
