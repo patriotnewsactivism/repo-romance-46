@@ -657,7 +657,7 @@ async function runBatchedAI(
 
 // ─── Shared analysis core (used by runAnalysis + rerunAnalysis) ─
 export interface AnalysisContext {
-  supabase: ReturnType<typeof import("@supabase/supabase-js").createClient>;
+  supabase: SupabaseClient<Database>;
   userId: string;
   token: string;
   prefs: {
