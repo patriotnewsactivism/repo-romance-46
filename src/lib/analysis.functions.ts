@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { getPreferences } from "@/lib/preferences.functions";
+import { getAIProviderConfig, callAI } from "@/lib/ai-provider";
 import { z } from "zod";
 
 const GH_API = "https://api.github.com";
@@ -167,10 +168,10 @@ const RecommendationSchema = z.object({
     .optional(),
 });
 
-async function callLovableAI(digests: string[]): Promise<z.infer<typeof RecommendationSchema>> {
-  const apiKey = process.env.LOVABLE_API_KEY;
-  if (!apiKey) throw new Error("LOVABLE_API_KEY missing");
-
+async function callLovableAI(
+  digests: string[],
+  aiConfig: { provider: string; apiKey: string | null },
+): Promise<z.infer<typeof RecommendationSchema>> {
   const system = `You are an expert product strategist and technical marketer reviewing a developer's GitHub portfolio.
 For each repo digest, identify:
 - FINISH: repos that are close to shippable — describe exactly what's missing.
@@ -274,24 +275,14 @@ Return 5-12 recommendations. Rank by (market_potential * 2 - effort) desc.`;
     },
   };
 
-  const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Lovable-API-Key": apiKey,
+  const aiResult = await callAI(
+    {
+      messages: body.messages,
+      responseFormat: body.response_format,
     },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    if (res.status === 429) throw new Error("AI rate limit hit — please try again in a minute.");
-    if (res.status === 402)
-      throw new Error("Lovable AI credits exhausted. Add credits in workspace billing.");
-    throw new Error(`AI error ${res.status}: ${text.slice(0, 300)}`);
-  }
-  const json = (await res.json()) as { choices: { message: { content: string } }[] };
-  const content = json.choices?.[0]?.message?.content ?? "{}";
-  const parsed = JSON.parse(content);
+    aiConfig,
+  );
+  const parsed = JSON.parse(aiResult.content || "{}");
   return RecommendationSchema.parse(parsed);
 }
 
@@ -358,7 +349,10 @@ export const runAnalysis = createServerFn({ method: "POST" })
       }
 
       // Call AI
-      const ai = await callLovableAI(digests);
+      const ai = await callLovableAI(digests, {
+        provider: prefs?.custom_ai_provider || "lovable",
+        apiKey: prefs?.custom_ai_key || null,
+      });
 
       // Rank and persist items
       const ranked = [...ai.recommendations].sort(
@@ -533,8 +527,16 @@ export const generateActionPlan = createServerFn({ method: "POST" })
       })
       .join("\n");
 
-    const apiKey = process.env.LOVABLE_API_KEY;
-    if (!apiKey) throw new Error("LOVABLE_API_KEY missing");
+    // Get user's AI provider config
+    const { data: apPrefs } = await context.supabase
+      .from("user_preferences")
+      .select("custom_ai_provider, custom_ai_key")
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    const aiConfig = {
+      provider: apPrefs?.custom_ai_provider || "lovable",
+      apiKey: apPrefs?.custom_ai_key || null,
+    };
 
     const system = `You are a technical product manager creating a sequenced action plan from a portfolio analysis.
 Given a set of recommendations (finish/combine/repurpose), create a realistic execution roadmap.
@@ -611,18 +613,17 @@ Return a JSON object with:
       },
     };
 
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Lovable-API-Key": apiKey },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      if (res.status === 429) throw new Error("AI rate limit hit — try again in a minute.");
-      throw new Error(`AI error ${res.status}: ${text.slice(0, 300)}`);
-    }
-    const json = (await res.json()) as { choices: { message: { content: string } }[] };
-    const plan = JSON.parse(json.choices?.[0]?.message?.content ?? "{}");
+    const aiResult = await callAI(
+      {
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+        responseFormat: body.response_format,
+      },
+      aiConfig,
+    );
+    const plan = JSON.parse(aiResult.content || "{}");
     return plan;
   });
 
@@ -827,7 +828,10 @@ export const rerunAnalysis = createServerFn({ method: "POST" })
         }
       }
 
-      const ai = await callLovableAI(digests);
+      const ai = await callLovableAI(digests, {
+        provider: prefs?.custom_ai_provider || "lovable",
+        apiKey: prefs?.custom_ai_key || null,
+      });
       const ranked = [...ai.recommendations].sort(
         (a, b) => b.market_potential * 2 - b.effort - (a.market_potential * 2 - a.effort),
       );

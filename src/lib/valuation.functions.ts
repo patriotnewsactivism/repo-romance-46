@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { callAI } from "@/lib/ai-provider";
 
 // ─── Types ─────────────────────────────────────────────────────
 
@@ -307,32 +308,14 @@ Analysis Context:
     },
   };
 
-  // Route to AI provider
-  let apiUrl = "https://ai.gateway.lovable.dev/v1/chat/completions";
-  let headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "Lovable-API-Key": process.env.LOVABLE_API_KEY || "",
-  };
-
-  if (aiProvider === "github_models" && aiKey) {
-    apiUrl = "https://models.inference.ai.azure.com/chat/completions";
-    headers = { "Content-Type": "application/json", Authorization: `Bearer ${aiKey}` };
-    body.model = "gpt-4o";
-  } else if (aiProvider === "custom" && aiKey) {
-    apiUrl = "https://api.openai.com/v1/chat/completions";
-    headers = { "Content-Type": "application/json", Authorization: `Bearer ${aiKey}` };
-    body.model = "gpt-4o";
-  }
-
-  const res = await fetch(apiUrl, { method: "POST", headers, body: JSON.stringify(body) });
-  if (!res.ok) {
-    const text = await res.text();
-    if (res.status === 429) throw new Error("AI rate limit — try again in a minute.");
-    throw new Error(`AI error ${res.status}: ${text.slice(0, 300)}`);
-  }
-
-  const json = (await res.json()) as { choices: { message: { content: string } }[] };
-  return JSON.parse(json.choices?.[0]?.message?.content ?? "{}") as Valuation;
+  const aiResult = await callAI(
+    {
+      messages: body.messages,
+      responseFormat: body.response_format,
+    },
+    { provider: aiProvider, apiKey: aiKey },
+  );
+  return JSON.parse(aiResult.content || "{}") as Valuation;
 }
 
 // ─── Server Functions ──────────────────────────────────────────
