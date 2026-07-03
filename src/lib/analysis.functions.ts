@@ -341,12 +341,7 @@ export const runAnalysis = createServerFn({ method: "POST" })
       }
 
       // Call AI
-      const ai = await callLovableAI(
-        digests,
-        prefs?.custom_ai_key,
-        prefs?.custom_ai_provider,
-        token, // GitHub OAuth token — used by GitHub Models provider
-      );
+      const ai = await callLovableAI(digests);
 
       // Rank and persist items
       const ranked = [...ai.recommendations].sort(
@@ -464,7 +459,7 @@ export const toggleShare = createServerFn({ method: "POST" })
 
 export const getPublicAnalysis = createServerFn({ method: "GET" })
   .inputValidator((d: { slug: string }) => z.object({ slug: z.string() }).parse(d))
-  .handler(async ({ data }) => {
+  .handler(async ({ data }): Promise<{ analysis: Record<string, string | number | boolean | null>; items: Record<string, string | number | boolean | null>[] }> => {
     // Use anon client — RLS allows reading public analyses
     const SUPABASE_URL = process.env.SUPABASE_URL;
     const SUPABASE_ANON_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
