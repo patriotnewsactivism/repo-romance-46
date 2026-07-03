@@ -832,9 +832,10 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
 
 // ─── Helper: get GitHub connection + prefs for a user ───────────
 async function getAnalysisContext(
-  supabase: ReturnType<typeof import("@supabase/supabase-js").createClient>,
+  supabase: SupabaseClient<Database>,
   userId: string,
   triggerType: string,
+
 ): Promise<AnalysisContext> {
   const { data: conn } = await supabase
     .from("github_connections")
