@@ -525,7 +525,7 @@ ${nextSteps.map((s) => `- [x] ${s}`).join("\n")}
     if (data.analysisId && data.itemRank !== undefined) {
       await context.supabase
         .from("analysis_items")
-        .update({ finish_result: result })
+        .update({ finish_result: result as unknown as import("@/integrations/supabase/types").Json })
         .eq("analysis_id", data.analysisId)
         .eq("rank", data.itemRank);
     }
@@ -551,6 +551,7 @@ export const getFinishStatus = createServerFn({ method: "GET" })
     return {
       repo: data.repo,
       hasBeenFinished: finished.length > 0,
-      finishes: finished.map((i) => (i as Record<string, unknown>).finish_result),
+      finishes: JSON.parse(JSON.stringify(finished.map((i) => (i as Record<string, unknown>).finish_result))) as import("@/integrations/supabase/types").Json[],
     };
   });
+

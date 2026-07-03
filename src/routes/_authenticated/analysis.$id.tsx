@@ -32,6 +32,8 @@ import { RepoHealthCheck } from "@/components/RepoHealth";
 import { MergeInstructions } from "@/components/MergeInstructions";
 import { RepoFinisher } from "@/components/RepoFinisher";
 import { PortfolioValuation } from "@/components/PortfolioValuation";
+import { VibeTools } from "@/components/VibeTools";
+
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/analysis/$id")({
@@ -69,7 +71,14 @@ interface AnalysisItem {
   estimated_hours?: number | null;
   is_starred?: boolean;
   rank: number;
+  market_analysis?: unknown;
+  valuation?: unknown;
+  vibe_spec?: unknown;
+  combine_result?: unknown;
+  finish_history?: unknown;
+  iteration_count?: number;
 }
+
 
 interface PortfolioStats {
   total_repos?: number;
@@ -513,6 +522,22 @@ function AnalysisPage() {
                   {it.kind === "combine" && (
                     <MergeInstructions analysisId={id} itemRank={it.rank} />
                   )}
+
+                  <VibeTools
+                    analysisId={id}
+                    itemRank={it.rank}
+                    kind={it.kind}
+                    repos={it.repos}
+                    existing={{
+                      market_analysis: it.market_analysis,
+                      valuation: it.valuation,
+                      vibe_spec: it.vibe_spec,
+                      combine_result: it.combine_result,
+                      finish_history: it.finish_history,
+                      iteration_count: it.iteration_count,
+                    }}
+                  />
+
 
                   {/* Marketing copy */}
                   {(it.marketing_tweet || it.marketing_linkedin) && (

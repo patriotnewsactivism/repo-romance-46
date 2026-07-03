@@ -2,6 +2,9 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { callAI } from "@/lib/ai-provider";
 import { z } from "zod";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/integrations/supabase/types";
+
 
 const GH_API = "https://api.github.com";
 
@@ -654,7 +657,7 @@ async function runBatchedAI(
 
 // ─── Shared analysis core (used by runAnalysis + rerunAnalysis) ─
 export interface AnalysisContext {
-  supabase: ReturnType<typeof import("@supabase/supabase-js").createClient>;
+  supabase: SupabaseClient<Database>;
   userId: string;
   token: string;
   prefs: {
@@ -745,13 +748,15 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
     const digests: string[] = [];
     let failedDigests = 0;
     for (let i = 0; i < digestResults.length; i++) {
-      if (digestResults[i].status === "fulfilled") {
-        digests.push(digestResults[i].value);
+      const r = digestResults[i];
+      if (r.status === "fulfilled") {
+        digests.push(r.value);
       } else {
         failedDigests++;
-        console.error("digest failed", shortlist[i].full_name, (digestResults[i] as PromiseRejectedResult).reason);
+        console.error("digest failed", shortlist[i].full_name, r.reason);
       }
     }
+
 
     if (digests.length < 2) {
       throw new Error(
@@ -829,9 +834,10 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
 
 // ─── Helper: get GitHub connection + prefs for a user ───────────
 async function getAnalysisContext(
-  supabase: ReturnType<typeof import("@supabase/supabase-js").createClient>,
+  supabase: SupabaseClient<Database>,
   userId: string,
   triggerType: string,
+
 ): Promise<AnalysisContext> {
   const { data: conn } = await supabase
     .from("github_connections")
