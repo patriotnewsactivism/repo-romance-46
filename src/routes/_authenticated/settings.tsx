@@ -42,7 +42,7 @@ function SettingsPage() {
   // Sync from server
   useEffect(() => {
     if (prefs.data) {
-      const p = prefs.data as Record<string, unknown>;
+      const p = prefs.data as unknown as Record<string, unknown>;
       setEmailNotif(p.email_notifications as boolean);
       setScheduleEnabled(p.schedule_enabled as boolean);
       setScheduleFreq(p.schedule_frequency as "weekly" | "monthly");
@@ -167,11 +167,11 @@ function SettingsPage() {
                 </button>
               ))}
             </div>
-            {prefs.data && (prefs.data as Record<string, unknown>).last_scheduled_run && (
+            {Boolean((prefs.data as unknown as Record<string, unknown>)?.last_scheduled_run) && (
               <p className="text-xs text-muted-foreground font-mono">
                 Last auto-run:{" "}
                 {new Date(
-                  (prefs.data as Record<string, unknown>).last_scheduled_run as string,
+                  (prefs.data as unknown as Record<string, unknown>).last_scheduled_run as string,
                 ).toLocaleString()}
               </p>
             )}
@@ -226,8 +226,8 @@ function SettingsPage() {
           <div>
             <Label className="text-sm">
               API Key{" "}
-              {prefs.data &&
-                (prefs.data as Record<string, unknown>).custom_ai_key &&
+              {Boolean(prefs.data &&
+                (prefs.data as unknown as Record<string, unknown>).custom_ai_key &&
                 "(saved — leave blank to keep)"}
             </Label>
             <Input
@@ -235,7 +235,7 @@ function SettingsPage() {
               value={customKey}
               onChange={(e) => setCustomKey(e.target.value)}
               placeholder={
-                prefs.data && (prefs.data as Record<string, unknown>).custom_ai_key
+                prefs.data && (prefs.data as unknown as Record<string, unknown>).custom_ai_key
                   ? "••••••••••••"
                   : "sk-..."
               }
