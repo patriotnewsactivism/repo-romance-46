@@ -174,9 +174,9 @@ async function digestRepo(
   if (repo.license?.name) parts.push(`LICENSE: ${repo.license.name}`);
 
   // README
-  const readmeChars = compact ? 500 : 3000;
+  const readmeChars = compact ? 200 : 3000;
   const readme = await ghText(`/repos/${repo.full_name}/readme`, token);
-  if (readme) parts.push(`README (truncated):\n${readme.slice(0, readmeChars)}`);
+  if (readme) parts.push(`README:\n${readme.slice(0, readmeChars)}`);
 
   // File tree — handle truncated trees
   let tree: TreeEntry[] = [];
@@ -202,9 +202,9 @@ async function digestRepo(
   }
 
   const paths = tree.map((t) => t.path);
-  const topFiles = compact ? 25 : 80;
+  const topFiles = compact ? 12 : 80;
   parts.push(
-    `FILES (${paths.length} total${treeTruncated ? " — TRUNCATED, showing partial" : ""}, top ${Math.min(topFiles, paths.length)}):\n${paths.slice(0, topFiles).join("\n")}`,
+    `FILES (${paths.length} total, top ${Math.min(topFiles, paths.length)}):\n${paths.slice(0, topFiles).join("\n")}`,
   );
 
   // Detect key files to sample
@@ -229,11 +229,11 @@ async function digestRepo(
       );
     })
     .sort((a, b) => (b.size ?? 0) - (a.size ?? 0))
-    .slice(0, compact ? 3 : 6)
+    .slice(0, compact ? 1 : 6)
     .map((t) => t.path);
   for (const p of sourceFiles) toSample.add(p);
 
-  const samplePaths = Array.from(toSample).slice(0, compact ? 4 : 10);
+  const samplePaths = Array.from(toSample).slice(0, compact ? 2 : 10);
 
   // Parallel fetch of key files
   const fileResults = await Promise.all(
@@ -241,8 +241,8 @@ async function digestRepo(
   );
 
   let sampledBytes = 0;
-  const BUDGET = compact ? 1800 : 12000;
-  const maxFileSlice = compact ? 600 : 2000;
+  const BUDGET = compact ? 400 : 12000;
+  const maxFileSlice = compact ? 300 : 2000;
 
   for (let i = 0; i < fileResults.length; i++) {
     if (sampledBytes >= BUDGET) break;
@@ -290,7 +290,7 @@ function estimateTokens(s: string): number {
 function maxInputTokensForProvider(provider: string): number {
   switch (provider) {
     case "github_models":
-      return 50000; // gpt-4o-mini supports 128k — keep batches minimal to avoid rate-limit timeouts
+      return 4000; // GitHub Models free tier caps at 8k total — leave room for system prompt + output
     case "openai":
       return 12000;
     case "anthropic":
@@ -528,7 +528,11 @@ async function callBatchedAI(
   digests: string[],
   aiConfig: { provider: string; apiKey: string | null },
 ): Promise<z.infer<typeof RecommendationSchema>> {
-  const user = `Here are the repo digests:\n\n${digests.join("\n\n=========\n\n")}`;
+  const isSmallCtx = aiConfig.provider === "github_models";
+  const repoBlock = digests.join("\n\n=========\n\n");
+  const user = isSmallCtx
+    ? `Repo digests (be concise — max 3-5 recommendations, short pitches):\n\n${repoBlock}`
+    : `Here are the repo digests:\n\n${repoBlock}`;
 
   const aiResult = await callAI(
     {
