@@ -83,7 +83,7 @@ function SharedAnalysisPage() {
       </div>
     );
 
-  const { analysis, items } = q.data! as { analysis: Record<string, unknown>; items: SharedItem[] };
+  const { analysis, items } = q.data! as unknown as { analysis: Record<string, unknown>; items: SharedItem[] };
   const filtered = filter === "all" ? items : items.filter((i) => i.kind === filter);
   const stats =
     (analysis.portfolio_stats as {
@@ -116,7 +116,7 @@ function SharedAnalysisPage() {
             shared analysis · {analysis.repo_count as number} repos
           </div>
           <h1 className="mt-2 text-3xl font-bold tracking-tight">Portfolio audit</h1>
-          {analysis.summary_md && (
+          {!!analysis.summary_md && (
             <p className="mt-4 whitespace-pre-wrap text-sm text-muted-foreground leading-relaxed">
               {analysis.summary_md as string}
             </p>

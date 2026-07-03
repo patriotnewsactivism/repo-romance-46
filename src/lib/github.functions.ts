@@ -267,14 +267,14 @@ export const getRepoHealth = createServerFn({ method: "GET" })
     return {
       repo: data.repo,
       healthScore: score,
-      grade: score >= 80 ? "A" : score >= 60 ? "B" : score >= 40 ? "C" : score >= 20 ? "D" : "F",
+      grade: (score >= 80 ? "A" : score >= 60 ? "B" : score >= 40 ? "C" : score >= 20 ? "D" : "F") as string,
       factors,
       ciProvider,
       license,
       hasTests,
       hasCI,
-      stars: repo.stargazers_count,
-      openIssues: repo.open_issues_count,
-      lastPush: repo.pushed_at,
+      stars: (repo.stargazers_count as number) ?? 0,
+      openIssues: (repo.open_issues_count as number) ?? 0,
+      lastPush: (repo.pushed_at as string) ?? new Date().toISOString(),
     };
   });

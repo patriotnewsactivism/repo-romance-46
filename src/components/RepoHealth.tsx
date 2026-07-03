@@ -26,9 +26,22 @@ export function RepoHealthCheck({
   const fn = useServerFn(getRepoHealth);
   const [open, setOpen] = useState(defaultOpen);
 
-  const q = useQuery({
+  type HealthData = {
+    repo: string;
+    healthScore: number;
+    grade: string;
+    factors: { name: string; status: boolean; weight: number }[];
+    ciProvider: string | null;
+    license: string | null;
+    hasTests: boolean;
+    hasCI: boolean;
+    stars: number;
+    openIssues: number;
+    lastPush: string;
+  };
+  const q = useQuery<HealthData>({
     queryKey: ["repo-health", repo],
-    queryFn: () => fn({ data: { repo } }),
+    queryFn: () => fn({ data: { repo } }) as Promise<HealthData>,
     enabled: open,
   });
 

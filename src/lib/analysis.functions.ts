@@ -341,12 +341,7 @@ export const runAnalysis = createServerFn({ method: "POST" })
       }
 
       // Call AI
-      const ai = await callLovableAI(
-        digests,
-        prefs?.custom_ai_key,
-        prefs?.custom_ai_provider,
-        token, // GitHub OAuth token — used by GitHub Models provider
-      );
+      const ai = await callLovableAI(digests);
 
       // Rank and persist items
       const ranked = [...ai.recommendations].sort(
@@ -465,6 +460,8 @@ export const toggleShare = createServerFn({ method: "POST" })
 export const getPublicAnalysis = createServerFn({ method: "GET" })
   .inputValidator((d: { slug: string }) => z.object({ slug: z.string() }).parse(d))
   .handler(async ({ data }) => {
+    type JsonVal = string | number | boolean | null | JsonVal[] | { [k: string]: JsonVal };
+    type JsonObj = { [k: string]: JsonVal };
     // Use anon client — RLS allows reading public analyses
     const SUPABASE_URL = process.env.SUPABASE_URL;
     const SUPABASE_ANON_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
@@ -484,8 +481,9 @@ export const getPublicAnalysis = createServerFn({ method: "GET" })
     );
     const items = (await itemsRes.json()) as Array<Record<string, unknown>>;
 
-    return { analysis, items };
+    return { analysis: analysis as JsonObj, items: items as JsonObj[] };
   });
+
 
 export const generateActionPlan = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -679,7 +677,7 @@ export const generateMergeInstructions = createServerFn({ method: "POST" })
     // Generate merge instructions
     const primaryRepo = repoInfo[0];
     const otherRepos = repoInfo.slice(1);
-    const newRepoName = (item as Record<string, unknown>).title
+    const newRepoName = ((item as Record<string, unknown>).title as string)
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "");
@@ -794,12 +792,7 @@ export const rerunAnalysis = createServerFn({ method: "POST" })
         }
       }
 
-      const ai = await callLovableAI(
-        digests,
-        prefs?.custom_ai_key,
-        prefs?.custom_ai_provider,
-        token, // GitHub OAuth token — used by GitHub Models provider
-      );
+      const ai = await callLovableAI(digests);
       const ranked = [...ai.recommendations].sort(
         (a, b) => b.market_potential * 2 - b.effort - (a.market_potential * 2 - a.effort),
       );

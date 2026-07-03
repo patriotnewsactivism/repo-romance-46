@@ -21,6 +21,9 @@ import {
   Star,
   TrendingUp,
   Package,
+  Loader2,
+  RefreshCw,
+  Trash2,
 } from "lucide-react";
 import { useState } from "react";
 import { ActionPlan } from "@/components/ActionPlan";

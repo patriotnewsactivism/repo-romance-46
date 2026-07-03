@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/react-start/server";
 import { createClient } from "@supabase/supabase-js";
 
 /**
@@ -30,9 +31,10 @@ function shouldRun(frequency: "weekly" | "monthly", lastRun: string | null): boo
 }
 
 export const runScheduledAnalyses = createServerFn({ method: "GET" }).handler(
-  async ({ request }) => {
+  async () => {
+    const request = getRequest();
     // Auth: verify CRON_SECRET
-    const authHeader = request.headers.get("authorization");
+    const authHeader = request?.headers.get("authorization");
     const cronSecret = process.env.CRON_SECRET;
     if (!cronSecret) {
       return { error: "CRON_SECRET not configured", ran: 0 };
@@ -143,7 +145,7 @@ export const runScheduledAnalyses = createServerFn({ method: "GET" }).handler(
           // Get filter prefs
           const { data: filterPrefs } = await admin
             .from("user_preferences")
-            .select("filter_languages, filter_exclude_archived, filter_min_stars")
+            .select("filter_languages, filter_exclude_archived, filter_min_stars, filter_max_repos")
             .eq("user_id", user.user_id)
             .maybeSingle();
 
@@ -152,6 +154,7 @@ export const runScheduledAnalyses = createServerFn({ method: "GET" }).handler(
               filter_languages: string[] | null;
               filter_exclude_archived: boolean;
               filter_min_stars: number;
+              filter_max_repos: number | null;
             };
             if (fp.filter_exclude_archived) shortlist = shortlist.filter((r) => !r.archived);
             if (fp.filter_languages && fp.filter_languages.length > 0)
@@ -161,7 +164,7 @@ export const runScheduledAnalyses = createServerFn({ method: "GET" }).handler(
             if (fp.filter_min_stars > 0)
               shortlist = shortlist.filter((r) => r.stargazers_count >= fp.filter_min_stars);
           }
-          shortlist = shortlist.slice(0, filterPrefs?.filter_max_repos || 25);
+          shortlist = shortlist.slice(0, (filterPrefs as { filter_max_repos?: number } | null)?.filter_max_repos || 25);
 
           if (shortlist.length < 2) {
             await admin
@@ -422,14 +425,15 @@ ${files}`,
 );
 
 // Export a standalone email notification function for manual analyses
-export const sendAnalysisEmail = createServerFn({ method: "POST" }).handler(async ({ request }) => {
-  const authHeader = request.headers.get("authorization");
+export const sendAnalysisEmail = createServerFn({ method: "POST" }).handler(async () => {
+  const request = getRequest();
+  const authHeader = request?.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
     return { error: "Unauthorized" };
   }
 
-  const body = (await request.json()) as {
+  const body = (await request!.json()) as {
     email: string;
     analysisId: string;
     repoCount: number;
