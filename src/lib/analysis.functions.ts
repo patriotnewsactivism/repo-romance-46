@@ -429,7 +429,7 @@ async function fetchAllRepos(token: string, maxRepos: number): Promise<Repo[]> {
 const RecommendationSchema = z.object({
   recommendations: z.array(
     z.object({
-      kind: z.enum(["finish", "combine", "repurpose"]),
+      kind: z.string().transform(v => v.toLowerCase() as "finish" | "combine" | "repurpose").pipe(z.enum(["finish", "combine", "repurpose"])),
       title: z.string(),
       repos: z.array(z.string()),
       pitch: z.string(),
@@ -488,7 +488,9 @@ Also produce:
 - summary_md (markdown, ~200 words) covering the portfolio — note trends, strengths, and gaps
 
 Return 5-12 recommendations. Rank by (market_potential * 2 - effort) desc.
-Be specific and reference actual code, files, and features you see in the digests. Generic advice is useless.`;
+Be specific and reference actual code, files, and features you see in the digests. Generic advice is useless.
+
+IMPORTANT: In your JSON output, use lowercase for the "kind" field: "finish", "combine", or "repurpose".`;
 
 // JSON schema for structured output (OpenAI-compatible providers)
 const AI_JSON_SCHEMA = {
