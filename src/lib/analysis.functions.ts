@@ -157,12 +157,20 @@ function maxInputTokensForProvider(provider: string): number {
     case "github_models":
       return 4500; // free tier hard-caps gpt-4o at 8000 total tokens
     case "openai":
-      return 90000;
+      // Standard (Tier 1) OpenAI accounts cap gpt-4o at 30,000 TPM — that
+      // limit covers prompt + completion tokens combined, and applies
+      // across a whole rolling minute, not just per-request. Keep the
+      // per-request input budget well under that so a single batch never
+      // gets rejected outright, and leave headroom for completion tokens.
+      return 12000;
     case "anthropic":
       return 150000;
     case "google":
       return 500000;
     case "custom":
+      // custom defaults to the OpenAI-compatible endpoint — assume the
+      // same conservative Tier 1-style TPM ceiling unless proven otherwise.
+      return 12000;
     default:
       return 60000;
   }
@@ -252,12 +260,20 @@ async function runBatchedAI(
     const result = await callBatchedAI(batches[i], aiConfig);
     allRecommendations.push(...result.recommendations);
     if (i === 0) summaryMd = result.summary_md;
-    // Pacing delay between batches — GitHub Models free tier allows ~15 RPM
+    // Pacing delay between batches. GitHub Models free tier allows ~15 RPM
     // for gpt-4o-mini (4s between calls) and only 5 RPM for gpt-4o (12s).
+    // OpenAI/custom (OpenAI-compatible) Tier 1 accounts cap gpt-4o at
+    // 30,000 TPM measured over a rolling minute — even when each individual
+    // batch fits under that limit, firing several batches back-to-back can
+    // still blow the per-minute aggregate, so we space those out too.
     // The fetchWithRetry in ai-provider.ts handles 429s with backoff, but
-    // we proactively pace here to minimize retries.
-    if (i < batches.length - 1 && aiConfig.provider === "github_models") {
-      await sleep(5000);
+    // we proactively pace here to minimize retries and outright rejections.
+    if (i < batches.length - 1) {
+      if (aiConfig.provider === "github_models") {
+        await sleep(5000);
+      } else if (aiConfig.provider === "openai" || aiConfig.provider === "custom") {
+        await sleep(15000);
+      }
     }
   }
 
