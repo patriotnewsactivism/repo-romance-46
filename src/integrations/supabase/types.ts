@@ -62,12 +62,16 @@ export type Database = {
       analysis_items: {
         Row: {
           analysis_id: string
+          combine_result: Json | null
           created_at: string
           effort: number
           estimated_hours: number | null
+          finish_history: Json | null
           id: string
           is_starred: boolean
+          iteration_count: number
           kind: string
+          market_analysis: Json | null
           market_potential: number
           marketing_linkedin: string | null
           marketing_tweet: string | null
@@ -79,15 +83,21 @@ export type Database = {
           tech_stack: string[]
           title: string
           user_id: string
+          valuation: Json | null
+          vibe_spec: Json | null
         }
         Insert: {
           analysis_id: string
+          combine_result?: Json | null
           created_at?: string
           effort?: number
           estimated_hours?: number | null
+          finish_history?: Json | null
           id?: string
           is_starred?: boolean
+          iteration_count?: number
           kind: string
+          market_analysis?: Json | null
           market_potential?: number
           marketing_linkedin?: string | null
           marketing_tweet?: string | null
@@ -99,15 +109,21 @@ export type Database = {
           tech_stack?: string[]
           title: string
           user_id: string
+          valuation?: Json | null
+          vibe_spec?: Json | null
         }
         Update: {
           analysis_id?: string
+          combine_result?: Json | null
           created_at?: string
           effort?: number
           estimated_hours?: number | null
+          finish_history?: Json | null
           id?: string
           is_starred?: boolean
+          iteration_count?: number
           kind?: string
+          market_analysis?: Json | null
           market_potential?: number
           marketing_linkedin?: string | null
           marketing_tweet?: string | null
@@ -119,6 +135,8 @@ export type Database = {
           tech_stack?: string[]
           title?: string
           user_id?: string
+          valuation?: Json | null
+          vibe_spec?: Json | null
         }
         Relationships: [
           {
