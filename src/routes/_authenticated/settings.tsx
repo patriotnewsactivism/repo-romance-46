@@ -51,6 +51,7 @@ function SettingsPage() {
       setFilterLanguages(((p.filter_languages as string[]) || []).join(", "));
       setFilterMinStars((p.filter_min_stars as number) || 0);
       setExcludeArchived(p.filter_exclude_archived as boolean);
+      setFilterMaxRepos((p.filter_max_repos as number) || 50);
     }
   }, [prefs.data]);
 
@@ -232,8 +233,26 @@ function SettingsPage() {
             {customProvider === "github_models" && (
               <p className="text-xs text-muted-foreground mt-1">
                 Create a GitHub token at Settings → Developer settings → Personal access tokens
-                (needs <code>read:user</code> scope).
+                (needs <code>read:user</code> scope). Or leave blank to use your connected GitHub
+                account.
               </p>
+            )}
+            {(prefs.data as unknown as Record<string, unknown> | undefined)?.custom_ai_key && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomKey("");
+                  updateFn({
+                    data: { custom_ai_key: null },
+                  }).then(() => {
+                    toast.success("API key removed");
+                    prefs.refetch();
+                  });
+                }}
+                className="text-xs text-destructive hover:underline mt-1"
+              >
+                Remove saved key
+              </button>
             )}
             <Input
               type="password"
