@@ -16,6 +16,8 @@ export type Database = {
     Tables: {
       analyses: {
         Row: {
+          ai_model: string | null
+          ai_provider: string | null
           analyzed_repo_names: string[]
           completed_at: string | null
           created_at: string
@@ -24,13 +26,17 @@ export type Database = {
           is_public: boolean
           portfolio_stats: Json
           repo_count: number
+          share_expires_at: string | null
           share_slug: string | null
           status: string
           summary_md: string | null
+          trigger_type: string
           user_id: string
           valuation: Json | null
         }
         Insert: {
+          ai_model?: string | null
+          ai_provider?: string | null
           analyzed_repo_names?: string[]
           completed_at?: string | null
           created_at?: string
@@ -39,13 +45,17 @@ export type Database = {
           is_public?: boolean
           portfolio_stats?: Json
           repo_count?: number
+          share_expires_at?: string | null
           share_slug?: string | null
           status?: string
           summary_md?: string | null
+          trigger_type?: string
           user_id: string
           valuation?: Json | null
         }
         Update: {
+          ai_model?: string | null
+          ai_provider?: string | null
           analyzed_repo_names?: string[]
           completed_at?: string | null
           created_at?: string
@@ -54,9 +64,11 @@ export type Database = {
           is_public?: boolean
           portfolio_stats?: Json
           repo_count?: number
+          share_expires_at?: string | null
           share_slug?: string | null
           status?: string
           summary_md?: string | null
+          trigger_type?: string
           user_id?: string
           valuation?: Json | null
         }
