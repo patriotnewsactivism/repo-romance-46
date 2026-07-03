@@ -677,7 +677,7 @@ export const generateMergeInstructions = createServerFn({ method: "POST" })
     // Generate merge instructions
     const primaryRepo = repoInfo[0];
     const otherRepos = repoInfo.slice(1);
-    const newRepoName = (item as Record<string, unknown>).title
+    const newRepoName = ((item as Record<string, unknown>).title as string)
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "");
@@ -792,12 +792,7 @@ export const rerunAnalysis = createServerFn({ method: "POST" })
         }
       }
 
-      const ai = await callLovableAI(
-        digests,
-        prefs?.custom_ai_key,
-        prefs?.custom_ai_provider,
-        token, // GitHub OAuth token — used by GitHub Models provider
-      );
+      const ai = await callLovableAI(digests);
       const ranked = [...ai.recommendations].sort(
         (a, b) => b.market_potential * 2 - b.effort - (a.market_potential * 2 - a.effort),
       );
