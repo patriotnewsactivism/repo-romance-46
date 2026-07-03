@@ -14,6 +14,7 @@ import {
   Clock,
   TrendingUp,
   AlertTriangle,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -89,6 +90,15 @@ function Dashboard() {
       toast.success("Analysis complete");
       analyses.refetch();
       router.navigate({ to: "/analysis/$id", params: { id: res.id } });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => deleteFn({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Analysis deleted");
+      analyses.refetch();
     },
     onError: (e: Error) => toast.error(e.message),
   });
