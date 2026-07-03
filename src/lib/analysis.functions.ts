@@ -459,7 +459,9 @@ export const toggleShare = createServerFn({ method: "POST" })
 
 export const getPublicAnalysis = createServerFn({ method: "GET" })
   .inputValidator((d: { slug: string }) => z.object({ slug: z.string() }).parse(d))
-  .handler(async ({ data }): Promise<{ analysis: Record<string, string | number | boolean | null>; items: Record<string, string | number | boolean | null>[] }> => {
+  .handler(async ({ data }) => {
+    type JsonVal = string | number | boolean | null | JsonVal[] | { [k: string]: JsonVal };
+    type JsonObj = { [k: string]: JsonVal };
     // Use anon client — RLS allows reading public analyses
     const SUPABASE_URL = process.env.SUPABASE_URL;
     const SUPABASE_ANON_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
@@ -479,8 +481,9 @@ export const getPublicAnalysis = createServerFn({ method: "GET" })
     );
     const items = (await itemsRes.json()) as Array<Record<string, unknown>>;
 
-    return { analysis, items };
+    return { analysis: analysis as JsonObj, items: items as JsonObj[] };
   });
+
 
 export const generateActionPlan = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
