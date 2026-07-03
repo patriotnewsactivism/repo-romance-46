@@ -656,3 +656,468 @@ export const getAnalysis = createServerFn({ method: "GET" })
 
     return { analysis, items: items ?? [] };
   });
+
+// ─── deleteAnalysis ─────────────────────────────────────────────
+export const deleteAnalysis = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ context, data }) => {
+    const { supabase, userId } = context;
+
+    // Delete child items first, then the analysis row
+    const { error: itemsErr } = await supabase
+      .from("analysis_items")
+      .delete()
+      .eq("analysis_id", data.id)
+      .eq("user_id", userId);
+    if (itemsErr) throw new Error(itemsErr.message);
+
+    const { error: aErr } = await supabase
+      .from("analyses")
+      .delete()
+      .eq("id", data.id)
+      .eq("user_id", userId);
+    if (aErr) throw new Error(aErr.message);
+
+    return { success: true };
+  });
+
+// ─── toggleShare ────────────────────────────────────────────────
+export const toggleShare = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(
+    (d: { id: string; isPublic: boolean }) =>
+      z.object({ id: z.string().uuid(), isPublic: z.boolean() }).parse(d),
+  )
+  .handler(async ({ context, data }) => {
+    const { supabase, userId } = context;
+
+    let slug: string | null = null;
+
+    if (data.isPublic) {
+      // Generate a short random slug for the share link
+      slug = Array.from({ length: 10 }, () =>
+        "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 36)],
+      ).join("");
+    }
+
+    const { data: updated, error } = await supabase
+      .from("analyses")
+      .update({
+        is_public: data.isPublic,
+        share_slug: data.isPublic ? slug : null,
+        share_expires_at: null,
+      })
+      .eq("id", data.id)
+      .eq("user_id", userId)
+      .select("id, is_public, share_slug")
+      .maybeSingle();
+
+    if (error) throw new Error(error.message);
+    if (!updated) throw new Error("Analysis not found");
+
+    return {
+      isPublic: updated.is_public as boolean,
+      slug: updated.share_slug as string | null,
+    };
+  });
+
+// ─── rerunAnalysis ──────────────────────────────────────────────
+export const rerunAnalysis = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(
+    (d: { analysisId: string }) =>
+      z.object({ analysisId: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ context, data }) => {
+    const { supabase, userId } = context;
+
+    // Fetch the original analysis to carry over prefs context
+    const { data: original, error: origErr } = await supabase
+      .from("analyses")
+      .select("id, ai_provider, ai_model")
+      .eq("id", data.analysisId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (origErr) throw new Error(origErr.message);
+    if (!original) throw new Error("Analysis not found");
+
+    // Fetch GitHub connection
+    const { data: conn } = await supabase
+      .from("github_connections")
+      .select("access_token, github_login")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!conn) throw new Error("Connect GitHub first.");
+
+    const token = conn.access_token;
+
+    // Fetch user preferences
+    const { data: prefs } = await supabase
+      .from("user_preferences")
+      .select(
+        "custom_ai_provider, custom_ai_key, filter_max_repos, filter_languages, filter_min_stars, filter_exclude_archived",
+      )
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    // Insert a new pending analysis
+    const { data: analysis, error: aErr } = await supabase
+      .from("analyses")
+      .insert({
+        user_id: userId,
+        status: "running",
+        trigger_type: "rerun",
+        ai_provider: prefs?.custom_ai_provider || "openai",
+        ai_model:
+          prefs?.custom_ai_provider === "github_models" ? "gpt-4o-mini" : "gpt-4o",
+      })
+      .select("id")
+      .single();
+    if (aErr || !analysis) throw new Error(aErr?.message ?? "Failed to create analysis");
+    const analysisId = analysis.id;
+
+    const updateProgress: ProgressFn = async (msg: string) => {
+      console.log(`[analysis ${analysisId}] ${msg}`);
+    };
+
+    try {
+      await updateProgress("Fetching repos from GitHub…");
+      const repos = await withTimeout(
+        gh<Repo[]>(`/user/repos?per_page=100&affiliation=owner&sort=pushed`, token),
+        30000,
+        "GitHub repo fetch",
+      );
+
+      const shortlist = repos
+        .filter((r) => !r.fork && !r.archived)
+        .slice(0, prefs?.filter_max_repos || 50);
+
+      if (shortlist.length < 2) {
+        throw new Error("Need at least 2 active repos to analyze. Push some code first!");
+      }
+
+      await updateProgress(`Digesting ${shortlist.length} repos (parallel)…`);
+      const provider = prefs?.custom_ai_provider || "openai";
+      const compactDigest = provider === "github_models";
+
+      let digested = 0;
+      const digestResults = await withTimeout(
+        parallelMap(shortlist, 6, async (repo) => {
+          const digest = await digestRepo(repo, token, compactDigest);
+          digested++;
+          if (digested % 5 === 0 || digested === shortlist.length) {
+            await updateProgress(`Digested ${digested}/${shortlist.length} repos…`);
+          }
+          return digest;
+        }),
+        60000,
+        "Repo digestion",
+      );
+
+      const digests: string[] = [];
+      let failedDigests = 0;
+      for (let i = 0; i < digestResults.length; i++) {
+        if (digestResults[i].status === "fulfilled") {
+          digests.push(digestResults[i].value);
+        } else {
+          failedDigests++;
+          console.error(
+            "digest failed",
+            shortlist[i].full_name,
+            (digestResults[i] as PromiseRejectedResult).reason,
+          );
+        }
+      }
+
+      if (digests.length < 2) {
+        throw new Error(
+          `Only ${digests.length} repos could be digested (${failedDigests} failed). Check GitHub API rate limits.`,
+        );
+      }
+
+      let aiKey = prefs?.custom_ai_key || null;
+      if (provider === "github_models" && !aiKey) {
+        aiKey = conn.access_token;
+      }
+      const aiConfig = { provider, apiKey: aiKey };
+
+      await updateProgress(`Running AI analysis on ${digests.length} repos…`);
+      const ai = await withTimeout(
+        runBatchedAI(digests, aiConfig, updateProgress),
+        90000,
+        "AI analysis",
+      );
+      ai.portfolio_stats = computePortfolioStats(shortlist);
+
+      const ranked = [...ai.recommendations].sort(
+        (a, b) =>
+          b.market_potential * 2 - b.effort - (a.market_potential * 2 - a.effort),
+      );
+
+      const rows = ranked.map((r, i) => ({
+        analysis_id: analysisId,
+        user_id: userId,
+        kind: r.kind,
+        title: r.title,
+        repos: r.repos,
+        pitch: r.pitch,
+        effort: Math.max(1, Math.min(5, r.effort)),
+        market_potential: Math.max(1, Math.min(5, r.market_potential)),
+        next_steps: r.next_steps,
+        tech_stack: r.tech_stack ?? [],
+        marketing_tweet: r.marketing_tweet ?? null,
+        marketing_linkedin: r.marketing_linkedin ?? null,
+        estimated_hours: r.estimated_hours ?? null,
+        rank: i,
+      }));
+      if (rows.length) {
+        const { error: iErr } = await supabase.from("analysis_items").insert(rows);
+        if (iErr) throw new Error(iErr.message);
+      }
+
+      await supabase
+        .from("analyses")
+        .update({
+          status: "complete",
+          repo_count: shortlist.length,
+          analyzed_repo_names: shortlist.map((r: Repo) => r.full_name),
+          summary_md: ai.summary_md,
+          portfolio_stats: ai.portfolio_stats,
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", analysisId);
+
+      return { id: analysisId };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Analysis failed";
+      await supabase
+        .from("analyses")
+        .update({ status: "failed", error: msg })
+        .eq("id", analysisId);
+      throw new Error(msg);
+    }
+  });
+
+// ─── getPublicAnalysis ──────────────────────────────────────────
+// No auth middleware — this is the public shared view
+export const getPublicAnalysis = createServerFn({ method: "GET" })
+  .inputValidator((d: { slug: string }) => z.object({ slug: z.string().min(1) }).parse(d))
+  .handler(async ({ data }) => {
+    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseKey =
+      process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error("Server is not configured for Supabase access.");
+    }
+
+    // Use a direct fetch to the Supabase REST API since we don't have
+    // a client instance without the auth middleware
+    const analysisRes = await fetch(
+      `${supabaseUrl}/rest/v1/analyses?select=*&share_slug=eq.${encodeURIComponent(
+        data.slug,
+      )}&is_public=eq.true`,
+      {
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+        },
+      },
+    );
+    if (!analysisRes.ok) throw new Error("Failed to fetch analysis");
+    const analyses = await analysisRes.json();
+    if (!analyses || analyses.length === 0) {
+      throw new Error("Analysis not found or no longer shared.");
+    }
+    const analysis = analyses[0];
+
+    // Check if share has expired
+    if (analysis.share_expires_at) {
+      const expires = new Date(analysis.share_expires_at).getTime();
+      if (Date.now() > expires) {
+        throw new Error("This shared analysis has expired.");
+      }
+    }
+
+    // Fetch items
+    const itemsRes = await fetch(
+      `${supabaseUrl}/rest/v1/analysis_items?select=*&analysis_id=eq.${encodeURIComponent(
+        analysis.id,
+      )}&order=rank.asc`,
+      {
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+        },
+      },
+    );
+    if (!itemsRes.ok) throw new Error("Failed to fetch analysis items");
+    const items = await itemsRes.json();
+
+    return { analysis, items: items ?? [] };
+  });
+
+// ─── generateActionPlan ─────────────────────────────────────────
+export const generateActionPlan = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(
+    (d: { analysisId: string }) =>
+      z.object({ analysisId: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ context, data }) => {
+    const { supabase, userId } = context;
+
+    // Fetch analysis items
+    const { data: items, error: itemsErr } = await supabase
+      .from("analysis_items")
+      .select("title, kind, repos, pitch, effort, market_potential, next_steps, tech_stack, rank")
+      .eq("analysis_id", data.analysisId)
+      .eq("user_id", userId)
+      .order("rank", { ascending: true });
+    if (itemsErr) throw new Error(itemsErr.message);
+    if (!items || items.length === 0) throw new Error("No recommendations found for this analysis.");
+
+    // Fetch AI config from preferences
+    const { data: prefs } = await supabase
+      .from("user_preferences")
+      .select("custom_ai_provider, custom_ai_key")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const provider = prefs?.custom_ai_provider || "openai";
+    let aiKey = prefs?.custom_ai_key || null;
+    if (provider === "github_models" && !aiKey) {
+      const { data: conn } = await supabase
+        .from("github_connections")
+        .select("access_token")
+        .eq("user_id", userId)
+        .maybeSingle();
+      aiKey = conn?.access_token || null;
+    }
+    const aiConfig = { provider, apiKey: aiKey };
+
+    const recsText = items
+      .map(
+        (r, i) =>
+          `${i + 1}. [${r.kind}] ${r.title} (effort: ${r.effort}/5, market: ${r.market_potential}/5)\n   Repos: ${(r.repos as string[]).join(", ")}\n   Pitch: ${r.pitch}\n   Next steps: ${(r.next_steps as string[]).join("; ")}`,
+      )
+      .join("\n\n");
+
+    const prompt = `You are a product strategist. Given these repo recommendations, create a phased action plan.
+
+Recommendations:
+${recsText}
+
+Return JSON with this exact shape:
+{
+  "total_weeks": number,
+  "phases": [
+    {
+      "name": string,
+      "duration_weeks": number,
+      "items": [
+        {
+          "title": string,
+          "recommendation_index": number (0-based),
+          "why_now": string,
+          "key_deliverable": string
+        }
+      ]
+    }
+  ],
+  "quick_wins": [string],
+  "moonshots": [string],
+  "dependencies": [
+    { "from_title": string, "to_title": string, "reason": string }
+  ]
+}
+
+Sequence phases from quick wins (low effort, high impact) to moonshots. Group related items. Be practical.`;
+
+    const result = await callAI(
+      {
+        messages: [
+          { role: "system", content: "You are a helpful product strategist assistant. Always respond with valid JSON." },
+          { role: "user", content: prompt },
+        ],
+      },
+      aiConfig,
+    );
+
+    return JSON.parse(result.content || "{}");
+  });
+
+// ─── generateMergeInstructions ──────────────────────────────────
+export const generateMergeInstructions = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(
+    (d: { analysisId: string; itemRank: number }) =>
+      z.object({ analysisId: z.string().uuid(), itemRank: z.number().int().min(0) }).parse(d),
+  )
+  .handler(async ({ context, data }) => {
+    const { supabase, userId } = context;
+
+    // Fetch the specific "combine" recommendation
+    const { data: item, error: itemErr } = await supabase
+      .from("analysis_items")
+      .select("title, repos, pitch, next_steps, tech_stack")
+      .eq("analysis_id", data.analysisId)
+      .eq("user_id", userId)
+      .eq("rank", data.itemRank)
+      .maybeSingle();
+    if (itemErr) throw new Error(itemErr.message);
+    if (!item) throw new Error("Recommendation not found.");
+
+    // Fetch AI config
+    const { data: prefs } = await supabase
+      .from("user_preferences")
+      .select("custom_ai_provider, custom_ai_key")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const provider = prefs?.custom_ai_provider || "openai";
+    let aiKey = prefs?.custom_ai_key || null;
+    if (provider === "github_models" && !aiKey) {
+      const { data: conn } = await supabase
+        .from("github_connections")
+        .select("access_token")
+        .eq("user_id", userId)
+        .maybeSingle();
+      aiKey = conn?.access_token || null;
+    }
+    const aiConfig = { provider, apiKey: aiKey };
+
+    const repos = (item.repos as string[]) || [];
+    const techStack = (item.tech_stack as string[]) || [];
+
+    const prompt = `You are a senior engineer. Generate step-by-step git merge instructions for combining these repos into one.
+
+Repos to merge: ${repos.join(", ")}
+Tech stack: ${techStack.join(", ") || "unknown"}
+Pitch: ${item.pitch}
+Next steps: ${((item.next_steps as string[]) || []).join("; ")}
+
+Return JSON with this exact shape:
+{
+  "instructions": "step-by-step shell commands and explanation as a markdown string",
+  "newRepoName": "suggested name for the merged repo",
+  "newRepoUrl": "placeholder URL (e.g. https://github.com/user/new-repo)",
+  "primaryRepo": "which repo should be the base/primary",
+  "mergedRepos": ["list", "of", "all", "repos", "being", "merged"]
+}
+
+Include actual git commands (clone, remote add, merge --allow-unrelated-histories, etc). Be specific about conflict resolution strategy.`;
+
+    const result = await callAI(
+      {
+        messages: [
+          { role: "system", content: "You are a helpful senior engineer. Always respond with valid JSON." },
+          { role: "user", content: prompt },
+        ],
+      },
+      aiConfig,
+    );
+
+    return JSON.parse(result.content || "{}");
+  });
