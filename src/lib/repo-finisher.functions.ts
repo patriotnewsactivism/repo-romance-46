@@ -413,13 +413,18 @@ export const finishRepo = createServerFn({ method: "POST" })
     const files = await fetchKeyFiles(token, data.repo, defaultBranch);
 
     // Generate the finish plan via AI
+    // For GitHub Models, fall back to GitHub connection token
+    let rfAiKey = prefs?.custom_ai_key || null;
+    if (prefs?.custom_ai_provider === "github_models" && !rfAiKey) {
+      rfAiKey = token; // reuse the GitHub token we already have
+    }
     const plan = await generateFinishPlan(
       data.repo,
       repoData,
       files,
       nextSteps,
       prefs?.custom_ai_provider || "lovable",
-      prefs?.custom_ai_key || null,
+      rfAiKey,
     );
 
     if (!plan.changes || plan.changes.length === 0) {

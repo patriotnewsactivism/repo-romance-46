@@ -408,12 +408,17 @@ export const valuePortfolio = createServerFn({ method: "POST" })
             }
           : null;
 
+        // For GitHub Models, fall back to GitHub connection token
+        let valAiKey = prefs?.custom_ai_key || null;
+        if (prefs?.custom_ai_provider === "github_models" && !valAiKey) {
+          valAiKey = conn.access_token;
+        }
         const valuation = await generateValuation(
           repo,
           metrics,
           analysisContext,
           prefs?.custom_ai_provider || "lovable",
-          prefs?.custom_ai_key || null,
+          valAiKey,
         );
 
         valuations.push(valuation);

@@ -63,7 +63,6 @@ function SettingsPage() {
           schedule_frequency: scheduleFreq,
           custom_ai_provider: customProvider,
           ...(customKey ? { custom_ai_key: customKey } : {}),
-          ...(customProvider === "github_models" ? { custom_ai_key: null } : {}),
           filter_languages: filterLanguages
             .split(",")
             .map((s) => s.trim())
@@ -230,6 +229,12 @@ function SettingsPage() {
                 ? "(saved — leave blank to keep)"
                 : ""}
             </Label>
+            {customProvider === "github_models" && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Create a GitHub token at Settings → Developer settings → Personal access tokens
+                (needs <code>read:user</code> scope).
+              </p>
+            )}
             <Input
               type="password"
               value={customKey}
@@ -237,7 +242,9 @@ function SettingsPage() {
               placeholder={
                 prefs.data && (prefs.data as unknown as Record<string, unknown>).custom_ai_key
                   ? "••••••••••••"
-                  : "sk-..."
+                  : customProvider === "github_models"
+                    ? "ghp_... (your GitHub Personal Access Token)"
+                    : "sk-..."
               }
               className="mt-1 font-mono"
             />
