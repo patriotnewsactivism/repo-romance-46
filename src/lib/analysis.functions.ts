@@ -274,10 +274,13 @@ const RecommendationSchema = z.object({
       effort: z.number().int(),
       market_potential: z.number().int(),
       next_steps: z.array(z.string()),
-      tech_stack: z.array(z.string()).optional().default([]),
-      marketing_tweet: z.string().optional(),
-      marketing_linkedin: z.string().optional(),
-      estimated_hours: z.number().int().optional(),
+      tech_stack: z
+        .array(z.string())
+        .nullish()
+        .transform((v) => v ?? []),
+      marketing_tweet: z.string().nullish(),
+      marketing_linkedin: z.string().nullish(),
+      estimated_hours: z.number().int().nullish(),
     }),
   ),
   summary_md: z.string(),
@@ -322,7 +325,6 @@ For every recommendation give:
 
 Also produce:
 - summary_md (markdown, ~200 words) covering the portfolio
-- portfolio_stats object with: total_repos, languages (array of {name, count, pct} — top 5 languages), total_stars, most_active_repo (full_name of most recently pushed), dormant_repos (array of repos not pushed in 6+ months), average_repo_size_kb
 
 Return 5-12 recommendations. Rank by (market_potential * 2 - effort) desc.`;
 
@@ -344,31 +346,6 @@ Return 5-12 recommendations. Rank by (market_potential * 2 - effort) desc.`;
           additionalProperties: false,
           properties: {
             summary_md: { type: "string" },
-            portfolio_stats: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                total_repos: { type: "integer" },
-                total_stars: { type: "integer" },
-                most_active_repo: { type: "string" },
-                dormant_repos: { type: "array", items: { type: "string" } },
-                average_repo_size_kb: { type: "number" },
-                languages: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    additionalProperties: false,
-                    properties: {
-                      name: { type: "string" },
-                      count: { type: "integer" },
-                      pct: { type: "number" },
-                    },
-                    required: ["name", "count", "pct"],
-                  },
-                },
-              },
-              required: ["total_repos", "languages", "total_stars"],
-            },
             recommendations: {
               type: "array",
               items: {
@@ -383,10 +360,12 @@ Return 5-12 recommendations. Rank by (market_potential * 2 - effort) desc.`;
                   market_potential: { type: "integer" },
                   next_steps: { type: "array", items: { type: "string" } },
                   tech_stack: { type: "array", items: { type: "string" } },
-                  marketing_tweet: { type: "string" },
-                  marketing_linkedin: { type: "string" },
-                  estimated_hours: { type: "integer" },
+                  marketing_tweet: { type: ["string", "null"] },
+                  marketing_linkedin: { type: ["string", "null"] },
+                  estimated_hours: { type: ["integer", "null"] },
                 },
+                // OpenAI/GitHub Models strict mode requires every property to be
+                // listed here — truly-optional fields are made nullable above instead.
                 required: [
                   "kind",
                   "title",
@@ -395,6 +374,10 @@ Return 5-12 recommendations. Rank by (market_potential * 2 - effort) desc.`;
                   "effort",
                   "market_potential",
                   "next_steps",
+                  "tech_stack",
+                  "marketing_tweet",
+                  "marketing_linkedin",
+                  "estimated_hours",
                 ],
               },
             },
