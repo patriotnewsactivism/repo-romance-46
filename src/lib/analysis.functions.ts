@@ -554,7 +554,9 @@ async function callBatchedAI(
     aiConfig,
   );
   const parsed = JSON.parse(aiResult.content || "{}");
-  return RecommendationSchema.parse(parsed);
+  // Gemini sometimes returns a bare array instead of {recommendations: [...]}
+  const normalized = Array.isArray(parsed) ? { recommendations: parsed, summary_md: "" } : parsed;
+  return RecommendationSchema.parse(normalized);
 }
 
 // ─── Cross-batch synthesis: find combine opportunities across batches ──
@@ -611,7 +613,8 @@ Only include NEW recommendations not already in the list above. If no new opport
       aiConfig,
     );
     const parsed = JSON.parse(result.content || "{}");
-    const validated = RecommendationSchema.parse(parsed);
+    const normalized = Array.isArray(parsed) ? { recommendations: parsed, summary_md: "" } : parsed;
+    const validated = RecommendationSchema.parse(normalized);
     return validated.recommendations;
   } catch {
     // Synthesis is best-effort — don't fail the whole analysis if it errors
