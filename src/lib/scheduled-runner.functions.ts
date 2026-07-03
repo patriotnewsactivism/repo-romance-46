@@ -351,7 +351,7 @@ ${files}`,
             if (email) {
               const resendKey = process.env.RESEND_API_KEY;
               if (resendKey) {
-                const appUrl = process.env.APP_URL || "https://repofinisher.vercel.app";
+                const appUrl = process.env.APP_URL || "https://repofinish.vercel.app";
                 await fetch("https://api.resend.com/emails", {
                   method: "POST",
                   headers: {
@@ -437,7 +437,7 @@ export const sendAnalysisEmail = createServerFn({ method: "POST" }).handler(asyn
   const resendKey = process.env.RESEND_API_KEY;
   if (!resendKey) return { error: "RESEND_API_KEY not set" };
 
-  const appUrl = process.env.APP_URL || "https://repofinisher.vercel.app";
+  const appUrl = process.env.APP_URL || "https://repofinish.vercel.app";
   await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
