@@ -322,7 +322,7 @@ Analysis Context:
 
 export const valuePortfolio = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { analysisId: string }) =>
+  .validator((d: { analysisId: string }) =>
     z.object({ analysisId: z.string().uuid() }).parse(d),
   )
   .handler(async ({ context, data }) => {
@@ -356,6 +356,19 @@ export const valuePortfolio = createServerFn({ method: "POST" })
       .select("custom_ai_provider, custom_ai_key")
       .eq("user_id", context.userId)
       .maybeSingle();
+
+    // Resolve AI provider — server key overrides github_models default
+    const serverProvider = process.env.SERVER_AI_PROVIDER;
+    const serverKey = process.env.SERVER_AI_KEY;
+    const resolvedProvider =
+      prefs?.custom_ai_key ? (prefs.custom_ai_provider || "openai")
+      : serverProvider && serverKey ? serverProvider
+      : prefs?.custom_ai_provider || "github_models";
+    const resolvedKey =
+      prefs?.custom_ai_key ? prefs.custom_ai_key
+      : serverProvider && serverKey ? serverKey
+      : resolvedProvider === "github_models" ? conn.access_token
+      : null;
 
     // Collect unique repos from all recommendations (dedupe)
     const allRepos = new Set<string>();
@@ -408,17 +421,12 @@ export const valuePortfolio = createServerFn({ method: "POST" })
             }
           : null;
 
-        // For GitHub Models, fall back to GitHub connection token
-        let valAiKey = prefs?.custom_ai_key || null;
-        if (prefs?.custom_ai_provider === "github_models" && !valAiKey) {
-          valAiKey = conn.access_token;
-        }
         const valuation = await generateValuation(
           repo,
           metrics,
           analysisContext,
-          prefs?.custom_ai_provider || "openai",
-          valAiKey,
+          resolvedProvider,
+          resolvedKey,
         );
 
         valuations.push(valuation);
@@ -483,7 +491,7 @@ export const valuePortfolio = createServerFn({ method: "POST" })
 
 export const getValuation = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { analysisId: string }) =>
+  .validator((d: { analysisId: string }) =>
     z.object({ analysisId: z.string().uuid() }).parse(d),
   )
   .handler(async ({ context, data }) => {
