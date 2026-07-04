@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { callAI } from "@/lib/ai-provider";
+import { callAI, type AIProviderConfig } from "@/lib/ai-provider";
 
 // ─── Types ─────────────────────────────────────────────────────
 
@@ -176,6 +176,7 @@ async function generateValuation(
   } | null,
   aiProvider: string,
   aiKey: string | null,
+  aiFallbacks?: AIProviderConfig[],
 ): Promise<Valuation> {
   const system = `You are a technology investment analyst and M&A advisor specializing in codebase and software project valuations.
 You value software projects the way a VC or acquirer would — based on:
@@ -314,6 +315,7 @@ Analysis Context:
       responseFormat: body.response_format,
     },
     { provider: aiProvider, apiKey: aiKey },
+    aiFallbacks,
   );
   return JSON.parse(aiResult.content || "{}") as Valuation;
 }
@@ -421,12 +423,22 @@ export const valuePortfolio = createServerFn({ method: "POST" })
             }
           : null;
 
+        // Build fallback chain: primary → server → github_models (always free via GitHub token)
+        const valFallbacks: AIProviderConfig[] = [];
+        if (serverProvider && serverKey && serverProvider !== resolvedProvider) {
+          valFallbacks.push({ provider: serverProvider, apiKey: serverKey });
+        }
+        if (resolvedProvider !== "github_models" && conn.access_token) {
+          valFallbacks.push({ provider: "github_models", apiKey: conn.access_token });
+        }
+
         const valuation = await generateValuation(
           repo,
           metrics,
           analysisContext,
           resolvedProvider,
           resolvedKey,
+          valFallbacks,
         );
 
         valuations.push(valuation);

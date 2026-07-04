@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { callAI } from "@/lib/ai-provider";
+import { callAI, callAIWithFallback, type AIProviderConfig } from "@/lib/ai-provider";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
@@ -573,7 +573,7 @@ const AI_JSON_SCHEMA = {
 
 async function callBatchedAI(
   digests: string[],
-  aiConfig: { provider: string; apiKey: string | null },
+  aiConfig: { provider: string; apiKey: string | null; fallbacks?: AIProviderConfig[] },
 ): Promise<z.infer<typeof RecommendationSchema>> {
   // Include a compact repo index at the top so the AI can see all repos at a glance
   const repoIndex = digests
@@ -613,6 +613,7 @@ ${digests.join("\n\n=========\n\n")}`;
         },
       },
       aiConfig,
+      aiConfig.fallbacks,
     );
   } catch (e) {
     // If structured output fails, retry without responseFormat (some providers don't support it)
@@ -630,6 +631,7 @@ ${digests.join("\n\n=========\n\n")}`;
         ],
       },
       aiConfig,
+      aiConfig.fallbacks,
     );
   }
 
@@ -687,7 +689,7 @@ ${digests.join("\n\n=========\n\n")}`;
 async function synthesizeCrossBatch(
   allRecommendations: z.infer<typeof RecommendationSchema>["recommendations"],
   digests: string[],
-  aiConfig: { provider: string; apiKey: string | null },
+  aiConfig: { provider: string; apiKey: string | null; fallbacks?: AIProviderConfig[] },
 ): Promise<z.infer<typeof RecommendationSchema>["recommendations"]> {
   // Only run synthesis if there are existing combine recs or if we had multiple batches
   // Build a compact index of all repos for the AI to reference
@@ -752,6 +754,7 @@ Return JSON with: summary_md (string) + recommendations array (same schema as be
         },
       },
       aiConfig,
+      aiConfig.fallbacks,
     );
     const parsed = JSON.parse(result.content || "{}");
     const normalized = Array.isArray(parsed) ? { recommendations: parsed, summary_md: "" } : parsed;
@@ -767,7 +770,7 @@ Return JSON with: summary_md (string) + recommendations array (same schema as be
 // ─── Batched AI runner with synthesis ──────────────────────────
 async function runBatchedAI(
   digests: string[],
-  aiConfig: { provider: string; apiKey: string | null },
+  aiConfig: { provider: string; apiKey: string | null; fallbacks?: AIProviderConfig[] },
   onProgress?: ProgressFn,
 ): Promise<z.infer<typeof RecommendationSchema>> {
   const budget = maxInputTokensForProvider(aiConfig.provider);
@@ -959,7 +962,15 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
     }
 
     // Key was already resolved above alongside the provider
-    const aiConfig = { provider, apiKey: resolvedKey };
+    // Build fallback chain: primary → server → github_models (always free via GitHub token)
+    const aiFallbacks: AIProviderConfig[] = [];
+    if (serverProvider && serverKey && serverProvider !== resolvedProvider) {
+      aiFallbacks.push({ provider: serverProvider, apiKey: serverKey });
+    }
+    if (resolvedProvider !== "github_models" && token) {
+      aiFallbacks.push({ provider: "github_models", apiKey: token });
+    }
+    const aiConfig = { provider: resolvedProvider, apiKey: resolvedKey, fallbacks: aiFallbacks };
 
     await reportProgress(`Running AI analysis on ${digests.length} repos…`);
 
@@ -1276,6 +1287,16 @@ export const generateActionPlan = createServerFn({ method: "POST" })
     if (!aiKey && srvKey && srvProvider && provider === srvProvider) {
       aiKey = srvKey;
     }
+    // Always fetch GitHub token for fallback (even if primary provider isn't github_models)
+    let ghToken = aiKey;
+    if (provider !== "github_models") {
+      const { data: conn } = await supabase
+        .from("github_connections")
+        .select("access_token")
+        .eq("user_id", userId)
+        .maybeSingle();
+      ghToken = conn?.access_token || null;
+    }
     if (provider === "github_models" && !aiKey) {
       const { data: conn } = await supabase
         .from("github_connections")
@@ -1283,8 +1304,9 @@ export const generateActionPlan = createServerFn({ method: "POST" })
         .eq("user_id", userId)
         .maybeSingle();
       aiKey = conn?.access_token || null;
+      ghToken = aiKey;
     }
-    const aiConfig = { provider, apiKey: aiKey };
+    const aiConfig = { provider, apiKey: aiKey, fallbacks: ghToken ? [{ provider: "github_models", apiKey: ghToken }] : [] };
 
     const recsText = items
       .map(
@@ -1336,6 +1358,7 @@ Sequence phases from quick wins (low effort, high impact) to moonshots. Group re
         ],
       },
       aiConfig,
+      aiConfig.fallbacks,
     );
 
     return JSON.parse(result.content || "{}");
@@ -1377,6 +1400,16 @@ export const generateMergeInstructions = createServerFn({ method: "POST" })
     if (!aiKey && srvK && srvP && provider === srvP) {
       aiKey = srvK;
     }
+    // Always fetch GitHub token for fallback
+    let ghToken = aiKey;
+    if (provider !== "github_models") {
+      const { data: conn } = await supabase
+        .from("github_connections")
+        .select("access_token")
+        .eq("user_id", userId)
+        .maybeSingle();
+      ghToken = conn?.access_token || null;
+    }
     if (provider === "github_models" && !aiKey) {
       const { data: conn } = await supabase
         .from("github_connections")
@@ -1384,8 +1417,9 @@ export const generateMergeInstructions = createServerFn({ method: "POST" })
         .eq("user_id", userId)
         .maybeSingle();
       aiKey = conn?.access_token || null;
+      ghToken = aiKey;
     }
-    const aiConfig = { provider, apiKey: aiKey };
+    const aiConfig = { provider, apiKey: aiKey, fallbacks: ghToken ? [{ provider: "github_models", apiKey: ghToken }] : [] };
 
     const repos = (item.repos as string[]) || [];
     const techStack = (item.tech_stack as string[]) || [];
@@ -1419,6 +1453,7 @@ Include actual git commands (clone, remote add, merge --allow-unrelated-historie
         ],
       },
       aiConfig,
+      aiConfig.fallbacks,
     );
 
     return JSON.parse(result.content || "{}");

@@ -83,9 +83,15 @@ const PROVIDER_ENDPOINTS: Record<string, string> = {
  * Call the AI provider based on the user's configuration.
  * Routes to the appropriate endpoint based on provider setting.
  */
-export async function callAI(request: AIRequest, config: AIProviderConfig): Promise<AIResponse> {
+export async function callAI(
+  request: AIRequest,
+  config: AIProviderConfig,
+  fallbacks?: AIProviderConfig[],
+): Promise<AIResponse> {
   const provider = config.provider || "openai";
   const model = request.model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.openai;
+
+  try {
 
   // ─── Anthropic (different API format) ─────────────────────
   if (provider === "anthropic" && config.apiKey) {
@@ -192,8 +198,69 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     return { content: json.choices?.[0]?.message?.content || "" };
   }
 
-  // No matching provider with a valid key
+  // No matching provider with a valid key — try fallbacks before giving up
+  if (fallbacks && fallbacks.length > 0) {
+    console.warn(`[ai-provider] No key for ${provider}, trying fallback providers...`);
+    return callAIWithFallback(request, fallbacks);
+  }
   throw new Error(
     `No AI provider available. You selected "${provider}" but no API key is saved. Go to Settings and enter your API key.`,
   );
+
+  } catch (err) {
+    // If the primary provider fails (rate limit, quota, API error), try fallbacks
+    if (fallbacks && fallbacks.length > 0) {
+      const msg = (err as Error).message;
+      console.warn(
+        `[ai-provider] ${provider} failed: ${msg.slice(0, 150)}. Trying fallback providers...`,
+      );
+      return callAIWithFallback(request, fallbacks);
+    }
+    throw err;
+  }
+}
+
+
+// ─── Multi-provider fallback ─────────────────────────────────
+// If the primary provider fails after all retries, try fallback configs.
+// This makes the app resilient to any single provider's quota limits.
+
+export async function callAIWithFallback(
+  request: AIRequest,
+  configs: AIProviderConfig[],
+): Promise<AIResponse> {
+  let lastError: Error | null = null;
+  for (let i = 0; i < configs.length; i++) {
+    const config = configs[i];
+    if (!config.apiKey && config.provider !== "github_models") {
+      // No key for this provider — skip it
+      continue;
+    }
+    try {
+      if (i > 0) {
+        console.warn(
+          `[ai-provider] Primary provider failed, falling back to ${config.provider}`,
+        );
+      }
+      return await callAI(request, config);
+    } catch (err) {
+      lastError = err as Error;
+      const msg = (err as Error).message;
+      // Only fall back on rate limit / quota errors, not on malformed requests
+      if (
+        msg.includes("rate limit") ||
+        msg.includes("quota") ||
+        msg.includes("429") ||
+        msg.includes("exceeded")
+      ) {
+        console.warn(
+          `[ai-provider] ${config.provider} failed: ${msg.slice(0, 100)}, trying next provider...`,
+        );
+        continue;
+      }
+      // For other errors (bad key, network, etc.), throw immediately
+      throw err;
+    }
+  }
+  throw lastError || new Error("All AI providers exhausted");
 }
