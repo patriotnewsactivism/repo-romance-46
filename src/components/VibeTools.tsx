@@ -383,9 +383,7 @@ export function VibeTools({ analysisId, itemRank, kind, repos, existing }: Props
                   <span className="text-xs text-red-500">{h.error}</span>
                 )}
               </div>
-              {h.summary && (
-                <div className="text-xs text-muted-foreground mt-0.5">{h.summary}</div>
-              )}
+              {h.summary && <div className="text-xs text-muted-foreground mt-0.5">{h.summary}</div>}
             </div>
           ))}
         </Card>

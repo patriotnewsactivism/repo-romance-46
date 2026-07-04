@@ -235,7 +235,9 @@ function SettingsPage() {
                 account.
               </p>
             )}
-            {Boolean((prefs.data as unknown as Record<string, unknown> | undefined)?.custom_ai_key) && (
+            {Boolean(
+              (prefs.data as unknown as Record<string, unknown> | undefined)?.custom_ai_key,
+            ) && (
               <button
                 type="button"
                 onClick={() => {

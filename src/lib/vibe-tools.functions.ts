@@ -58,10 +58,7 @@ async function loadPrefs(supabase: unknown, userId: string) {
   const s = supabase as {
     from: (t: string) => {
       select: (c: string) => {
-        eq: (
-          col: string,
-          v: string,
-        ) => { maybeSingle: () => Promise<{ data: unknown }> };
+        eq: (col: string, v: string) => { maybeSingle: () => Promise<{ data: unknown }> };
       };
     };
   };
@@ -70,14 +67,13 @@ async function loadPrefs(supabase: unknown, userId: string) {
     .select("custom_ai_provider, custom_ai_key")
     .eq("user_id", userId)
     .maybeSingle();
-  return (data ?? null) as { custom_ai_provider: string | null; custom_ai_key: string | null } | null;
+  return (data ?? null) as {
+    custom_ai_provider: string | null;
+    custom_ai_key: string | null;
+  } | null;
 }
 
-async function updateItem(
-  supabase: unknown,
-  itemId: string,
-  patch: Record<string, unknown>,
-) {
+async function updateItem(supabase: unknown, itemId: string, patch: Record<string, unknown>) {
   const s = supabase as {
     from: (t: string) => {
       update: (p: Record<string, unknown>) => {
@@ -92,10 +88,7 @@ async function loadGhToken(supabase: unknown, userId: string): Promise<string> {
   const s = supabase as {
     from: (t: string) => {
       select: (c: string) => {
-        eq: (
-          col: string,
-          v: string,
-        ) => { maybeSingle: () => Promise<{ data: unknown }> };
+        eq: (col: string, v: string) => { maybeSingle: () => Promise<{ data: unknown }> };
       };
     };
   };
@@ -162,9 +155,7 @@ const marketSchema = {
 export const assessMarketAndValue = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { analysisId: string; itemRank: number }) =>
-    z
-      .object({ analysisId: z.string().uuid(), itemRank: z.number().int() })
-      .parse(d),
+    z.object({ analysisId: z.string().uuid(), itemRank: z.number().int() }).parse(d),
   )
   .handler(async ({ context, data }) => {
     const item = await loadItem(context.supabase as never, data.analysisId, data.itemRank);
@@ -248,9 +239,7 @@ const vibeSchema = {
 export const generateVibeSpec = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { analysisId: string; itemRank: number }) =>
-    z
-      .object({ analysisId: z.string().uuid(), itemRank: z.number().int() })
-      .parse(d),
+    z.object({ analysisId: z.string().uuid(), itemRank: z.number().int() }).parse(d),
   )
   .handler(async ({ context, data }) => {
     const item = await loadItem(context.supabase as never, data.analysisId, data.itemRank);
@@ -292,11 +281,7 @@ Existing next steps: ${item.next_steps.join(" | ")}`;
 
 // ─── 3. COMBINE REPOS (create combined repo + link issues) ────
 
-async function gh(
-  token: string,
-  path: string,
-  init?: RequestInit,
-): Promise<Response> {
+async function gh(token: string, path: string, init?: RequestInit): Promise<Response> {
   return fetch(`https://api.github.com${path}`, {
     ...init,
     headers: {
@@ -311,9 +296,7 @@ async function gh(
 export const combineRepos = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { analysisId: string; itemRank: number }) =>
-    z
-      .object({ analysisId: z.string().uuid(), itemRank: z.number().int() })
-      .parse(d),
+    z.object({ analysisId: z.string().uuid(), itemRank: z.number().int() }).parse(d),
   )
   .handler(async ({ context, data }) => {
     const item = await loadItem(context.supabase as never, data.analysisId, data.itemRank);
@@ -342,7 +325,14 @@ export const combineRepos = createServerFn({ method: "POST" })
         integration_plan_md: { type: "string" },
         first_pr_title: { type: "string" },
       },
-      required: ["repo_name", "description", "readme_md", "structure", "integration_plan_md", "first_pr_title"],
+      required: [
+        "repo_name",
+        "description",
+        "readme_md",
+        "structure",
+        "integration_plan_md",
+        "first_pr_title",
+      ],
     };
 
     const planResp = await callAI(
@@ -381,7 +371,10 @@ export const combineRepos = createServerFn({ method: "POST" })
     const me = (await meRes.json()) as { login: string };
 
     // Create new repo (with auto-init so we can write files immediately)
-    const repoName = plan.repo_name.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 60);
+    const repoName = plan.repo_name
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "-")
+      .slice(0, 60);
     const createRes = await gh(token, "/user/repos", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -396,7 +389,11 @@ export const combineRepos = createServerFn({ method: "POST" })
       const err = await createRes.text();
       throw new Error(`Create repo failed: ${createRes.status} ${err.slice(0, 200)}`);
     }
-    const newRepo = (await createRes.json()) as { full_name: string; html_url: string; default_branch: string };
+    const newRepo = (await createRes.json()) as {
+      full_name: string;
+      html_url: string;
+      default_branch: string;
+    };
 
     // Write README + INTEGRATION_PLAN.md + structure placeholders
     async function putFile(path: string, content: string, message: string) {
@@ -461,16 +458,15 @@ export const combineRepos = createServerFn({ method: "POST" })
 
 export const iterativeFinish = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
-    (d: { analysisId: string; itemRank: number; repo: string; passes?: number }) =>
-      z
-        .object({
-          analysisId: z.string().uuid(),
-          itemRank: z.number().int(),
-          repo: z.string(),
-          passes: z.number().int().min(1).max(4).optional(),
-        })
-        .parse(d),
+  .inputValidator((d: { analysisId: string; itemRank: number; repo: string; passes?: number }) =>
+    z
+      .object({
+        analysisId: z.string().uuid(),
+        itemRank: z.number().int(),
+        repo: z.string(),
+        passes: z.number().int().min(1).max(4).optional(),
+      })
+      .parse(d),
   )
   .handler(async ({ context, data }) => {
     const { finishRepo } = await import("@/lib/repo-finisher.functions");

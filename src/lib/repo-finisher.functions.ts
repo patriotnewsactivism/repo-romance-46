@@ -397,7 +397,10 @@ async function fetchKeyFiles(
   token: string,
   repo: string,
   branch: string,
-  treeData: { tree: Array<{ path: string; type: string; sha: string; size?: number }>; truncated: boolean },
+  treeData: {
+    tree: Array<{ path: string; type: string; sha: string; size?: number }>;
+    truncated: boolean;
+  },
 ): Promise<{ path: string; content: string }[]> {
   const tree = treeData.tree.filter((t) => t.type === "blob");
 
@@ -539,11 +542,7 @@ export const finishRepo = createServerFn({ method: "POST" })
 
     // Now fetch tree + CI check + test check in parallel
     const [treeResult, ciResult] = await Promise.all([
-      withTimeout(
-        getRepoTree(token, data.repo, defaultBranch),
-        15000,
-        "File tree fetch",
-      ),
+      withTimeout(getRepoTree(token, data.repo, defaultBranch), 15000, "File tree fetch"),
       ghFetch(token, `/repos/${data.repo}/contents/.github/workflows`),
     ]);
 
@@ -587,7 +586,8 @@ export const finishRepo = createServerFn({ method: "POST" })
     if (nextSteps.length === 0) {
       // Generate targeted next steps based on actual health check
       nextSteps = [];
-      if (!hasReadme) nextSteps.push("Add a comprehensive README with installation and usage instructions");
+      if (!hasReadme)
+        nextSteps.push("Add a comprehensive README with installation and usage instructions");
       if (!hasLicense) nextSteps.push("Add a LICENSE file");
       if (!hasCi) nextSteps.push("Set up basic CI/CD");
       if (!hasTests) nextSteps.push("Add basic tests for the main entry point");
@@ -602,7 +602,9 @@ export const finishRepo = createServerFn({ method: "POST" })
     );
 
     if (files.length === 0) {
-      throw new Error("Could not fetch any source files from the repo. Check if it's empty or private.");
+      throw new Error(
+        "Could not fetch any source files from the repo. Check if it's empty or private.",
+      );
     }
 
     // ── 4. Generate the finish plan via AI ─────────────────────
@@ -690,7 +692,9 @@ ${nextSteps.map((s) => `- [x] ${s}`).join("\n")}
     if (data.analysisId && data.itemRank !== undefined) {
       await context.supabase
         .from("analysis_items")
-        .update({ finish_result: result as unknown as import("@/integrations/supabase/types").Json })
+        .update({
+          finish_result: result as unknown as import("@/integrations/supabase/types").Json,
+        })
         .eq("analysis_id", data.analysisId)
         .eq("rank", data.itemRank);
     }
@@ -716,7 +720,8 @@ export const getFinishStatus = createServerFn({ method: "GET" })
     return {
       repo: data.repo,
       hasBeenFinished: finished.length > 0,
-      finishes: JSON.parse(JSON.stringify(finished.map((i) => (i as Record<string, unknown>).finish_result))) as import("@/integrations/supabase/types").Json[],
+      finishes: JSON.parse(
+        JSON.stringify(finished.map((i) => (i as Record<string, unknown>).finish_result)),
+      ) as import("@/integrations/supabase/types").Json[],
     };
   });
-

@@ -79,7 +79,6 @@ interface AnalysisItem {
   iteration_count?: number;
 }
 
-
 interface PortfolioStats {
   total_repos?: number;
   total_stars?: number;
@@ -537,7 +536,6 @@ function AnalysisPage() {
                       iteration_count: it.iteration_count,
                     }}
                   />
-
 
                   {/* Marketing copy */}
                   {(it.marketing_tweet || it.marketing_linkedin) && (

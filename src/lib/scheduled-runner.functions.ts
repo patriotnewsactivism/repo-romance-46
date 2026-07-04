@@ -18,8 +18,6 @@ interface ScheduledUser {
   schedule_frequency: "weekly" | "monthly";
   last_scheduled_run: string | null;
   email_notifications: boolean;
-  custom_ai_provider: string;
-  custom_ai_key: string | null;
 }
 
 function shouldRun(frequency: "weekly" | "monthly", lastRun: string | null): boolean {
@@ -53,9 +51,7 @@ export const runScheduledAnalyses = createServerFn({ method: "GET" }).handler(as
   // Get all users with scheduling enabled
   const { data: users, error } = await admin
     .from("user_preferences")
-    .select(
-      "user_id, schedule_frequency, last_scheduled_run, email_notifications, custom_ai_provider, custom_ai_key",
-    )
+    .select("user_id, schedule_frequency, last_scheduled_run, email_notifications")
     .eq("schedule_enabled", true);
 
   if (error) return { error: error.message, ran: 0 };
@@ -134,7 +130,9 @@ export const runScheduledAnalyses = createServerFn({ method: "GET" }).handler(as
           if (email && analysis) {
             // Send via Supabase edge function or external email service
             // For now, log — wire up your email provider here
-            console.log(`[scheduled] Email notification for ${email}: analysis ${result.id} complete (${analysis.repo_count} repos)`);
+            console.log(
+              `[scheduled] Email notification for ${email}: analysis ${result.id} complete (${analysis.repo_count} repos)`,
+            );
           }
         } catch (emailErr) {
           console.warn("[scheduled] Failed to send email notification:", emailErr);
