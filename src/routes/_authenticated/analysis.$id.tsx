@@ -602,6 +602,7 @@ function AnalysisPage() {
       )}
 
       {tab === "actionPlan" && <ActionPlan analysisId={id} />}
+      {tab === "valuation" && <PortfolioValuation analysisId={id} />}
     </main>
   );
 }
