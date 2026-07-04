@@ -464,31 +464,61 @@ const RecommendationSchema = z.object({
 });
 
 // ─── AI system prompt ──────────────────────────────────────────
-const AI_SYSTEM_PROMPT = `You are an expert product strategist and technical marketer reviewing a developer's GitHub portfolio.
-You analyze repos to find opportunities to FINISH, COMBINE, or REPURPOSE them into shippable products.
+const AI_SYSTEM_PROMPT = `You are a rigorous, skeptical product strategist evaluating a developer's GitHub portfolio. You are NOT a hype person — you are a discerning evaluator who only recommends repos with genuine potential.
 
-For each repo digest, identify:
-- FINISH: repos that are close to shippable — describe exactly what's missing and how to get it to v1.
-- COMBINE: 2+ repos that together form a stronger product than any alone. List their full names. Explain the synergy.
-- REPURPOSE: repos whose code could be rebranded/positioned as a marketable tool for a different audience.
+## EVALUATION CRITERIA — apply these STRICTLY
 
-For every recommendation give:
-- kind, title (5-8 words, punchy)
-- repos (full_name array — use the exact full_name from the digest)
-- pitch (2-3 sentence "market as X" — be specific about the target user and value prop)
-- effort (1=hours, 5=months)
-- market_potential (1=niche, 5=broad)
-- next_steps (3-5 concrete, specific todos — reference actual files, features, or APIs from the repo digests)
-- tech_stack (array of detected technologies, frameworks, languages, tools — include those from dependencies and file extensions)
-- marketing_tweet (a punchy, engaging tweet promoting the product — include relevant hashtags, max 280 chars)
-- marketing_linkedin (a professional LinkedIn post — 3-4 sentences with a hook + value prop + CTA)
-- estimated_hours (realistic total hours to complete, 1-500)
+Before recommending any repo, verify it meets these quality bars:
+
+### MATURITY ASSESSMENT (evaluate each repo):
+- SKELETON: <5 files, mostly boilerplate, no real logic → DO NOT recommend
+- EARLY: 5-20 files, some logic but incomplete → Only FINISH if there's a clear path
+- DEVELOPING: 20+ files, real functionality, some gaps → Good FINISH candidate
+- MATURE: Complete codebase, tests, CI → Only REPURPOSE if market fit is strong
+- ABANDONED: No push in 6+ months → Only recommend if code is still relevant
+
+### FINISH criteria (MUST meet ALL):
+1. The repo has actual executable code (not just config/README)
+2. There is a clear, specific gap between current state and shippable
+3. The gap is closeable in <40 hours of work
+4. The finished product has an identifiable target user
+5. You can name the SPECIFIC files that need work (not "improve the UI")
+
+### COMBINE criteria (MUST meet ALL):
+1. The repos share a compatible tech stack OR solve adjacent problems
+2. The combination creates something NEITHER repo could do alone
+3. You can describe the specific integration point (API contract, shared data model, etc.)
+4. The combined product has a clearer market position than either repo individually
+5. Do NOT combine repos just because they're in the same language — that's not synergy
+
+### REPURPOSE criteria (MUST meet ALL):
+1. The repo has real, working code that solves an internal problem
+2. That code can be positioned for an EXTERNAL audience with minimal changes
+3. You can name the specific target market and why they'd pay
+4. The repurposing is plausible — not "turn a CLI tool into a SaaS platform" unless there's real evidence
+
+## OUTPUT REQUIREMENTS
+
+For each recommendation:
+- kind, title (5-8 words, specific — not "Finish Your App" but "Add Auth & Deploy Quantum API")
+- repos (full_name array — use the EXACT full_name from the digest, no guessing)
+- pitch (2-3 sentences: WHO is the target user, WHAT value does it provide, WHY now)
+- effort (1=hours, 5=months — be honest, most repos are 3-4)
+- market_potential (1=niche hobby, 5=broad commercial — be conservative, most are 2-3)
+- next_steps (3-5 concrete todos — each must reference a SPECIFIC file, function, or feature from the digest)
+- tech_stack (array — only include technologies you can VERIFY from the digest: dependencies, file extensions, imports)
+- marketing_tweet (punchy, 280 chars max, with relevant hashtags)
+- marketing_linkedin (3-4 sentences: hook + value prop + CTA)
+- estimated_hours (realistic, 1-500 — do not underestimate)
 
 Also produce:
-- summary_md (markdown, ~200 words) covering the portfolio — note trends, strengths, and gaps
+- summary_md (markdown, ~200 words) — assess portfolio maturity, note patterns, call out dead weight
 
-Return 5-12 recommendations. Rank by (market_potential * 2 - effort) desc.
-Be specific and reference actual code, files, and features you see in the digests. Generic advice is useless.
+Return ONLY 3-7 recommendations. Quality over quantity. If you can only find 3 genuine opportunities, return 3 — do NOT pad with weak suggestions.
+
+Rank by (market_potential * 2 - effort) desc.
+
+Every recommendation MUST reference specific files, functions, or features you actually saw in the digests. If you can't cite specific evidence, don't make the recommendation.
 
 IMPORTANT: In your JSON output, use lowercase for the "kind" field: "finish", "combine", or "repurpose".`;
 
@@ -530,34 +560,101 @@ async function callBatchedAI(
   digests: string[],
   aiConfig: { provider: string; apiKey: string | null },
 ): Promise<z.infer<typeof RecommendationSchema>> {
-  const isSmallCtx = aiConfig.provider === "github_models";
-  const repoBlock = digests.join("\n\n=========\n\n");
-  const user = isSmallCtx
-    ? `Repo digests (be concise — max 3-5 recommendations, short pitches):\n\n${repoBlock}`
-    : `Here are the repo digests:\n\n${repoBlock}`;
+  // Include a compact repo index at the top so the AI can see all repos at a glance
+  const repoIndex = digests
+    .map((d) => {
+      const lines = d.split("\n");
+      const repoLine = lines[0]; // REPO: owner/name
+      const descLine = lines.find((l) => l.startsWith("DESC:"));
+      const langLine = lines.find((l) => l.startsWith("LANG:"));
+      const filesLine = d.match(/FILES \((\d+) total/);
+      const fileCount = filesLine ? filesLine[1] : "?";
+      return `${repoLine} | ${langLine || ""} | ${fileCount} files | ${descLine || ""}`;
+    })
+    .join("\n");
 
-  const aiResult = await callAI(
-    {
-      messages: [
-        { role: "system", content: AI_SYSTEM_PROMPT },
-        { role: "user", content: user },
-      ],
-      responseFormat: {
-        type: "json_schema",
-        json_schema: {
-          name: "recommendations",
-          strict: true,
-          schema: AI_JSON_SCHEMA,
+  const user = `REPO INDEX (${digests.length} repos):
+${repoIndex}
+
+FULL DIGESTS:
+
+${digests.join("\n\n=========\n\n")}`;
+
+  let aiResult;
+  try {
+    aiResult = await callAI(
+      {
+        messages: [
+          { role: "system", content: AI_SYSTEM_PROMPT },
+          { role: "user", content: user },
+        ],
+        responseFormat: {
+          type: "json_schema",
+          json_schema: {
+            name: "recommendations",
+            strict: true,
+            schema: AI_JSON_SCHEMA,
+          },
         },
       },
-    },
-    aiConfig,
-  );
-  const parsed = JSON.parse(aiResult.content || "{}");
+      aiConfig,
+    );
+  } catch (e) {
+    // If structured output fails, retry without responseFormat (some providers don't support it)
+    console.warn("[analysis] Structured output failed, retrying without schema:", e);
+    aiResult = await callAI(
+      {
+        messages: [
+          { role: "system", content: AI_SYSTEM_PROMPT + "\n\nIMPORTANT: Return ONLY valid JSON, no markdown, no code fences." },
+          { role: "user", content: user },
+        ],
+      },
+      aiConfig,
+    );
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(aiResult.content || "{}");
+  } catch {
+    // Try to extract JSON from markdown code fences
+    const jsonMatch = aiResult.content?.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (jsonMatch) {
+      parsed = JSON.parse(jsonMatch[1]);
+    } else {
+      throw new Error("AI returned non-JSON content — could not parse recommendations.");
+    }
+  }
+
   // Gemini sometimes returns a bare array instead of {recommendations: [...]}
   const normalized = Array.isArray(parsed) ? { recommendations: parsed, summary_md: "" } : parsed;
-  return RecommendationSchema.parse(normalized);
+  const result = RecommendationSchema.parse(normalized);
+
+  // Post-filter: remove weak recommendations that don't meet quality bars
+  const validRepoNames = new Set(digests.map((d) => d.split("\n")[0].replace("REPO: ", "")));
+  result.recommendations = result.recommendations.filter((rec) => {
+    // Must reference at least one repo that actually exists in the digests
+    const repoMatch = rec.repos.some((r) => validRepoNames.has(r) || validRepoNames.has(r.toLowerCase()));
+    if (!repoMatch) {
+      console.warn(`[analysis] Filtering out recommendation "${rec.title}" — references unknown repos: ${rec.repos.join(", ")}`);
+      return false;
+    }
+    // Reject if pitch is too generic (< 40 chars)
+    if (rec.pitch.length < 40) return false;
+    // Reject if next_steps are all generic (no file names or specific features)
+    const hasSpecificSteps = rec.next_steps.some((s) =>
+      /\b(src\/|lib\/|app\/|api\/|\.ts|\.tsx|\.js|\.jsx|\.py|\.go|\.rs|component|route|endpoint|function|class|test|config|docker|ci|workflow)\b/i.test(s)
+    );
+    if (!hasSpecificSteps && rec.next_steps.length > 0) {
+      console.warn(`[analysis] Filtering out recommendation "${rec.title}" — next_steps are too generic`);
+      return false;
+    }
+    return true;
+  });
+
+  return result;
 }
+
 
 // ─── Cross-batch synthesis: find combine opportunities across batches ──
 async function synthesizeCrossBatch(
@@ -580,19 +677,33 @@ async function synthesizeCrossBatch(
     .map((r, i) => `${i + 1}. [${r.kind}] ${r.title} — repos: ${r.repos.join(", ")} — ${r.pitch}`)
     .join("\n");
 
-  const synthPrompt = `You are reviewing a developer's GitHub portfolio of ${digests.length} repos.
-Here are all the repos (compact index):
+  const synthPrompt = `You are a rigorous product strategist doing a SECOND PASS over a developer's GitHub portfolio.
+You previously generated recommendations for batches of repos. Now look ACROSS batches for combination opportunities that were missed.
+
+Here are all ${digests.length} repos (compact index):
 ${repoIndex}
 
 Here are the recommendations already generated:
 ${existingRecs}
 
-Now find 1-5 ADDITIONAL "combine" recommendations that merge repos which were NOT already paired together.
-Look for synergies across different repos — e.g., a frontend repo + a backend repo = full-stack product.
-Also look for "repurpose" opportunities that weren't caught.
+Find 0-3 ADDITIONAL "combine" recommendations where repos from DIFFERENT batches form a stronger product together.
 
-Return JSON with the same schema as before (summary_md + recommendations array).
-Only include NEW recommendations not already in the list above. If no new opportunities exist, return an empty recommendations array.`;
+STRICT CRITERIA — only include a recommendation if ALL are true:
+1. The repos are from different batches (not already paired above)
+2. The repos share compatible tech stacks or solve adjacent problems
+3. The combination creates something NEITHER repo could do alone
+4. You can describe the specific integration point
+5. The target user and market are clear
+
+Do NOT:
+- Combine repos just because they're the same language
+- Suggest vague "integrate these" without explaining HOW
+- Include more than 3 recommendations
+- Duplicate any existing recommendation
+
+If you cannot find genuine cross-batch opportunities, return an EMPTY recommendations array. Quality over quantity.
+
+Return JSON with: summary_md (string) + recommendations array (same schema as before).`;
 
   try {
     const result = await callAI(
