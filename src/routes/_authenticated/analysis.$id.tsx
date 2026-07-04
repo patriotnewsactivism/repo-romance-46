@@ -146,7 +146,11 @@ function AnalysisPage() {
     return <div className="p-10 text-sm text-destructive">{(q.error as Error).message}</div>;
 
   const { analysis, items } = q.data!;
-  const typedItems = items as unknown as AnalysisItem[];
+  const typedItems = (items as unknown as AnalysisItem[]).map((it) => ({
+    ...it,
+    repos: Array.isArray(it.repos) ? it.repos : [],
+    next_steps: Array.isArray(it.next_steps) ? it.next_steps : [],
+  }));
   const filtered = filter === "all" ? typedItems : typedItems.filter((i) => i.kind === filter);
   const stats = (analysis.portfolio_stats as unknown as PortfolioStats) || {};
   const isPublic = (analysis as Record<string, unknown>).is_public as boolean;
@@ -465,13 +469,15 @@ function AnalysisPage() {
                     </div>
                   </div>
                   <h3 className="font-semibold leading-tight">{it.title}</h3>
-                  <div className="flex flex-wrap gap-1">
-                    {it.repos.map((r) => (
-                      <Badge key={r} variant="secondary" className="font-mono text-[10px]">
-                        {r}
-                      </Badge>
-                    ))}
-                  </div>
+                  {it.repos.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {it.repos.map((r) => (
+                        <Badge key={r} variant="secondary" className="font-mono text-[10px]">
+                          {r}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
                   {it.tech_stack && it.tech_stack.length > 0 && (
                     <div className="flex flex-wrap gap-1">
                       {it.tech_stack.map((tech) => (
@@ -482,7 +488,7 @@ function AnalysisPage() {
                     </div>
                   )}
                   <p className="text-sm text-muted-foreground">{it.pitch}</p>
-                  {it.next_steps.length > 0 && (
+                  {(it.next_steps?.length ?? 0) > 0 && (
                     <div>
                       <div className="font-mono text-[10px] uppercase text-muted-foreground mb-1">
                         Next steps
@@ -498,14 +504,14 @@ function AnalysisPage() {
                     </div>
                   )}
                   {/* Health check for each repo */}
-                  {it.repos.length > 0 && (
+                  {(it.repos?.length ?? 0) > 0 && (
                     <div className="pt-2 border-t border-border">
                       <RepoHealthCheck repo={it.repos[0]} />
                     </div>
                   )}
 
                   {/* Auto-finish button for finish recommendations */}
-                  {it.kind === "finish" && it.repos.length > 0 && (
+                  {it.kind === "finish" && (it.repos?.length ?? 0) > 0 && (
                     <div className="pt-2 border-t border-border">
                       <RepoFinisher
                         repo={it.repos[0]}
