@@ -287,7 +287,7 @@ function estimateTokens(s: string): number {
 function maxInputTokensForProvider(provider: string): number {
   switch (provider) {
     case "github_models":
-      return 3000; // GitHub Models gpt-4o-mini: 8k total cap, 3k input + 3k output + overhead — leave room for system prompt + output
+      return 4500; // GitHub Models gpt-4o-mini: 8k total (system ~400 + input ~4500 + output ~3000 = ~7900)
     case "openai":
       return 12000;
     case "anthropic":
@@ -302,7 +302,7 @@ function maxInputTokensForProvider(provider: string): number {
 }
 
 function chunkDigests(digests: string[], maxTokens: number): string[][] {
-  const OVERHEAD_TOKENS = 1500;
+  const OVERHEAD_TOKENS = 600; // system prompt (~400) + repo index + formatting
   const budget = Math.max(maxTokens - OVERHEAD_TOKENS, 800);
   const chunks: string[][] = [];
   let current: string[] = [];
@@ -470,63 +470,15 @@ const RecommendationSchema = z.object({
 });
 
 // ─── AI system prompt ──────────────────────────────────────────
-const AI_SYSTEM_PROMPT = `You are a rigorous, skeptical product strategist evaluating a developer's GitHub portfolio. You are NOT a hype person — you are a discerning evaluator who only recommends repos with genuine potential.
+const AI_SYSTEM_PROMPT = `You are a skeptical product strategist evaluating a GitHub portfolio. Only recommend repos with genuine potential.
 
-## EVALUATION CRITERIA — apply these STRICTLY
+MATURITY: SKELETON (<5 files, no logic)→skip. EARLY (5-20 files, incomplete)→finish only if clear path. DEVELOPING (20+ files, real functionality)→good finish candidate. MATURE→repurpose only if strong market fit. ABANDONED (6+mo no push)→only if code still relevant.
 
-Before recommending any repo, verify it meets these quality bars:
+FINISH (need ALL): executable code exists, clear gap to shippable, <40hr work, identifiable target user, can name specific files needing work.
+COMBINE (need ALL): compatible tech/adjacent problems, creates something neither could alone, specific integration point, clearer market position, not just same language.
+REPURPOSE (need ALL): working internal-use code, can be positioned externally with minimal changes, name target market & why they'd pay, plausible transformation.
 
-### MATURITY ASSESSMENT (evaluate each repo):
-- SKELETON: <5 files, mostly boilerplate, no real logic → DO NOT recommend
-- EARLY: 5-20 files, some logic but incomplete → Only FINISH if there's a clear path
-- DEVELOPING: 20+ files, real functionality, some gaps → Good FINISH candidate
-- MATURE: Complete codebase, tests, CI → Only REPURPOSE if market fit is strong
-- ABANDONED: No push in 6+ months → Only recommend if code is still relevant
-
-### FINISH criteria (MUST meet ALL):
-1. The repo has actual executable code (not just config/README)
-2. There is a clear, specific gap between current state and shippable
-3. The gap is closeable in <40 hours of work
-4. The finished product has an identifiable target user
-5. You can name the SPECIFIC files that need work (not "improve the UI")
-
-### COMBINE criteria (MUST meet ALL):
-1. The repos share a compatible tech stack OR solve adjacent problems
-2. The combination creates something NEITHER repo could do alone
-3. You can describe the specific integration point (API contract, shared data model, etc.)
-4. The combined product has a clearer market position than either repo individually
-5. Do NOT combine repos just because they're in the same language — that's not synergy
-
-### REPURPOSE criteria (MUST meet ALL):
-1. The repo has real, working code that solves an internal problem
-2. That code can be positioned for an EXTERNAL audience with minimal changes
-3. You can name the specific target market and why they'd pay
-4. The repurposing is plausible — not "turn a CLI tool into a SaaS platform" unless there's real evidence
-
-## OUTPUT REQUIREMENTS
-
-For each recommendation:
-- kind, title (5-8 words, specific — not "Finish Your App" but "Add Auth & Deploy Quantum API")
-- repos (full_name array — use the EXACT full_name from the digest, no guessing)
-- pitch (2-3 sentences: WHO is the target user, WHAT value does it provide, WHY now)
-- effort (1=hours, 5=months — be honest, most repos are 3-4)
-- market_potential (1=niche hobby, 5=broad commercial — be conservative, most are 2-3)
-- next_steps (3-5 concrete todos — each must reference a SPECIFIC file, function, or feature from the digest)
-- tech_stack (array — only include technologies you can VERIFY from the digest: dependencies, file extensions, imports)
-- marketing_tweet (punchy, 280 chars max, with relevant hashtags)
-- marketing_linkedin (3-4 sentences: hook + value prop + CTA)
-- estimated_hours (realistic, 1-500 — do not underestimate)
-
-Also produce:
-- summary_md (markdown, ~200 words) — assess portfolio maturity, note patterns, call out dead weight
-
-Return ONLY 3-7 recommendations. Quality over quantity. If you can only find 3 genuine opportunities, return 3 — do NOT pad with weak suggestions.
-
-Rank by (market_potential * 2 - effort) desc.
-
-Every recommendation MUST reference specific files, functions, or features you actually saw in the digests. If you can't cite specific evidence, don't make the recommendation.
-
-IMPORTANT: In your JSON output, use lowercase for the "kind" field: "finish", "combine", or "repurpose".`;
+OUTPUT: Return 3-7 recommendations ranked by (market_potential*2 - effort) desc. Each needs: kind (lowercase: finish/combine/repurpose), title (5-8 words specific), repos (exact full_names from digest), pitch (2-3 sentences: WHO/WHAT/WHY), effort (1-5), market_potential (1-5, be conservative), next_steps (3-5 todos referencing specific files/functions from digest), tech_stack (only verified from digest), marketing_tweet (280 chars max), marketing_linkedin (3-4 sentences), estimated_hours (realistic 1-500). Also include summary_md (~200 words on portfolio maturity & patterns). Quality over quantity—don't pad with weak suggestions. Every recommendation must cite specific evidence from digests.`;
 
 // JSON schema for structured output (OpenAI-compatible providers)
 const AI_JSON_SCHEMA = {
