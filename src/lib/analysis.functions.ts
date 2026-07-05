@@ -1093,7 +1093,7 @@ export const listAnalyses = createServerFn({ method: "GET" })
 // ─── getAnalysis ────────────────────────────────────────────────
 export const getAnalysis = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ context, data }) => {
     const { data: analysis, error } = await context.supabase
       .from("analyses")
@@ -1116,7 +1116,7 @@ export const getAnalysis = createServerFn({ method: "GET" })
 // ─── deleteAnalysis ─────────────────────────────────────────────
 export const deleteAnalysis = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ context, data }) => {
     const { supabase, userId } = context;
 
@@ -1140,7 +1140,7 @@ export const deleteAnalysis = createServerFn({ method: "POST" })
 // ─── toggleShare ────────────────────────────────────────────────
 export const toggleShare = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { id: string; isPublic: boolean }) =>
+  .validator((d: { id: string; isPublic: boolean }) =>
     z.object({ id: z.string().uuid(), isPublic: z.boolean() }).parse(d),
   )
   .handler(async ({ context, data }) => {
@@ -1179,7 +1179,7 @@ export const toggleShare = createServerFn({ method: "POST" })
 // ─── rerunAnalysis ──────────────────────────────────────────────
 export const rerunAnalysis = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { analysisId: string }) =>
+  .validator((d: { analysisId: string }) =>
     z.object({ analysisId: z.string().uuid() }).parse(d),
   )
   .handler(async ({ context, data }) => {
@@ -1200,7 +1200,7 @@ export const rerunAnalysis = createServerFn({ method: "POST" })
 
 // ─── getPublicAnalysis ──────────────────────────────────────────
 export const getPublicAnalysis = createServerFn({ method: "GET" })
-  .inputValidator((d: { slug: string }) => z.object({ slug: z.string().min(1) }).parse(d))
+  .validator((d: { slug: string }) => z.object({ slug: z.string().min(1) }).parse(d))
   .handler(async ({ data }) => {
     const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
     const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
@@ -1254,7 +1254,7 @@ export const getPublicAnalysis = createServerFn({ method: "GET" })
 // ─── generateActionPlan ─────────────────────────────────────────
 export const generateActionPlan = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { analysisId: string }) =>
+  .validator((d: { analysisId: string }) =>
     z.object({ analysisId: z.string().uuid() }).parse(d),
   )
   .handler(async ({ context, data }) => {
@@ -1367,7 +1367,7 @@ Sequence phases from quick wins (low effort, high impact) to moonshots. Group re
 // ─── generateMergeInstructions ──────────────────────────────────
 export const generateMergeInstructions = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { analysisId: string; itemRank: number }) =>
+  .validator((d: { analysisId: string; itemRank: number }) =>
     z.object({ analysisId: z.string().uuid(), itemRank: z.number().int().min(0) }).parse(d),
   )
   .handler(async ({ context, data }) => {
