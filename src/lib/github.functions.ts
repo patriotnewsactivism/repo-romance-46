@@ -155,7 +155,7 @@ export const getPortfolioSummary = createServerFn({ method: "GET" })
 
 export const getRepoHealth = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { repo: string }) => z.object({ repo: z.string() }).parse(d))
+  .validator((d: { repo: string }) => z.object({ repo: z.string() }).parse(d))
   .handler(async ({ context, data }) => {
     const { data: conn } = await context.supabase
       .from("github_connections")

@@ -491,7 +491,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 
 export const finishRepo = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     (d: { repo: string; nextSteps?: string[]; analysisId?: string; itemRank?: number }) =>
       z
         .object({
@@ -706,7 +706,7 @@ ${nextSteps.map((s) => `- [x] ${s}`).join("\n")}
 
 export const getFinishStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { repo: string }) => z.object({ repo: z.string() }).parse(d))
+  .validator((d: { repo: string }) => z.object({ repo: z.string() }).parse(d))
   .handler(async ({ context, data }) => {
     const { data: items } = await context.supabase
       .from("analysis_items")

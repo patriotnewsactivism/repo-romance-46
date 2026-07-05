@@ -6,7 +6,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 export const toggleStar = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { itemId: string; starred: boolean }) =>
+  .validator((d: { itemId: string; starred: boolean }) =>
     z.object({ itemId: z.string().uuid(), starred: z.boolean() }).parse(d),
   )
   .handler(async ({ context, data }) => {
@@ -66,7 +66,7 @@ export const getPreferences = createServerFn({ method: "GET" })
 
 export const updatePreferences = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: Partial<UserPreferences>) =>
+  .validator((d: Partial<UserPreferences>) =>
     z
       .object({
         email_notifications: z.boolean().optional(),

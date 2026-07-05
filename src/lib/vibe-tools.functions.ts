@@ -154,7 +154,7 @@ const marketSchema = {
 
 export const assessMarketAndValue = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { analysisId: string; itemRank: number }) =>
+  .validator((d: { analysisId: string; itemRank: number }) =>
     z.object({ analysisId: z.string().uuid(), itemRank: z.number().int() }).parse(d),
   )
   .handler(async ({ context, data }) => {
@@ -238,7 +238,7 @@ const vibeSchema = {
 
 export const generateVibeSpec = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { analysisId: string; itemRank: number }) =>
+  .validator((d: { analysisId: string; itemRank: number }) =>
     z.object({ analysisId: z.string().uuid(), itemRank: z.number().int() }).parse(d),
   )
   .handler(async ({ context, data }) => {
@@ -295,7 +295,7 @@ async function gh(token: string, path: string, init?: RequestInit): Promise<Resp
 
 export const combineRepos = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { analysisId: string; itemRank: number }) =>
+  .validator((d: { analysisId: string; itemRank: number }) =>
     z.object({ analysisId: z.string().uuid(), itemRank: z.number().int() }).parse(d),
   )
   .handler(async ({ context, data }) => {
@@ -458,7 +458,7 @@ export const combineRepos = createServerFn({ method: "POST" })
 
 export const iterativeFinish = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { analysisId: string; itemRank: number; repo: string; passes?: number }) =>
+  .validator((d: { analysisId: string; itemRank: number; repo: string; passes?: number }) =>
     z
       .object({
         analysisId: z.string().uuid(),
