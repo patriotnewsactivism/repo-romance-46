@@ -2,7 +2,7 @@
 import { createFileRoute, Outlet, redirect, Link, useRouter } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { LogOut, Settings } from "lucide-react";
+import { LogOut, Settings, Users } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -35,6 +35,12 @@ function AuthedShell() {
             <span className="hidden sm:inline text-xs text-muted-foreground font-mono">
               {user.email}
             </span>
+            <Link
+              to="/team"
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium hover:bg-accent h-9 px-3"
+            >
+              <Users className="h-4 w-4" />
+            </Link>
             <Link
               to="/settings"
               className="inline-flex items-center justify-center rounded-md text-sm font-medium hover:bg-accent h-9 px-3"
