@@ -167,9 +167,18 @@ export async function callAI(
     (provider === "github_models" || provider === "openai" || provider === "custom") &&
     config.apiKey
   ) {
+    // Set max_tokens per provider — github_models (gpt-4o-mini) has an 8000
+    // total token cap, so we keep output small to leave room for input.
+    const maxTokens: Record<string, number> = {
+      github_models: 3000, // 3000 output + ~4000 input = under 8000 total
+      openai: 4096,
+      custom: 4096,
+    };
+
     const body: Record<string, unknown> = {
       model,
       messages: request.messages,
+      max_tokens: maxTokens[provider] ?? 4096,
     };
 
     if (request.responseFormat) {
@@ -251,7 +260,10 @@ export async function callAIWithFallback(
         msg.includes("rate limit") ||
         msg.includes("quota") ||
         msg.includes("429") ||
-        msg.includes("exceeded")
+        msg.includes("exceeded") ||
+        msg.includes("413") ||
+        msg.includes("tokens_limit") ||
+        msg.includes("too large")
       ) {
         console.warn(
           `[ai-provider] ${config.provider} failed: ${msg.slice(0, 100)}, trying next provider...`,

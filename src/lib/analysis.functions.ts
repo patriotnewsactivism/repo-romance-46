@@ -287,7 +287,7 @@ function estimateTokens(s: string): number {
 function maxInputTokensForProvider(provider: string): number {
   switch (provider) {
     case "github_models":
-      return 4000; // GitHub Models free tier caps at 8k total — leave room for system prompt + output
+      return 3000; // GitHub Models gpt-4o-mini: 8k total cap, 3k input + 3k output + overhead — leave room for system prompt + output
     case "openai":
       return 12000;
     case "anthropic":
