@@ -1,5 +1,58 @@
 // Centralized AI provider routing — handles GitHub Models, OpenAI, Anthropic, Google
 
+const VALID_PROVIDERS = ["github_models", "openai", "anthropic", "google", "custom"];
+
+/**
+ * Resolve the best available AI config from user prefs → server env → GitHub OAuth token.
+ * Call this from any server function before invoking callAI().
+ */
+export async function resolveAIConfig(
+  supabase: unknown,
+  userId: string,
+): Promise<AIProviderConfig> {
+  // 1. Load user preferences
+  const s = supabase as {
+    from: (t: string) => {
+      select: (c: string) => {
+        eq: (col: string, v: string) => { maybeSingle: () => Promise<{ data: unknown }> };
+      };
+    };
+  };
+  const { data: prefs } = await s
+    .from("user_preferences")
+    .select("custom_ai_provider, custom_ai_key")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const p = prefs as { custom_ai_provider: string | null; custom_ai_key: string | null } | null;
+
+  if (p?.custom_ai_key) {
+    let provider = p.custom_ai_provider || "openai";
+    if (!VALID_PROVIDERS.includes(provider)) provider = "openai";
+    return { provider, apiKey: p.custom_ai_key };
+  }
+
+  // 2. Server-level env vars
+  const serverProvider = typeof process !== "undefined" ? process.env?.SERVER_AI_PROVIDER : undefined;
+  const serverKey = typeof process !== "undefined" ? process.env?.SERVER_AI_KEY : undefined;
+  if (serverProvider && serverKey) {
+    return { provider: serverProvider, apiKey: serverKey };
+  }
+
+  // 3. Fall back to GitHub Models using the user's GitHub OAuth token
+  const { data: conn } = await s
+    .from("github_connections")
+    .select("access_token")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const ghToken = (conn as { access_token: string } | null)?.access_token;
+  if (ghToken) {
+    return { provider: "github_models", apiKey: ghToken };
+  }
+
+  // 4. Last resort — will error in callAI() with a helpful message
+  return { provider: p?.custom_ai_provider || "openai", apiKey: null };
+}
+
 export interface AIProviderConfig {
   provider: string; // "github_models" | "openai" | "anthropic" | "google" | "custom"
   apiKey: string | null; // user's custom key

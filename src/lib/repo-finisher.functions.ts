@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { callAI } from "@/lib/ai-provider";
+import { callAI, resolveAIConfig, type AIProviderConfig } from "@/lib/ai-provider";
 
 // ─── Types ─────────────────────────────────────────────────────
 
@@ -288,8 +288,7 @@ async function generateFinishPlan(
   },
   files: { path: string; content: string }[],
   nextSteps: string[],
-  aiProvider: string,
-  aiKey: string | null,
+  aiConfig: AIProviderConfig,
 ): Promise<AIFinishPlan> {
   // Build file summaries — show more of each file since the AI needs full context
   const MAX_FILE_CHARS = 4000;
@@ -360,7 +359,7 @@ ${fileSummaries}`;
         },
       },
     },
-    { provider: aiProvider, apiKey: aiKey },
+    aiConfig,
   );
 
   const plan = JSON.parse(aiResult.content || "{}") as AIFinishPlan;
@@ -513,18 +512,8 @@ export const finishRepo = createServerFn({ method: "POST" })
 
     const token = conn.access_token;
 
-    // Get user preferences for AI provider
-    const { data: prefs } = await context.supabase
-      .from("user_preferences")
-      .select("custom_ai_provider, custom_ai_key")
-      .eq("user_id", context.userId)
-      .maybeSingle();
-
-    const aiProvider = prefs?.custom_ai_provider || "openai";
-    let aiKey = prefs?.custom_ai_key || null;
-    if (aiProvider === "github_models" && !aiKey) {
-      aiKey = token;
-    }
+    // Resolve AI provider (user key → server key → GitHub Models via OAuth token)
+    const aiConfig = await resolveAIConfig(context.supabase, context.userId);
 
     // ── 1. Fetch repo metadata + tree in parallel ──────────────
     const [repoRes, treeData] = await Promise.all([
@@ -609,7 +598,7 @@ export const finishRepo = createServerFn({ method: "POST" })
 
     // ── 4. Generate the finish plan via AI ─────────────────────
     const plan = await withTimeout(
-      generateFinishPlan(data.repo, repoData, files, nextSteps, aiProvider, aiKey),
+      generateFinishPlan(data.repo, repoData, files, nextSteps, aiConfig),
       60000,
       "AI plan generation",
     );
