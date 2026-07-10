@@ -33,6 +33,7 @@ import { MergeInstructions } from "@/components/MergeInstructions";
 import { RepoFinisher } from "@/components/RepoFinisher";
 import { PortfolioValuation } from "@/components/PortfolioValuation";
 import { VibeTools } from "@/components/VibeTools";
+import { SwarmRunner } from "@/components/SwarmRunner";
 
 import { toast } from "sonner";
 
@@ -426,6 +427,7 @@ function AnalysisPage() {
 
       {tab === "recommendations" && (
         <>
+          <SwarmRunner analysisId={id} />
           <div className="flex flex-wrap gap-2">
             {(["all", "finish", "combine", "repurpose"] as const).map((f) => (
               <button

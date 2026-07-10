@@ -259,6 +259,56 @@ export type Database = {
         }
         Relationships: []
       }
+      swarm_runs: {
+        Row: {
+          analysis_id: string
+          autonomy_mode: string
+          concurrency: number
+          created_at: string
+          id: string
+          plan: Json
+          results: Json
+          status: string
+          summary: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          analysis_id: string
+          autonomy_mode?: string
+          concurrency?: number
+          created_at?: string
+          id?: string
+          plan?: Json
+          results?: Json
+          status?: string
+          summary?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          analysis_id?: string
+          autonomy_mode?: string
+          concurrency?: number
+          created_at?: string
+          id?: string
+          plan?: Json
+          results?: Json
+          status?: string
+          summary?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "swarm_runs_analysis_id_fkey"
+            columns: ["analysis_id"]
+            isOneToOne: false
+            referencedRelation: "analyses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_preferences: {
         Row: {
           created_at: string
