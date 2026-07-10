@@ -4,7 +4,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { callAI } from "@/lib/ai-provider";
+import { callAI, resolveAIConfig } from "@/lib/ai-provider";
 import type { Json } from "@/integrations/supabase/types";
 
 type Action = "iterative_finish" | "gentle_finish" | "combine" | "vibe_spec" | "skip";
@@ -29,25 +29,6 @@ interface ResultItem {
   pr_urls?: string[];
   combined_url?: string;
   duration_ms: number;
-}
-
-async function loadPrefs(supabase: unknown, userId: string) {
-  const s = supabase as {
-    from: (t: string) => {
-      select: (c: string) => {
-        eq: (col: string, v: string) => { maybeSingle: () => Promise<{ data: unknown }> };
-      };
-    };
-  };
-  const { data } = await s
-    .from("user_preferences")
-    .select("custom_ai_provider, custom_ai_key")
-    .eq("user_id", userId)
-    .maybeSingle();
-  return (data ?? null) as {
-    custom_ai_provider: string | null;
-    custom_ai_key: string | null;
-  } | null;
 }
 
 // ─── PLAN ───────────────────────────────────────────────────────
@@ -109,7 +90,7 @@ export const planSwarm = createServerFn({ method: "POST" })
 
     if (items.length === 0) throw new Error("Analysis has no recommendations to swarm.");
 
-    const prefs = await loadPrefs(context.supabase, context.userId);
+    const aiConfig = await resolveAIConfig(context.supabase, context.userId);
 
     const triageSchema = {
       type: "object",
@@ -177,7 +158,7 @@ next_steps: ${(it.next_steps || []).slice(0, 3).join(" | ")}`,
           json_schema: { name: "swarm_plan", strict: true, schema: triageSchema },
         },
       },
-      { provider: prefs?.custom_ai_provider || "openai", apiKey: prefs?.custom_ai_key || null },
+      aiConfig,
     );
 
     const parsed = JSON.parse(resp.content || "{}") as {

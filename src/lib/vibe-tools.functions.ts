@@ -4,7 +4,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { callAI } from "@/lib/ai-provider";
+import { callAI, resolveAIConfig } from "@/lib/ai-provider";
 import type { Json } from "@/integrations/supabase/types";
 
 const ASJSON = "as unknown as Json";
@@ -52,25 +52,6 @@ async function loadItem(
     market_potential: number;
     estimated_hours: number | null;
   };
-}
-
-async function loadPrefs(supabase: unknown, userId: string) {
-  const s = supabase as {
-    from: (t: string) => {
-      select: (c: string) => {
-        eq: (col: string, v: string) => { maybeSingle: () => Promise<{ data: unknown }> };
-      };
-    };
-  };
-  const { data } = await s
-    .from("user_preferences")
-    .select("custom_ai_provider, custom_ai_key")
-    .eq("user_id", userId)
-    .maybeSingle();
-  return (data ?? null) as {
-    custom_ai_provider: string | null;
-    custom_ai_key: string | null;
-  } | null;
 }
 
 async function updateItem(supabase: unknown, itemId: string, patch: Record<string, unknown>) {
@@ -159,7 +140,7 @@ export const assessMarketAndValue = createServerFn({ method: "POST" })
   )
   .handler(async ({ context, data }) => {
     const item = await loadItem(context.supabase as never, data.analysisId, data.itemRank);
-    const prefs = await loadPrefs(context.supabase, context.userId);
+    const aiConfig = await resolveAIConfig(context.supabase, context.userId);
 
     const sys = `You are a market analyst and startup valuator. Given a software project idea derived from GitHub repos, produce:
 - a realistic TAM summary (1-2 sentences)
@@ -193,7 +174,7 @@ Existing next steps: ${item.next_steps.slice(0, 5).join(" | ")}`;
           json_schema: { name: "market_and_value", strict: true, schema: marketSchema },
         },
       },
-      { provider: prefs?.custom_ai_provider || "openai", apiKey: prefs?.custom_ai_key || null },
+      aiConfig,
     );
 
     const parsed = JSON.parse(resp.content || "{}");
@@ -243,7 +224,7 @@ export const generateVibeSpec = createServerFn({ method: "POST" })
   )
   .handler(async ({ context, data }) => {
     const item = await loadItem(context.supabase as never, data.analysisId, data.itemRank);
-    const prefs = await loadPrefs(context.supabase, context.userId);
+    const aiConfig = await resolveAIConfig(context.supabase, context.userId);
 
     const sys = `You are a product engineer and copywriter. Turn a GitHub-derived project idea into a ready-to-ship spec:
 - product_name: short, memorable
@@ -271,7 +252,7 @@ Existing next steps: ${item.next_steps.join(" | ")}`;
           json_schema: { name: "vibe_spec", strict: true, schema: vibeSchema },
         },
       },
-      { provider: prefs?.custom_ai_provider || "openai", apiKey: prefs?.custom_ai_key || null },
+      aiConfig,
     );
 
     const spec = JSON.parse(resp.content || "{}");
@@ -303,7 +284,7 @@ export const combineRepos = createServerFn({ method: "POST" })
     if (item.repos.length < 2) throw new Error("Need at least 2 repos to combine.");
 
     const token = await loadGhToken(context.supabase, context.userId);
-    const prefs = await loadPrefs(context.supabase, context.userId);
+    const aiConfig = await resolveAIConfig(context.supabase, context.userId);
 
     // AI plan for the combined repo
     const planSchema = {
@@ -353,7 +334,7 @@ export const combineRepos = createServerFn({ method: "POST" })
           json_schema: { name: "combine_plan", strict: true, schema: planSchema },
         },
       },
-      { provider: prefs?.custom_ai_provider || "openai", apiKey: prefs?.custom_ai_key || null },
+      aiConfig,
     );
 
     const plan = JSON.parse(planResp.content || "{}") as {
