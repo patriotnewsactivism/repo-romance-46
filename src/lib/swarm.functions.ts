@@ -69,7 +69,7 @@ export const planSwarm = createServerFn({ method: "POST" })
         .parse(d),
   )
   .handler(async ({ context, data }) => {
-    const supabase = context.supabase as {
+    const supabase = context.supabase as unknown as {
       from: (t: string) => {
         select: (c: string) => {
           eq: (
@@ -371,7 +371,7 @@ export const executeSwarm = createServerFn({ method: "POST" })
     z.object({ swarmRunId: z.string().uuid() }).parse(d),
   )
   .handler(async ({ context, data }) => {
-    const supabase = context.supabase as {
+    const supabase = context.supabase as unknown as {
       from: (t: string) => {
         select: (c: string) => {
           eq: (
@@ -454,7 +454,7 @@ export const getSwarmRun = createServerFn({ method: "GET" })
     z.object({ swarmRunId: z.string().uuid() }).parse(d),
   )
   .handler(async ({ context, data }) => {
-    const supabase = context.supabase as {
+    const supabase = context.supabase as unknown as {
       from: (t: string) => {
         select: (c: string) => {
           eq: (
