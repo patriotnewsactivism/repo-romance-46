@@ -781,8 +781,7 @@ export interface AnalysisContext {
 export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: string }> {
   const { supabase, userId, token, prefs, triggerType, onProgress } = ctx;
 
-  // Resolve AI provider + key in one pass — avoids mismatched provider/key combos
-  // and sanitizes stale "lovable" values from before the Lovable removal.
+  // Resolve AI provider + key in one pass — avoids mismatched provider/key combos.
   const VALID_PROVIDERS = ["github_models", "openai", "anthropic", "google", "custom"];
   const serverProvider = process.env.SERVER_AI_PROVIDER;
   const serverKey = process.env.SERVER_AI_KEY;
@@ -793,7 +792,7 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
   if (prefs?.custom_ai_key) {
     // User has their own key — use their selected provider, sanitized
     resolvedProvider = prefs.custom_ai_provider || "openai";
-    if (resolvedProvider === "lovable" || !VALID_PROVIDERS.includes(resolvedProvider)) {
+    if (!VALID_PROVIDERS.includes(resolvedProvider)) {
       resolvedProvider = "openai"; // safest default when a key is present
     }
     resolvedKey = prefs.custom_ai_key;
@@ -805,7 +804,7 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
     // No user key, no server config — use user's preference or default to github_models
     // (github_models can reuse the GitHub OAuth token as its API key)
     resolvedProvider = prefs?.custom_ai_provider || "github_models";
-    if (resolvedProvider === "lovable" || !VALID_PROVIDERS.includes(resolvedProvider)) {
+    if (!VALID_PROVIDERS.includes(resolvedProvider)) {
       resolvedProvider = "github_models";
     }
     if (resolvedProvider === "github_models") {
