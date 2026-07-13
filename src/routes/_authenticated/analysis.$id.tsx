@@ -34,6 +34,8 @@ import { RepoFinisher } from "@/components/RepoFinisher";
 import { PortfolioValuation } from "@/components/PortfolioValuation";
 import { VibeTools } from "@/components/VibeTools";
 import { SwarmRunner } from "@/components/SwarmRunner";
+import { DeepAnalysis } from "@/components/DeepAnalysis";
+import { CrossRepoPatterns } from "@/components/CrossRepoPatterns";
 
 import { toast } from "sonner";
 
@@ -505,6 +507,13 @@ function AnalysisPage() {
                       </ul>
                     </div>
                   )}
+                  {/* Deep structural analysis */}
+                  {(it.repos?.length ?? 0) > 0 && (
+                    <div className="pt-2 border-t border-border">
+                      <DeepAnalysis repo={it.repos[0]} />
+                    </div>
+                  )}
+
                   {/* Health check for each repo */}
                   {(it.repos?.length ?? 0) > 0 && (
                     <div className="pt-2 border-t border-border">
@@ -611,6 +620,9 @@ function AnalysisPage() {
 
       {tab === "actionPlan" && <ActionPlan analysisId={id} />}
       {tab === "valuation" && <PortfolioValuation analysisId={id} />}
+
+      {/* Cross-repo learning patterns */}
+      <CrossRepoPatterns />
     </main>
   );
 }

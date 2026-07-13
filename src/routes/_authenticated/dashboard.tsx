@@ -25,6 +25,7 @@ import {
 } from "@/lib/github.functions";
 import { listAnalyses, runAnalysis, deleteAnalysis } from "@/lib/analysis.functions";
 import { getPreferences, getStarredItems } from "@/lib/preferences.functions";
+import { AutonomousRunner } from "@/components/AutonomousRunner";
 import { Link as TanLink } from "@tanstack/react-router";
 import { formatDistanceToNow } from "date-fns";
 
@@ -248,6 +249,9 @@ function Dashboard() {
 
       {/* Past Analyses */}
       <section>
+        {/* Autonomous Runner */}
+        <AutonomousRunner />
+
         <h2 className="font-mono text-sm text-muted-foreground mb-3">// past analyses</h2>
         {analyses.isLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
