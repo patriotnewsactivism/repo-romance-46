@@ -6,6 +6,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { callAI, resolveAIConfig } from "@/lib/ai-provider";
 import type { Json } from "@/integrations/supabase/types";
+import { logLearningEntry } from "@/lib/learning-log.functions";
 
 const ASJSON = "as unknown as Json";
 type Ctx = { supabase: unknown; userId: string };
@@ -515,6 +516,20 @@ export const iterativeFinish = createServerFn({ method: "POST" })
       finish_history: history as unknown as Json,
       iteration_count: history.filter((h) => h.pr_url).length,
     });
+
+    // Log learning entries for each pass
+    for (const h of history) {
+      await logLearningEntry(context.supabase, context.userId, data.repo, {
+        action: `iterative-finish-pass-${h.pass}`,
+        outcome: h.error ? "failure" : "success",
+        duration_ms: 0,
+        details: h.error || h.summary || `Pass ${h.pass} completed`,
+        files_affected: [],
+        error_message: h.error,
+        fix_pattern: `iterative-finish-pass-${h.pass}`,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     return { history, passes_completed: history.filter((h) => h.pr_url).length };
   });

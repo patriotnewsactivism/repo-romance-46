@@ -6,6 +6,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { callAI, resolveAIConfig } from "@/lib/ai-provider";
 import type { Json } from "@/integrations/supabase/types";
+import { assertNotProtectedBranch } from "@/lib/safety-rails";
 
 type Action = "iterative_finish" | "gentle_finish" | "combine" | "vibe_spec" | "skip";
 

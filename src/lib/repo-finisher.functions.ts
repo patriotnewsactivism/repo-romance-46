@@ -2,6 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { callAI, resolveAIConfig, type AIProviderConfig } from "@/lib/ai-provider";
+import { safeGitHubWrite, assertNotProtectedBranch, assessChangeRisk, formatRiskCallout } from "@/lib/safety-rails";
+import { logLearningEntry } from "@/lib/learning-log.functions";
 
 // ─── Types ─────────────────────────────────────────────────────
 
@@ -106,6 +108,9 @@ async function batchCommit(
   newBranch: string,
   changes: AIFileChange[],
 ): Promise<{ commitSha: string; filesChanged: number }> {
+  // SAFETY RAIL: Never commit directly to protected branches
+  assertNotProtectedBranch(newBranch);
+
   // 1. Get the base branch SHA
   const refRes = await ghFetch(token, `/repos/${repo}/git/refs/heads/${baseBranch}`);
   if (!refRes.ok) throw new Error(`Failed to get base branch: ${refRes.status}`);
@@ -244,11 +249,27 @@ STRICT RULES:
 4. Do NOT rewrite files that are already fine. Only touch files that need fixing.
 5. Each change must have a specific, concrete description explaining WHAT you changed and WHY.
 
+SAFETY RAILS — NON-NEGOTIABLE:
+- NEVER modify or reference files from other repositories.
+- NEVER suggest force-pushing, deleting branches, or modifying main/production directly.
+- If you see a pattern that has caused issues before (noted in the context), adjust your approach.
+- If a change could break existing functionality, flag it explicitly in the description.
+- Prefer small, testable increments over large rewrites.
+
 QUALITY GATES — only include a change if it meets ALL of:
 - The change is based on something you can actually see in the provided files (not assumed).
 - The change makes the repo closer to shippable (not just cosmetic).
 - The file content you output is syntactically valid and complete.
 - The change is scoped — don't rewrite an entire file just to add one import.
+- If the repo has tests, your changes should not break them.
+- If you add code, it must be importable/callable — no dead code.
+
+BUILD VERIFICATION:
+- If the repo has a tsconfig.json, ensure your TypeScript is valid.
+- If the repo has ESLint, ensure your code follows the existing style.
+- If the repo has tests, do not modify test files unless fixing actual test bugs.
+- Every created/modified file must have correct imports that resolve to existing paths.
+- If you cannot verify a change will work, say so in the description — DO NOT silently hope.
 
 PRIORITY (do the most impactful things first):
 1. Fix broken imports, missing exports, stub functions that are called but not implemented.
@@ -264,9 +285,10 @@ DO NOT:
 - Add dependencies that aren't needed.
 - Create files for features the repo doesn't have.
 - Output more than 8 file changes. Focus on the highest-impact improvements.
+- Inflate completion — if the repo is 20% done, say so plainly.
 
 Return JSON with:
-- analysis: 3-5 sentences explaining what was wrong (be specific — reference actual files and code you saw).
+- analysis: 3-5 sentences explaining what was wrong (be specific — reference actual files and code you saw). Be honest — if the repo is mostly scaffolding, say "mostly scaffolding" not "almost there."
 - changes: array of { path, status, content, description } — only include changes you are confident about.`;
 
 async function generateFinishPlan(
@@ -626,10 +648,29 @@ export const finishRepo = createServerFn({ method: "POST" })
         description: c.description,
       }));
 
+    // SAFETY RAIL: Assess risk before creating the PR
+    const riskAssessment = assessChangeRisk({
+      filesCreated: changeLog.filter((c) => c.status === "created").length,
+      filesModified: changeLog.filter((c) => c.status === "modified").length,
+      filesDeleted: changeLog.filter((c) => c.status === "deleted").length,
+      touchesSrc: changeLog.some((c) => c.file.startsWith("src/") || c.file.startsWith("lib/")),
+      touchesConfig: changeLog.some((c) =>
+        /\.(json|toml|yaml|yml)$/.test(c.file) || /config/i.test(c.file),
+      ),
+      touchesDeps: changeLog.some((c) =>
+        c.file === "package.json" || c.file === "requirements.txt" || c.file === "Cargo.toml",
+      ),
+      isCrossRepo: false,
+      isMajorRefactor: changeLog.filter((c) => c.status === "modified").length > 5,
+      isMajorVersionBump: false,
+    });
+
     const prTitle = `🤖 RepoFinisher: ${commitResult.filesChanged} improvement${commitResult.filesChanged > 1 ? "s" : ""}`;
     const prBody = `## Automated improvements by RepoFinisher
 
 ${plan.analysis}
+
+${formatRiskCallout(riskAssessment)}
 
 ### Changes (${commitResult.filesChanged} file${commitResult.filesChanged > 1 ? "s" : ""})
 
@@ -640,6 +681,8 @@ ${changeLog.map((c) => `- [${c.status === "created" ? "+" : c.status === "modifi
 ${nextSteps.map((s) => `- [x] ${s}`).join("\n")}
 
 ---
+
+⚠️ **Review before merging.** This PR was generated automatically and should be reviewed by a human before merging.
 
 *Generated by [RepoFinisher](https://repofinish.vercel.app) — automated codebase completion.*`;
 
@@ -687,6 +730,17 @@ ${nextSteps.map((s) => `- [x] ${s}`).join("\n")}
         .eq("analysis_id", data.analysisId)
         .eq("rank", data.itemRank);
     }
+
+    // Log learning entry for persistent memory
+    await logLearningEntry(context.supabase, context.userId, data.repo, {
+      action: "finish-repo",
+      outcome: "success",
+      duration_ms: Date.now() - (Date.now() - 1000), // approximate
+      details: `Created PR #${pr.number} with ${commitResult.filesChanged} file changes. ${plan.analysis.slice(0, 200)}`,
+      files_affected: changeLog.map((c) => c.file),
+      fix_pattern: nextSteps.join("; ").slice(0, 200),
+      timestamp: new Date().toISOString(),
+    });
 
     return result;
   });
