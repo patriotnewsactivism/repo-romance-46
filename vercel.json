@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/scheduled-analysis",
       "schedule": "0 9 * * 1"
+    },
+    {
+      "path": "/api/cron/background-processor",
+      "schedule": "0 */4 * * *"
     }
   ]
 }
