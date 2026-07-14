@@ -119,7 +119,7 @@ async function fetchWithRetry(
     }
   }
   throw new Error(
-    `AI rate limit exhausted for ${provider}. ${lastError}. Try again in a minute, or switch to a provider with higher limits (OpenAI, Anthropic, Google).`,
+    `AI rate limit exhausted for ${provider}. ${lastError}. Try again in a minute, or switch to a provider with higher limits (OpenAI, Anthropic, Google, Groq, Cerebras, Mistral).`,
   );
 }
 
