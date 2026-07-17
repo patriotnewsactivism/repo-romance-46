@@ -1,6 +1,6 @@
 // Centralized AI provider routing — handles GitHub Models, OpenAI, Anthropic, Google
 
-const VALID_PROVIDERS = ["github_models", "openai", "anthropic", "google", "custom"];
+const VALID_PROVIDERS = ["github_models", "openai", "anthropic", "google", "custom", "mistral"];
 
 /**
  * Resolve the best available AI config from user prefs → server env → GitHub OAuth token.
@@ -82,6 +82,10 @@ const DEFAULT_MODELS: Record<string, string> = {
   anthropic: "claude-sonnet-4-20250514",
   google: "gemini-2.5-flash",
   custom: "gpt-4o",
+  // Devstral: Mistral's purpose-built agentic coding model (multi-file edits, tool use) —
+  // this repo's whole job is autonomous code completion, so it's the right single default
+  // (no per-role persona split exists in this codebase, unlike Apex/autonomous-coder).
+  mistral: "devstral-2512",
 };
 
 // Rate-limit retry config — GitHub Models free tier is very aggressive (5 RPM
@@ -130,6 +134,7 @@ const PROVIDER_ENDPOINTS: Record<string, string> = {
   anthropic: "https://api.anthropic.com/v1/messages",
   google: "https://generativelanguage.googleapis.com/v1beta/models",
   custom: "https://api.openai.com/v1/chat/completions",
+  mistral: "https://api.mistral.ai/v1/chat/completions",
 };
 
 /**
@@ -215,9 +220,9 @@ export async function callAI(
     return { content: json.candidates?.[0]?.content?.parts?.[0]?.text || "" };
   }
 
-  // ─── OpenAI-compatible (GitHub Models, OpenAI, custom) ────
+  // ─── OpenAI-compatible (GitHub Models, OpenAI, custom, Mistral) ────
   if (
-    (provider === "github_models" || provider === "openai" || provider === "custom") &&
+    (provider === "github_models" || provider === "openai" || provider === "custom" || provider === "mistral") &&
     config.apiKey
   ) {
     // Set max_tokens per provider — github_models (gpt-4o-mini) has an 8000
@@ -226,6 +231,7 @@ export async function callAI(
       github_models: 3000, // 3000 output + ~4000 input = under 8000 total
       openai: 4096,
       custom: 4096,
+      mistral: 4096,
     };
 
     const body: Record<string, unknown> = {
