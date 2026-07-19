@@ -1,4 +1,4 @@
-// Persistent Learning — logs what worked, what broke, and what took longer
+// Persistent Learning â logs what worked, what broke, and what took longer
 // than expected per repo AND cross-repo patterns.
 // Before suggesting a fix, checks history to avoid re-suggesting failures.
 
@@ -7,7 +7,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { Json } from "@/integrations/supabase/types";
 
-// ─── Types ─────────────────────────────────────────────────────
+// âââ Types âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 export interface LearningEntry {
   action: string;
@@ -28,7 +28,7 @@ export interface CrossRepoPattern {
   confidence: number;
 }
 
-// ─── Supabase type helpers ─────────────────────────────────────
+// âââ Supabase type helpers âââââââââââââââââââââââââââââââââââââ
 
 type SupabaseOps = {
   from: (t: string) => {
@@ -70,7 +70,7 @@ type SupabaseOps = {
   };
 };
 
-// ─── Log a learning entry for a specific repo ──────────────────
+// âââ Log a learning entry for a specific repo ââââââââââââââââââ
 
 export const logRepoLearning = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -155,7 +155,7 @@ export const logRepoLearning = createServerFn({ method: "POST" })
     return { ok: true, patternsDetected };
   });
 
-// ─── Get learning history for a repo ───────────────────────────
+// âââ Get learning history for a repo âââââââââââââââââââââââââââ
 
 export const getRepoLearnings = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -194,7 +194,7 @@ export const getRepoLearnings = createServerFn({ method: "GET" })
     };
   });
 
-// ─── Check if a fix pattern has been tried before ──────────────
+// âââ Check if a fix pattern has been tried before ââââââââââââââ
 
 export const checkFixHistory = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -248,14 +248,14 @@ export const checkFixHistory = createServerFn({ method: "POST" })
         : null,
       warning:
         failures.length > 0
-          ? `⚠️ This fix pattern has failed ${failures.length} time(s) on this repo. ` +
+          ? `â ï¸ This fix pattern has failed ${failures.length} time(s) on this repo. ` +
             `Last failure: "${failures[failures.length - 1].error_message || "unknown error"}". ` +
             `Consider adjusting the approach.`
           : null,
     };
   });
 
-// ─── Get cross-repo patterns ──────────────────────────────────
+// âââ Get cross-repo patterns ââââââââââââââââââââââââââââââââââ
 
 export const getCrossRepoPatterns = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -272,7 +272,7 @@ export const getCrossRepoPatterns = createServerFn({ method: "GET" })
     return (patterns as CrossRepoPattern[] | null) ?? [];
   });
 
-// ─── Internal: detect recurring patterns in a repo's history ───
+// âââ Internal: detect recurring patterns in a repo's history âââ
 
 function detectPatterns(history: LearningEntry[]): string[] {
   const patterns: string[] = [];
@@ -291,7 +291,7 @@ function detectPatterns(history: LearningEntry[]): string[] {
   for (const [action, failures] of failuresByAction) {
     if (failures.length >= 2) {
       patterns.push(
-        `Recurring failure: "${action}" has failed ${failures.length} times — ` +
+        `Recurring failure: "${action}" has failed ${failures.length} times â ` +
           `investigate root cause before retrying`,
       );
     }
@@ -304,7 +304,7 @@ function detectPatterns(history: LearningEntry[]): string[] {
       slowOps.reduce((sum, h) => sum + h.duration_ms, 0) / slowOps.length / 1000,
     );
     patterns.push(
-      `Performance pattern: ${slowOps.length} operations took >${avgDuration}s average — ` +
+      `Performance pattern: ${slowOps.length} operations took >${avgDuration}s average â ` +
         `consider splitting into smaller chunks`,
     );
   }
@@ -318,14 +318,14 @@ function detectPatterns(history: LearningEntry[]): string[] {
   }
   for (const [file, count] of fileCounts) {
     if (count >= 4) {
-      patterns.push(`Hot file: "${file}" has been changed ${count} times — may need stabilization`);
+      patterns.push(`Hot file: "${file}" has been changed ${count} times â may need stabilization`);
     }
   }
 
   return patterns;
 }
 
-// ─── Internal: update cross-repo pattern log ───────────────────
+// âââ Internal: update cross-repo pattern log âââââââââââââââââââ
 
 async function updateCrossRepoPattern(
   supabase: SupabaseOps,
@@ -378,7 +378,7 @@ async function updateCrossRepoPattern(
       }
 
       if (failedRepos.size >= 3) {
-        recommendation += ` ⚠️ Has failed on ${failedRepos.size} different repos — may indicate a systemic issue.`;
+        recommendation += ` â ï¸ Has failed on ${failedRepos.size} different repos â may indicate a systemic issue.`;
       }
 
       await supabase
@@ -400,18 +400,18 @@ async function updateCrossRepoPattern(
         confidence: outcome === "success" ? 100 : 0,
         recommendation:
           outcome === "success"
-            ? "First occurrence — worked. Will track across repos."
-            : "First occurrence — failed. Will track to see if this is a recurring issue.",
+            ? "First occurrence â worked. Will track across repos."
+            : "First occurrence â failed. Will track to see if this is a recurring issue.",
         updated_at: new Date().toISOString(),
       });
     }
   } catch (e) {
-    // Learning log is best-effort — never fail the main operation
+    // Learning log is best-effort â never fail the main operation
     console.warn("[learning-log] Failed to update cross-repo pattern:", e);
   }
 }
 
-// ─── Log helper for use in repo-finisher ───────────────────────
+// âââ Log helper for use in repo-finisher âââââââââââââââââââââââ
 
 /**
  * Convenience function to log a learning entry from other server functions.

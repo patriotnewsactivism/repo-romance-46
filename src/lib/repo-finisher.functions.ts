@@ -5,7 +5,7 @@ import { callAI, resolveAIConfig, type AIProviderConfig } from "@/lib/ai-provide
 import { safeGitHubWrite, assertNotProtectedBranch, assessChangeRisk, formatRiskCallout } from "@/lib/safety-rails";
 import { logLearningEntry } from "@/lib/learning-log.functions";
 
-// ─── Types ─────────────────────────────────────────────────────
+// âââ Types âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 interface GitHubFile {
   path: string;
@@ -29,7 +29,7 @@ interface FinishResult {
   }[];
 }
 
-// ─── GitHub API helpers ────────────────────────────────────────
+// âââ GitHub API helpers ââââââââââââââââââââââââââââââââââââââââ
 
 function ghHeaders(token: string) {
   return {
@@ -70,7 +70,7 @@ async function getFileContent(
   return { path, content, sha: json.sha };
 }
 
-// ─── Parallel file fetching ────────────────────────────────────
+// âââ Parallel file fetching ââââââââââââââââââââââââââââââââââââ
 
 async function parallelMap<T, R>(
   items: T[],
@@ -96,7 +96,7 @@ async function parallelMap<T, R>(
   return results;
 }
 
-// ─── Git Data API: batch commit in a single API call ───────────
+// âââ Git Data API: batch commit in a single API call âââââââââââ
 // Instead of committing files one by one (N API calls), we create
 // a single tree with all changes and one commit. This is both faster
 // and atomic.
@@ -225,7 +225,7 @@ async function batchCommit(
   return { commitSha: newCommit.sha, filesChanged };
 }
 
-// ─── AI code generation ────────────────────────────────────────
+// âââ AI code generation ââââââââââââââââââââââââââââââââââââââââ
 
 interface AIFileChange {
   path: string;
@@ -244,32 +244,32 @@ You are given a repo's metadata, health check, and ACTUAL source files. Your job
 
 STRICT RULES:
 1. Only suggest changes you are CONFIDENT about based on the actual code you can see.
-2. For "modified" files, output the COMPLETE updated file — do not use diffs or partial content.
+2. For "modified" files, output the COMPLETE updated file â do not use diffs or partial content.
 3. For "created" files, output the full new file with working, production-ready code.
 4. Do NOT rewrite files that are already fine. Only touch files that need fixing.
 5. Each change must have a specific, concrete description explaining WHAT you changed and WHY.
 
-SAFETY RAILS — NON-NEGOTIABLE:
+SAFETY RAILS â NON-NEGOTIABLE:
 - NEVER modify or reference files from other repositories.
 - NEVER suggest force-pushing, deleting branches, or modifying main/production directly.
 - If you see a pattern that has caused issues before (noted in the context), adjust your approach.
 - If a change could break existing functionality, flag it explicitly in the description.
 - Prefer small, testable increments over large rewrites.
 
-QUALITY GATES — only include a change if it meets ALL of:
+QUALITY GATES â only include a change if it meets ALL of:
 - The change is based on something you can actually see in the provided files (not assumed).
 - The change makes the repo closer to shippable (not just cosmetic).
 - The file content you output is syntactically valid and complete.
-- The change is scoped — don't rewrite an entire file just to add one import.
+- The change is scoped â don't rewrite an entire file just to add one import.
 - If the repo has tests, your changes should not break them.
-- If you add code, it must be importable/callable — no dead code.
+- If you add code, it must be importable/callable â no dead code.
 
 BUILD VERIFICATION:
 - If the repo has a tsconfig.json, ensure your TypeScript is valid.
 - If the repo has ESLint, ensure your code follows the existing style.
 - If the repo has tests, do not modify test files unless fixing actual test bugs.
 - Every created/modified file must have correct imports that resolve to existing paths.
-- If you cannot verify a change will work, say so in the description — DO NOT silently hope.
+- If you cannot verify a change will work, say so in the description â DO NOT silently hope.
 
 PRIORITY (do the most impactful things first):
 1. Fix broken imports, missing exports, stub functions that are called but not implemented.
@@ -285,11 +285,11 @@ DO NOT:
 - Add dependencies that aren't needed.
 - Create files for features the repo doesn't have.
 - Output more than 8 file changes. Focus on the highest-impact improvements.
-- Inflate completion — if the repo is 20% done, say so plainly.
+- Inflate completion â if the repo is 20% done, say so plainly.
 
 Return JSON with:
-- analysis: 3-5 sentences explaining what was wrong (be specific — reference actual files and code you saw). Be honest — if the repo is mostly scaffolding, say "mostly scaffolding" not "almost there."
-- changes: array of { path, status, content, description } — only include changes you are confident about.`;
+- analysis: 3-5 sentences explaining what was wrong (be specific â reference actual files and code you saw). Be honest â if the repo is mostly scaffolding, say "mostly scaffolding" not "almost there."
+- changes: array of { path, status, content, description } â only include changes you are confident about.`;
 
 async function generateFinishPlan(
   repo: string,
@@ -312,7 +312,7 @@ async function generateFinishPlan(
   nextSteps: string[],
   aiConfig: AIProviderConfig,
 ): Promise<AIFinishPlan> {
-  // Build file summaries — show more of each file since the AI needs full context
+  // Build file summaries â show more of each file since the AI needs full context
   const MAX_FILE_CHARS = 4000;
   const fileSummaries = files
     .map((f) => {
@@ -388,7 +388,7 @@ ${fileSummaries}`;
 
   // Validate the plan
   if (!plan.changes || !Array.isArray(plan.changes)) {
-    throw new Error("AI returned an invalid finish plan — no changes array.");
+    throw new Error("AI returned an invalid finish plan â no changes array.");
   }
 
   // Filter out obviously bad changes
@@ -403,7 +403,7 @@ ${fileSummaries}`;
 
   if (validChanges.length === 0) {
     throw new Error(
-      "AI didn't produce any valid changes — the repo might already be in good shape, or the AI couldn't find concrete improvements based on the provided files.",
+      "AI didn't produce any valid changes â the repo might already be in good shape, or the AI couldn't find concrete improvements based on the provided files.",
     );
   }
 
@@ -412,7 +412,7 @@ ${fileSummaries}`;
   return plan;
 }
 
-// ─── Fetch key files from repo (parallel) ──────────────────────
+// âââ Fetch key files from repo (parallel) ââââââââââââââââââââââ
 
 async function fetchKeyFiles(
   token: string,
@@ -459,7 +459,7 @@ async function fetchKeyFiles(
     if (keyFiles.length >= 12) break;
   }
 
-  // Also grab source files from src/ — prioritize larger files
+  // Also grab source files from src/ â prioritize larger files
   const srcFiles = tree
     .filter(
       (t) =>
@@ -477,7 +477,7 @@ async function fetchKeyFiles(
     if (keyFiles.length >= 18) break;
   }
 
-  // Fetch contents IN PARALLEL (was sequential — major timeout cause)
+  // Fetch contents IN PARALLEL (was sequential â major timeout cause)
   const fetchResults = await parallelMap(
     keyFiles.slice(0, 15),
     5, // 5 concurrent fetches
@@ -494,7 +494,7 @@ async function fetchKeyFiles(
   return files;
 }
 
-// ─── Timeout helper ────────────────────────────────────────────
+// âââ Timeout helper ââââââââââââââââââââââââââââââââââââââââââââ
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([
@@ -508,7 +508,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   ]);
 }
 
-// ─── Main: Finish a repo ───────────────────────────────────────
+// âââ Main: Finish a repo âââââââââââââââââââââââââââââââââââââââ
 
 export const finishRepo = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -534,10 +534,10 @@ export const finishRepo = createServerFn({ method: "POST" })
 
     const token = conn.access_token;
 
-    // Resolve AI provider (user key → server key → GitHub Models via OAuth token)
+    // Resolve AI provider (user key â server key â GitHub Models via OAuth token)
     const aiConfig = await resolveAIConfig(context.supabase, context.userId);
 
-    // ── 1. Fetch repo metadata + tree in parallel ──────────────
+    // ââ 1. Fetch repo metadata + tree in parallel ââââââââââââââ
     const [repoRes, treeData] = await Promise.all([
       ghFetch(token, `/repos/${data.repo}`),
       (async () => {
@@ -582,7 +582,7 @@ export const finishRepo = createServerFn({ method: "POST" })
       ).slice(0, 8),
     };
 
-    // ── 2. Resolve next steps ──────────────────────────────────
+    // ââ 2. Resolve next steps ââââââââââââââââââââââââââââââââââ
     let nextSteps = data.nextSteps || [];
     if (nextSteps.length === 0 && data.analysisId && data.itemRank !== undefined) {
       const { data: item } = await context.supabase
@@ -605,7 +605,7 @@ export const finishRepo = createServerFn({ method: "POST" })
       nextSteps.push("Fix any obvious bugs or incomplete implementations");
     }
 
-    // ── 3. Fetch key files in parallel ─────────────────────────
+    // ââ 3. Fetch key files in parallel âââââââââââââââââââââââââ
     const files = await withTimeout(
       fetchKeyFiles(token, data.repo, defaultBranch, treeResult),
       20000,
@@ -618,7 +618,7 @@ export const finishRepo = createServerFn({ method: "POST" })
       );
     }
 
-    // ── 4. Generate the finish plan via AI ─────────────────────
+    // ââ 4. Generate the finish plan via AI âââââââââââââââââââââ
     const plan = await withTimeout(
       generateFinishPlan(data.repo, repoData, files, nextSteps, aiConfig),
       60000,
@@ -626,10 +626,10 @@ export const finishRepo = createServerFn({ method: "POST" })
     );
 
     if (!plan.changes || plan.changes.length === 0) {
-      throw new Error("AI didn't generate any changes — the repo might already be in good shape.");
+      throw new Error("AI didn't generate any changes â the repo might already be in good shape.");
     }
 
-    // ── 5. Batch commit all changes via Git Data API ───────────
+    // ââ 5. Batch commit all changes via Git Data API âââââââââââ
     // This creates a single commit with all changes instead of N sequential commits
     const branchName = `repo-finisher/fixes-${Date.now().toString(36)}`;
 
@@ -639,7 +639,7 @@ export const finishRepo = createServerFn({ method: "POST" })
       "Batch commit",
     );
 
-    // ── 6. Create PR ───────────────────────────────────────────
+    // ââ 6. Create PR âââââââââââââââââââââââââââââââââââââââââââ
     const changeLog: FinishResult["changes"] = plan.changes
       .slice(0, commitResult.filesChanged)
       .map((c) => ({
@@ -665,7 +665,7 @@ export const finishRepo = createServerFn({ method: "POST" })
       isMajorVersionBump: false,
     });
 
-    const prTitle = `🤖 RepoFinisher: ${commitResult.filesChanged} improvement${commitResult.filesChanged > 1 ? "s" : ""}`;
+    const prTitle = `ð¤ RepoFinisher: ${commitResult.filesChanged} improvement${commitResult.filesChanged > 1 ? "s" : ""}`;
     const prBody = `## Automated improvements by RepoFinisher
 
 ${plan.analysis}
@@ -674,7 +674,7 @@ ${formatRiskCallout(riskAssessment)}
 
 ### Changes (${commitResult.filesChanged} file${commitResult.filesChanged > 1 ? "s" : ""})
 
-${changeLog.map((c) => `- [${c.status === "created" ? "+" : c.status === "modified" ? "~" : "-"}] \`${c.file}\` — ${c.description}`).join("\n")}
+${changeLog.map((c) => `- [${c.status === "created" ? "+" : c.status === "modified" ? "~" : "-"}] \`${c.file}\` â ${c.description}`).join("\n")}
 
 ### Next steps addressed
 
@@ -682,9 +682,9 @@ ${nextSteps.map((s) => `- [x] ${s}`).join("\n")}
 
 ---
 
-⚠️ **Review before merging.** This PR was generated automatically and should be reviewed by a human before merging.
+â ï¸ **Review before merging.** This PR was generated automatically and should be reviewed by a human before merging.
 
-*Generated by [RepoFinisher](https://repofinish.vercel.app) — automated codebase completion.*`;
+*Generated by [RepoFinisher](https://repofinish.vercel.app) â automated codebase completion.*`;
 
     const pr = await withTimeout(
       (async () => {
@@ -745,7 +745,7 @@ ${nextSteps.map((s) => `- [x] ${s}`).join("\n")}
     return result;
   });
 
-// ─── Get finish status for a repo ──────────────────────────────
+// âââ Get finish status for a repo ââââââââââââââââââââââââââââââ
 
 export const getFinishStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])

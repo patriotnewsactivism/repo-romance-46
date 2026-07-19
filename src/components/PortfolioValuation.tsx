@@ -91,7 +91,7 @@ export function PortfolioValuation({ analysisId }: { analysisId: string }) {
           <h3 className="font-semibold">Portfolio Valuation</h3>
         </div>
         <p className="text-sm text-muted-foreground">
-          Get an AI-powered valuation of your repos — estimated market value, revenue potential,
+          Get an AI-powered valuation of your repos â estimated market value, revenue potential,
           comparable acquisitions, risk factors, and upside catalysts.
         </p>
         <Button onClick={() => valueMut.mutate()} disabled={valueMut.isPending} className="gap-2">
@@ -110,10 +110,10 @@ export function PortfolioValuation({ analysisId }: { analysisId: string }) {
           <h3 className="font-semibold">Valuing your portfolio...</h3>
         </div>
         <div className="text-xs text-muted-foreground space-y-1 pl-7">
-          <p>• Fetching GitHub metrics for each repo (stars, commits, CI, tests)</p>
-          <p>• Analyzing code quality, market potential, and traction signals</p>
-          <p>• Finding comparable acquisitions and exits</p>
-          <p>• Calculating estimated value ranges and revenue potential</p>
+          <p>â¢ Fetching GitHub metrics for each repo (stars, commits, CI, tests)</p>
+          <p>â¢ Analyzing code quality, market potential, and traction signals</p>
+          <p>â¢ Finding comparable acquisitions and exits</p>
+          <p>â¢ Calculating estimated value ranges and revenue potential</p>
         </div>
       </Card>
     );
@@ -132,7 +132,7 @@ export function PortfolioValuation({ analysisId }: { analysisId: string }) {
               Portfolio Estimated Value
             </div>
             <div className="text-3xl font-bold">
-              {formatMoney(data.total_estimated_value_low)} —{" "}
+              {formatMoney(data.total_estimated_value_low)} â{" "}
               {formatMoney(data.total_estimated_value_high)}
             </div>
             <p className="text-xs text-muted-foreground">{data.portfolio_summary}</p>
@@ -198,7 +198,7 @@ export function PortfolioValuation({ analysisId }: { analysisId: string }) {
               </div>
               <div className="text-right">
                 <div className="text-lg font-bold">
-                  {formatMoney(v.estimated_value_low)} — {formatMoney(v.estimated_value_high)}
+                  {formatMoney(v.estimated_value_low)} â {formatMoney(v.estimated_value_high)}
                 </div>
               </div>
             </div>
@@ -208,7 +208,7 @@ export function PortfolioValuation({ analysisId }: { analysisId: string }) {
               onClick={() => setExpandedRepo(expandedRepo === i ? null : i)}
               className="text-xs font-mono text-muted-foreground hover:text-foreground"
             >
-              {expandedRepo === i ? "▾ hide breakdown" : "▸ show breakdown"}
+              {expandedRepo === i ? "â¾ hide breakdown" : "â¸ show breakdown"}
             </button>
 
             {expandedRepo === i && (
@@ -221,7 +221,7 @@ export function PortfolioValuation({ analysisId }: { analysisId: string }) {
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">{v.revenue_potential.model}</span>
                     <span className="text-sm font-semibold">
-                      {formatMoney(v.revenue_potential.monthly_revenue_low)} —{" "}
+                      {formatMoney(v.revenue_potential.monthly_revenue_low)} â{" "}
                       {formatMoney(v.revenue_potential.monthly_revenue_high)}/mo
                     </span>
                   </div>
@@ -267,7 +267,7 @@ export function PortfolioValuation({ analysisId }: { analysisId: string }) {
                         <div className="space-y-0.5">
                           <div className="text-sm font-medium">{c.name}</div>
                           <div className="text-xs text-muted-foreground">
-                            {c.outcome} — {c.multiple}
+                            {c.outcome} â {c.multiple}
                           </div>
                           <div className="text-xs text-muted-foreground italic">{c.relevance}</div>
                         </div>

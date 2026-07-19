@@ -87,10 +87,10 @@ export function RepoFinisher({ repo, nextSteps, analysisId, itemRank, kind }: Re
             <span>Analyzing source files...</span>
           </div>
           <div className="text-xs text-muted-foreground space-y-1 pl-5">
-            <p>• Fetching repo metadata and file tree</p>
-            <p>• Reading key source files</p>
-            <p>• AI generating improvements (README, CI, tests, bug fixes)</p>
-            <p>• Creating branch and opening PR</p>
+            <p>â¢ Fetching repo metadata and file tree</p>
+            <p>â¢ Reading key source files</p>
+            <p>â¢ AI generating improvements (README, CI, tests, bug fixes)</p>
+            <p>â¢ Creating branch and opening PR</p>
           </div>
         </Card>
       )}

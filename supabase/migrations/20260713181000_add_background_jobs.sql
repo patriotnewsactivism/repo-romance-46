@@ -50,4 +50,4 @@ CREATE INDEX background_jobs_user_history_idx
   ON public.background_jobs(user_id, completed_at DESC)
   WHERE status IN ('complete', 'failed');
 
-COMMENT ON TABLE public.background_jobs IS 'Queue for autonomous background processing — analysis, finishing, dependency audits, etc.';
+COMMENT ON TABLE public.background_jobs IS 'Queue for autonomous background processing â analysis, finishing, dependency audits, etc.';
