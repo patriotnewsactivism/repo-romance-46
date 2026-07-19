@@ -1,4 +1,4 @@
-// Standalone Vite config — no Lovable dependency.
+// Standalone Vite config â no Lovable dependency.
 // Replaces @lovable.dev/vite-tanstack-config with direct plugin imports.
 
 import { defineConfig, loadEnv } from "vite";
@@ -9,11 +9,11 @@ import react from "@vitejs/plugin-react";
 export default defineConfig(async ({ command, mode }) => {
   const plugins = [];
 
-  // ── Core plugins ──────────────────────────────────────────────
+  // ââ Core plugins ââââââââââââââââââââââââââââââââââââââââââââââ
   plugins.push(tailwindcss());
   plugins.push(tsconfigPaths({ projects: ["./tsconfig.json"] }));
 
-  // ── TanStack Start ────────────────────────────────────────────
+  // ââ TanStack Start ââââââââââââââââââââââââââââââââââââââââââââ
   const { tanstackStart } = await import("@tanstack/react-start/plugin/vite");
   plugins.push(
     tanstackStart({
@@ -28,16 +28,16 @@ export default defineConfig(async ({ command, mode }) => {
     }),
   );
 
-  // ── Nitro (deploy target) — build only ────────────────────────
+  // ââ Nitro (deploy target) â build only ââââââââââââââââââââââââ
   if (command === "build") {
     const { nitro } = await import("nitro/vite");
     plugins.push(nitro({ defaultPreset: "vercel" }));
   }
 
-  // ── React ─────────────────────────────────────────────────────
+  // ââ React âââââââââââââââââââââââââââââââââââââââââââââââââââââ
   plugins.push(react());
 
-  // ── VITE_* env define (ensures SSR has access to env vars) ────
+  // ââ VITE_* env define (ensures SSR has access to env vars) ââââ
   const loadedEnv = loadEnv(mode, process.cwd(), "VITE_");
   const envDefine: Record<string, string> = {};
   for (const [key, value] of Object.entries(loadedEnv)) {

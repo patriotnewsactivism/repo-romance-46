@@ -1,8 +1,8 @@
-// Scope Guard — enforces single-repo discipline by default.
+// Scope Guard â enforces single-repo discipline by default.
 // Multi-repo operations require explicit opt-in with risk acknowledgment.
 // Prevents accidental cross-repo mutations that could cascade failures.
 
-// ─── Types ─────────────────────────────────────────────────────
+// âââ Types âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 export interface ScopeContext {
   /** The repo currently being worked on (null = portfolio-level) */
@@ -33,7 +33,7 @@ export class ScopeViolationError extends Error {
   }
 }
 
-// ─── Default scope ─────────────────────────────────────────────
+// âââ Default scope âââââââââââââââââââââââââââââââââââââââââââââ
 
 const DEFAULT_MAX_MULTI_REPOS = 5;
 
@@ -65,7 +65,7 @@ export function enableMultiRepo(
   };
 }
 
-// ─── Enforcement ───────────────────────────────────────────────
+// âââ Enforcement âââââââââââââââââââââââââââââââââââââââââââââââ
 
 /**
  * Assert that a repo operation is within the current scope.
@@ -83,12 +83,12 @@ export function assertWithinScope(scope: ScopeContext, repo: string): void {
     return;
   }
 
-  // Same repo — always OK
+  // Same repo â always OK
   if (scope.activeRepo === repo) {
     return;
   }
 
-  // Different repo — check mode
+  // Different repo â check mode
   if (!scope.multiRepoEnabled) {
     throw new ScopeViolationError({
       type: "implicit_multi_repo",
@@ -100,7 +100,7 @@ export function assertWithinScope(scope: ScopeContext, repo: string): void {
     });
   }
 
-  // Multi-repo mode — check limits
+  // Multi-repo mode â check limits
   scope.touchedRepos.add(repo);
   if (scope.touchedRepos.size > scope.maxMultiRepos) {
     throw new ScopeViolationError({
@@ -121,9 +121,9 @@ export function formatScopeStatus(scope: ScopeContext): string {
   const mode = scope.multiRepoEnabled ? "multi-repo" : "single-repo";
   const repos = Array.from(scope.touchedRepos);
 
-  if (repos.length === 0) return `🔒 Scope: ${mode} (no repos touched yet)`;
-  if (repos.length === 1) return `🔒 Scope: ${mode} — active on \`${repos[0]}\``;
-  return `⚠️ Scope: ${mode} — touching ${repos.length} repos: ${repos.map((r) => `\`${r}\``).join(", ")}`;
+  if (repos.length === 0) return `ð Scope: ${mode} (no repos touched yet)`;
+  if (repos.length === 1) return `ð Scope: ${mode} â active on \`${repos[0]}\``;
+  return `â ï¸ Scope: ${mode} â touching ${repos.length} repos: ${repos.map((r) => `\`${r}\``).join(", ")}`;
 }
 
 /**
@@ -134,11 +134,11 @@ export function multiRepoRiskCheck(repos: string[]): string | null {
   if (repos.length <= 1) return null;
 
   const warnings: string[] = [];
-  warnings.push(`⚠️ **Multi-repo operation** touching ${repos.length} repositories.`);
-  warnings.push("Each repo will receive its own PR — review and merge them independently.");
+  warnings.push(`â ï¸ **Multi-repo operation** touching ${repos.length} repositories.`);
+  warnings.push("Each repo will receive its own PR â review and merge them independently.");
 
   if (repos.length > 3) {
-    warnings.push("🔴 **High scope** — operating on 4+ repos in one session increases failure risk.");
+    warnings.push("ð´ **High scope** â operating on 4+ repos in one session increases failure risk.");
     warnings.push("Consider breaking this into smaller batches.");
   }
 

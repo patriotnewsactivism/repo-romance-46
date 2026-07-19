@@ -106,17 +106,17 @@ export function ActivityFeed({ repo }: { repo?: string }) {
             <span className="text-muted-foreground">24h:</span>
             {stats.byStatus.success > 0 && (
               <Badge variant="outline" className="text-green-500 border-green-500/30 text-[10px] px-1">
-                {stats.byStatus.success} ✓
+                {stats.byStatus.success} â
               </Badge>
             )}
             {stats.byStatus.error > 0 && (
               <Badge variant="outline" className="text-red-500 border-red-500/30 text-[10px] px-1">
-                {stats.byStatus.error} ✗
+                {stats.byStatus.error} â
               </Badge>
             )}
             {stats.byStatus.warning > 0 && (
               <Badge variant="outline" className="text-yellow-500 border-yellow-500/30 text-[10px] px-1">
-                {stats.byStatus.warning} ⚠
+                {stats.byStatus.warning} â 
               </Badge>
             )}
           </div>

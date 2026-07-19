@@ -23,8 +23,45 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
+import { toast } from "react-toastify";
+import { Skeleton } from "@/components/ui/skeleton";
 
+// Error handling utility
+const handleError = (error: unknown, defaultMessage: string) => {
+  if (error instanceof Error) {
+    toast.error(error.message || defaultMessage);
+    console.error(error);
+  } else {
+    toast.error(defaultMessage);
+    console.error('Unknown error:', error);
+  }
+};
+
+// Loading state component
+const LoadingState = () => (
+  <div className="space-y-2">
+    <Skeleton className="h-4 w-[200px]" />
+    {[1, 2, 3].map((i) => (
+      <div key={i} className="flex items-start gap-3 rounded-md border border-border p-3">
+        <Skeleton className="h-4 w-4 rounded-full" />
+        <div className="flex-1 space-y-2">
+          <Skeleton className="h-3 w-[150px]" />
+          <Skeleton className="h-3 w-full" />
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
+// Error state component
+const ErrorState = ({ message }: { message: string }) => (
+  <div className="flex items-center gap-2 p-3 rounded-md border border-destructive/50 bg-destructive/10">
+    <XCircle className="h-4 w-4 text-destructive" />
+    <p className="text-sm text-destructive">{message}</p>
+  </div>
+);
+
+// Main component
 export function AutonomousRunner() {
   const previewFn = useServerFn(previewAutonomousPlan);
   const runFn = useServerFn(runAutonomousNow);
@@ -35,7 +72,7 @@ export function AutonomousRunner() {
 
   const previewMut = useMutation({
     mutationFn: () => previewFn({}),
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => handleError(e, "Failed to preview autonomous plan"),
   });
 
   const runMut = useMutation({
@@ -46,19 +83,21 @@ export function AutonomousRunner() {
       toast.success(`Autonomous run complete: ${ok} succeeded, ${fail} failed`);
       activeQ.refetch();
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => handleError(e, "Failed to run autonomous tasks"),
   });
 
   const activeQ = useQuery({
     queryKey: ["active-jobs"],
-    queryFn: () => statusFn({ data: {} }),
+    queryFn: () => statusFn({ data: {} }),    
     refetchInterval: 5000,
+    onError: (e: Error) => handleError(e, "Failed to fetch active jobs"),
   });
 
   const historyQ = useQuery({
     queryKey: ["job-history"],
     queryFn: () => historyFn({}),
     enabled: showHistory,
+    onError: (e: Error) => handleError(e, "Failed to fetch job history"),
   });
 
   const activeJobs = (activeQ.data?.jobs ?? []) as Array<{
@@ -119,7 +158,11 @@ export function AutonomousRunner() {
       </div>
 
       {/* Preview: what the AI would do */}
-      {previewMut.data && (
+      {previewMut.isPending ? (
+        <LoadingState />
+      ) : previewMut.isError ? (
+        <ErrorState message="Failed to load preview" />
+      ) : previewMut.data ? (
         <div className="space-y-2">
           <div className="text-xs font-mono text-muted-foreground uppercase">
             AI Reasoning — Planned Actions
@@ -156,10 +199,14 @@ export function AutonomousRunner() {
             </div>
           ))}
         </div>
-      )}
+      ) : null}
 
       {/* Run results */}
-      {runMut.data && (
+      {runMut.isPending ? (
+        <LoadingState />
+      ) : runMut.isError ? (
+        <ErrorState message="Failed to execute run" />
+      ) : runMut.data ? (
         <div className="space-y-2">
           <div className="text-xs font-mono text-muted-foreground uppercase">
             Run Results
@@ -188,10 +235,14 @@ export function AutonomousRunner() {
             </div>
           ))}
         </div>
-      )}
+      ) : null}
 
       {/* Active background jobs */}
-      {activeJobs.length > 0 && (
+      {activeQ.isPending ? (
+        <LoadingState />
+      ) : activeQ.isError ? (
+        <ErrorState message="Failed to load active jobs" />
+      ) : activeJobs.length > 0 ? (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             <div className="text-xs font-mono text-muted-foreground uppercase">Active Jobs</div>
@@ -220,7 +271,7 @@ export function AutonomousRunner() {
             </div>
           ))}
         </div>
-      )}
+      ) : null}
 
       {/* Toggle history */}
       <div className="flex items-center gap-2 pt-1 border-t border-border">
@@ -232,29 +283,37 @@ export function AutonomousRunner() {
         </button>
       </div>
 
-      {showHistory && historyJobs.length > 0 && (
-        <div className="space-y-1 max-h-48 overflow-y-auto">
-          {historyJobs.slice(0, 20).map((job) => (
-            <div
-              key={job.id}
-              className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground"
-            >
-              {job.status === "complete" ? (
-                <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" />
-              ) : (
-                <XCircle className="h-3 w-3 text-red-500 shrink-0" />
-              )}
-              <span>{job.kind}</span>
-              <span className="text-muted-foreground/60">{job.repo || "portfolio"}</span>
-              {job.error && <span className="text-red-400 truncate">{job.error.slice(0, 50)}</span>}
-              <span className="ml-auto text-muted-foreground/40">
-                {job.completed_at
-                  ? new Date(job.completed_at).toLocaleDateString()
-                  : ""}
-              </span>
-            </div>
-          ))}
-        </div>
+      {showHistory && (
+        historyQ.isPending ? (
+          <LoadingState />
+        ) : historyQ.isError ? (
+          <ErrorState message="Failed to load job history" />
+        ) : historyJobs.length > 0 ? (
+          <div className="space-y-1 max-h-48 overflow-y-auto">
+            {historyJobs.slice(0, 20).map((job) => (
+              <div
+                key={job.id}
+                className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground"
+              >
+                {job.status === "complete" ? (
+                  <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" />
+                ) : (
+                  <XCircle className="h-3 w-3 text-red-500 shrink-0" />
+                )}
+                <span>{job.kind}</span>
+                <span className="text-muted-foreground/60">{job.repo || "portfolio"}</span>
+                {job.error && <span className="text-red-400 truncate">{job.error.slice(0, 50)}</span>}
+                <span className="ml-auto text-muted-foreground/40">
+                  {job.completed_at
+                    ? new Date(job.completed_at).toLocaleDateString()
+                    : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">No job history available</p>
+        )
       )}
     </Card>
   );

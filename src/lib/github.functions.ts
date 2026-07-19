@@ -91,7 +91,7 @@ export const getPortfolioSummary = createServerFn({ method: "GET" })
 
     const token = conn.access_token;
 
-    // Fetch repos — just metadata, no deep sampling
+    // Fetch repos â just metadata, no deep sampling
     const res = await fetch(
       "https://api.github.com/user/repos?per_page=100&affiliation=owner&sort=pushed",
       {

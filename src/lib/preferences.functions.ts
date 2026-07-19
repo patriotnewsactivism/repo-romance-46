@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
-// ─── Star / Unstar a recommendation ───────────────────────────
+// âââ Star / Unstar a recommendation âââââââââââââââââââââââââââ
 
 export const toggleStar = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -22,7 +22,7 @@ export const toggleStar = createServerFn({ method: "POST" })
     return { isStarred: data.starred };
   });
 
-// ─── Get user preferences ─────────────────────────────────────
+// âââ Get user preferences âââââââââââââââââââââââââââââââââââââ
 
 export interface UserPreferences {
   email_notifications: boolean;
@@ -62,7 +62,7 @@ export const getPreferences = createServerFn({ method: "GET" })
     return data as unknown as UserPreferences;
   });
 
-// ─── Update user preferences ──────────────────────────────────
+// âââ Update user preferences ââââââââââââââââââââââââââââââââââ
 
 export const updatePreferences = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -82,7 +82,7 @@ export const updatePreferences = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ context, data }) => {
-    // Use update() not upsert() — upsert replaces the whole row and would
+    // Use update() not upsert() â upsert replaces the whole row and would
     // null out any column not explicitly in the payload (e.g. custom_ai_key
     // when the user leaves the field blank to keep their saved key).
     const { error } = await context.supabase
@@ -96,7 +96,7 @@ export const updatePreferences = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-// ─── Get starred recommendations across all analyses ──────────
+// âââ Get starred recommendations across all analyses ââââââââââ
 
 export const getStarredItems = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])

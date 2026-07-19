@@ -5,7 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { callAI, type AIProviderConfig } from "@/lib/ai-provider";
 
-// ─── Types ────────────────────────────────────────────────────
+// âââ Types ââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 export type EmployeeRole = "support" | "engineering" | "marketing" | "ops" | "product" | "sales";
 export type TaskType =
@@ -35,7 +35,7 @@ export interface EmployeeResult {
   sendSubject?: string;
 }
 
-// ─── Employee Profiles ────────────────────────────────────────
+// âââ Employee Profiles ââââââââââââââââââââââââââââââââââââââââ
 
 const EMPLOYEE_PROFILES: Record<EmployeeRole, { name: string; systemPrompt: string }> = {
   support: {
@@ -61,7 +61,7 @@ Be technical and precise. Include code snippets when suggesting fixes.`,
   marketing: {
     name: "Maya",
     systemPrompt: `You are Maya, the marketing agent for RepoFinisher.
-Create engaging, authentic content about RepoFinisher — tweets, LinkedIn posts, and blog ideas.
+Create engaging, authentic content about RepoFinisher â tweets, LinkedIn posts, and blog ideas.
 RepoFinisher helps developers figure out what to do with their unfinished GitHub repos. It's like having an AI advisor for your code portfolio.
 Keep content genuine, not salesy. Use developer-friendly language. Include relevant hashtags.`,
   },
@@ -85,7 +85,7 @@ Be professional but not pushy. Focus on value and fit. Qualify leads before sche
   },
 };
 
-// ─── Task-Specific Prompt Builders ────────────────────────────
+// âââ Task-Specific Prompt Builders ââââââââââââââââââââââââââââ
 
 function buildPrompt(task: EmployeeTask): string {
   switch (task.taskType) {
@@ -163,7 +163,7 @@ Draft a follow-up message. Format as JSON:
   }
 }
 
-// ─── Core Dispatch Function ───────────────────────────────────
+// âââ Core Dispatch Function âââââââââââââââââââââââââââââââââââ
 
 async function resolveAIConfig(
   supabase: any,
@@ -260,7 +260,7 @@ async function dispatchTask(
   };
 }
 
-// ─── Public API: Dispatch any employee task ────────────────────
+// âââ Public API: Dispatch any employee task ââââââââââââââââââââ
 
 export const dispatchEmployeeTask = createServerFn({ method: "POST" })
   .validator((d: EmployeeTask) =>
@@ -312,7 +312,7 @@ export const dispatchEmployeeTask = createServerFn({ method: "POST" })
     return result;
   });
 
-// ─── Cron-callable endpoint for scheduled employee work ────────
+// âââ Cron-callable endpoint for scheduled employee work ââââââââ
 
 export const runEmployeeShift = createServerFn({ method: "GET" }).handler(async () => {
   const request = getRequest();
@@ -447,7 +447,7 @@ export const runEmployeeShift = createServerFn({ method: "GET" }).handler(async 
   return { results, ran: results.length };
 });
 
-// ─── Get employee dashboard data ──────────────────────────────
+// âââ Get employee dashboard data ââââââââââââââââââââââââââââââ
 
 export const getEmployeeDashboard = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])

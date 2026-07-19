@@ -33,7 +33,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 export const Route = createFileRoute("/_authenticated/team")({
   head: () => ({
-    meta: [{ title: "AI Team — RepoFinisher" }],
+    meta: [{ title: "AI Team â RepoFinisher" }],
   }),
   component: AITeamPage,
 });
@@ -78,7 +78,7 @@ function AITeamPage() {
           {isLoading ? (
             <Card>
               <CardContent className="py-12 text-center text-muted-foreground">
-                Loading team…
+                Loading teamâ¦
               </CardContent>
             </Card>
           ) : employees.length === 0 ? (

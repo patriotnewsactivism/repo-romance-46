@@ -68,7 +68,7 @@ export function DeepAnalysis({ repo }: DeepAnalysisProps) {
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
         <span className="font-mono">
-          Analyzing code structure, dependencies, tests, deploy readiness…
+          Analyzing code structure, dependencies, tests, deploy readinessâ¦
         </span>
       </div>
     );
@@ -129,7 +129,7 @@ export function DeepAnalysis({ repo }: DeepAnalysisProps) {
         <Progress value={result.completion.percentage} className="h-2" />
         <div className="text-[10px] font-mono text-muted-foreground space-y-0.5">
           {result.completion.evidence.map((e, i) => (
-            <div key={i}>• {e}</div>
+            <div key={i}>â¢ {e}</div>
           ))}
         </div>
       </div>
@@ -166,7 +166,7 @@ export function DeepAnalysis({ repo }: DeepAnalysisProps) {
         <div className="flex items-center gap-1.5 text-xs text-amber-500 bg-amber-500/5 border border-amber-500/20 rounded px-2 py-1.5">
           <AlertTriangle className="h-3 w-3 shrink-0" />
           <span>
-            No tests — can&apos;t verify anything works.{" "}
+            No tests â can&apos;t verify anything works.{" "}
             {result.testCoverage.hasTestFramework
               ? `${result.testCoverage.framework} is configured but no test files exist.`
               : "No test framework detected."}
@@ -178,7 +178,7 @@ export function DeepAnalysis({ repo }: DeepAnalysisProps) {
             <CheckCircle2 className="h-3 w-3" />
             <span>
               {result.testCoverage.testFileCount} test files ({result.testCoverage.framework})
-              · {Math.round(result.testCoverage.testToSourceRatio * 100)}% test ratio
+              Â· {Math.round(result.testCoverage.testToSourceRatio * 100)}% test ratio
             </span>
           </div>
           {result.testCoverage.uncoveredPaths.length > 0 && (
@@ -232,13 +232,13 @@ export function DeepAnalysis({ repo }: DeepAnalysisProps) {
                     {stub.kind}
                   </Badge>
                   <span className="truncate">
-                    {stub.file}:{stub.line} — {stub.snippet}
+                    {stub.file}:{stub.line} â {stub.snippet}
                   </span>
                 </div>
               ))}
               {result.stubs.length > 25 && (
                 <div className="text-[10px] text-muted-foreground">
-                  …and {result.stubs.length - 25} more
+                  â¦and {result.stubs.length - 25} more
                 </div>
               )}
             </div>
@@ -270,11 +270,11 @@ export function DeepAnalysis({ repo }: DeepAnalysisProps) {
                         dep.status === "major-behind" ? "text-red-400" : "text-yellow-400"
                       }
                     >
-                      {dep.status === "major-behind" ? "▲" : "△"}
+                      {dep.status === "major-behind" ? "â²" : "â³"}
                     </span>
                     <span>{dep.name}</span>
                     <span className="text-muted-foreground/60">
-                      {dep.current} → {dep.latest || "?"}
+                      {dep.current} â {dep.latest || "?"}
                     </span>
                     {dep.isDevDep && <Badge variant="outline" className="text-[8px]">dev</Badge>}
                   </div>
@@ -306,7 +306,7 @@ export function DeepAnalysis({ repo }: DeepAnalysisProps) {
                   <div className="text-[10px] font-mono text-amber-500 mb-1">Detected Patterns</div>
                   {learningsQ.data.patterns_detected.map((p, i) => (
                     <div key={i} className="text-[10px] text-muted-foreground">
-                      • {p}
+                      â¢ {p}
                     </div>
                   ))}
                 </Card>
@@ -329,9 +329,9 @@ export function DeepAnalysis({ repo }: DeepAnalysisProps) {
                       }
                     >
                       {entry.outcome === "success"
-                        ? "✓"
+                        ? "â"
                         : entry.outcome === "failure"
-                          ? "✗"
+                          ? "â"
                           : "~"}
                     </span>
                     <span className="truncate">

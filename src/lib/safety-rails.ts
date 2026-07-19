@@ -1,8 +1,8 @@
-// Safety Rails — enforced in code, not just prompted.
+// Safety Rails â enforced in code, not just prompted.
 // Every GitHub write operation goes through this module.
 // Non-negotiable: no auto-merge, no force-push, no touching main/production.
 
-// ─── Forbidden Operations ──────────────────────────────────────
+// âââ Forbidden Operations ââââââââââââââââââââââââââââââââââââââ
 
 export const PROTECTED_BRANCHES = new Set([
   "main",
@@ -22,7 +22,7 @@ export const FORBIDDEN_OPERATIONS = [
 
 export type ForbiddenOp = (typeof FORBIDDEN_OPERATIONS)[number];
 
-// ─── Risk Levels ───────────────────────────────────────────────
+// âââ Risk Levels âââââââââââââââââââââââââââââââââââââââââââââââ
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
@@ -33,7 +33,7 @@ export interface RiskAssessment {
   recommendation: string;
 }
 
-// ─── Validation Functions ──────────────────────────────────────
+// âââ Validation Functions ââââââââââââââââââââââââââââââââââââââ
 
 /**
  * Validate that a branch name is NOT a protected branch.
@@ -90,14 +90,14 @@ export function assertNoCrossRepoOverwrite(
 ): void {
   if (sourceRepo !== targetRepo && ["overwrite", "replace", "delete"].includes(operation)) {
     throw new SafetyRailError(
-      `BLOCKED: Cross-repo destructive operation "${operation}" from ${sourceRepo} → ${targetRepo} is forbidden. ` +
+      `BLOCKED: Cross-repo destructive operation "${operation}" from ${sourceRepo} â ${targetRepo} is forbidden. ` +
         `This must be proposed as a PR with a risk callout for the owner to review.`,
       "cross-repo-overwrite",
     );
   }
 }
 
-// ─── Risk Assessment ───────────────────────────────────────────
+// âââ Risk Assessment âââââââââââââââââââââââââââââââââââââââââââ
 
 /**
  * Assess the risk of a proposed change set before executing it.
@@ -126,38 +126,38 @@ export function assessChangeRisk(changes: {
 
   // Source code changes
   if (changes.touchesSrc && changes.filesModified > 3) {
-    factors.push(`Modifies ${changes.filesModified} source files — wide blast radius`);
+    factors.push(`Modifies ${changes.filesModified} source files â wide blast radius`);
     level = level === "low" ? "medium" : level;
   }
 
   // Config changes
   if (changes.touchesConfig) {
-    factors.push("Modifies build/deploy configuration — could break deployments");
+    factors.push("Modifies build/deploy configuration â could break deployments");
     level = level === "low" ? "medium" : level;
   }
 
   // Dependency changes
   if (changes.touchesDeps) {
-    factors.push("Changes dependencies — could introduce breaking changes or vulnerabilities");
+    factors.push("Changes dependencies â could introduce breaking changes or vulnerabilities");
     level = level === "low" ? "medium" : level;
   }
 
   // Major version bumps
   if (changes.isMajorVersionBump) {
-    factors.push("Major version bump — likely contains breaking API changes");
+    factors.push("Major version bump â likely contains breaking API changes");
     level = "high";
   }
 
   // Cross-repo operations
   if (changes.isCrossRepo) {
-    factors.push("Cross-repo operation — affects multiple repositories");
+    factors.push("Cross-repo operation â affects multiple repositories");
     level = "high";
     irreversible = true;
   }
 
   // Major refactor
   if (changes.isMajorRefactor) {
-    factors.push("Major refactor — significant structural changes to the codebase");
+    factors.push("Major refactor â significant structural changes to the codebase");
     level = "critical";
     irreversible = true;
   }
@@ -174,12 +174,12 @@ export function assessChangeRisk(changes: {
       break;
     case "high":
       recommendation =
-        "⚠️ HIGH RISK: Review thoroughly. Test in a staging environment before merging. " +
+        "â ï¸ HIGH RISK: Review thoroughly. Test in a staging environment before merging. " +
         "Consider breaking this into smaller PRs.";
       break;
     case "critical":
       recommendation =
-        "🚨 CRITICAL: This change is potentially irreversible. " +
+        "ð¨ CRITICAL: This change is potentially irreversible. " +
         "Do NOT merge without thorough review, backup, and a rollback plan.";
       break;
   }
@@ -193,12 +193,12 @@ export function assessChangeRisk(changes: {
 export function formatRiskCallout(assessment: RiskAssessment): string {
   const emoji =
     assessment.level === "critical"
-      ? "🚨"
+      ? "ð¨"
       : assessment.level === "high"
-        ? "⚠️"
+        ? "â ï¸"
         : assessment.level === "medium"
-          ? "📋"
-          : "✅";
+          ? "ð"
+          : "â";
 
   const lines = [
     `### ${emoji} Risk Assessment: ${assessment.level.toUpperCase()}`,
@@ -208,7 +208,7 @@ export function formatRiskCallout(assessment: RiskAssessment): string {
   ];
 
   if (assessment.irreversible) {
-    lines.push("**⚠️ This change may be irreversible.**");
+    lines.push("**â ï¸ This change may be irreversible.**");
     lines.push("");
   }
 
@@ -216,7 +216,7 @@ export function formatRiskCallout(assessment: RiskAssessment): string {
   return lines.join("\n");
 }
 
-// ─── Safe GitHub Write Wrapper ─────────────────────────────────
+// âââ Safe GitHub Write Wrapper âââââââââââââââââââââââââââââââââ
 
 /**
  * Wrap a GitHub API write call with safety checks.
@@ -240,11 +240,11 @@ export async function safeGitHubWrite<T>(opts: {
   // Check 3: No auto-merge
   assertNoAutoMerge(opts.operation);
 
-  // All checks passed — execute
+  // All checks passed â execute
   return opts.execute();
 }
 
-// ─── Custom Error ──────────────────────────────────────────────
+// âââ Custom Error ââââââââââââââââââââââââââââââââââââââââââââââ
 
 export class SafetyRailError extends Error {
   public readonly code: string;

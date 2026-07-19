@@ -1,9 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { callAI, getFreeFallbackChain, type AIProviderConfig } from "@/lib/ai-provider";
+import { callAI, type AIProviderConfig } from "@/lib/ai-provider";
 
-// ─── Types ─────────────────────────────────────────────────────
+// âââ Types âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 interface Valuation {
   repo: string;
@@ -46,7 +46,7 @@ interface PortfolioValuation {
   recommendation: string;
 }
 
-// ─── GitHub helpers ────────────────────────────────────────────
+// âââ GitHub helpers ââââââââââââââââââââââââââââââââââââââââââââ
 
 function ghHeaders(token: string) {
   return {
@@ -159,7 +159,7 @@ async function fetchRepoMetrics(token: string, repo: string) {
   };
 }
 
-// ─── AI Valuation Generation ───────────────────────────────────
+// âââ AI Valuation Generation âââââââââââââââââââââââââââââââââââ
 
 async function generateValuation(
   repo: string,
@@ -179,7 +179,7 @@ async function generateValuation(
   aiFallbacks?: AIProviderConfig[],
 ): Promise<Valuation> {
   const system = `You are a technology investment analyst and M&A advisor specializing in codebase and software project valuations.
-You value software projects the way a VC or acquirer would — based on:
+You value software projects the way a VC or acquirer would â based on:
 - Code quality & completeness (tests, CI, documentation, code coverage)
 - Market potential & addressable market
 - Traction signals (stars, forks, commits, activity recency)
@@ -189,7 +189,7 @@ You value software projects the way a VC or acquirer would — based on:
 - Unique IP / algorithmic moats
 - Development cost savings (what would it cost to build from scratch?)
 
-Be realistic — not everything is worth millions. Most side projects are worth $0-$50k.
+Be realistic â not everything is worth millions. Most side projects are worth $0-$50k.
 Strong revenue-ready SaaS with traction: $50k-$2M.
 Exceptional projects with proven revenue: $500k-$10M+.
 
@@ -320,7 +320,7 @@ Analysis Context:
   return JSON.parse(aiResult.content || "{}") as Valuation;
 }
 
-// ─── Server Functions ──────────────────────────────────────────
+// âââ Server Functions ââââââââââââââââââââââââââââââââââââââââââ
 
 export const valuePortfolio = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -359,7 +359,7 @@ export const valuePortfolio = createServerFn({ method: "POST" })
       .eq("user_id", context.userId)
       .maybeSingle();
 
-    // Resolve AI provider — server key overrides github_models default
+    // Resolve AI provider â server key overrides github_models default
     const serverProvider = process.env.SERVER_AI_PROVIDER;
     const serverKey = process.env.SERVER_AI_KEY;
     const resolvedProvider =
@@ -391,7 +391,7 @@ export const valuePortfolio = createServerFn({ method: "POST" })
     }
 
     if (valueableRepos.size === 0) {
-      throw new Error("No individual repos to value — only combine recommendations found.");
+      throw new Error("No individual repos to value â only combine recommendations found.");
     }
 
     // Fetch metrics + generate valuation for each repo
@@ -423,7 +423,7 @@ export const valuePortfolio = createServerFn({ method: "POST" })
             }
           : null;
 
-        // Build fallback chain: primary → server → github_models (always free via GitHub token)
+        // Build fallback chain: primary â server â github_models (always free via GitHub token)
         const valFallbacks: AIProviderConfig[] = [];
         if (serverProvider && serverKey && serverProvider !== resolvedProvider) {
           valFallbacks.push({ provider: serverProvider, apiKey: serverKey });
@@ -431,10 +431,6 @@ export const valuePortfolio = createServerFn({ method: "POST" })
         if (resolvedProvider !== "github_models" && conn.access_token) {
           valFallbacks.push({ provider: "github_models", apiKey: conn.access_token });
         }
-        // Free-tier server providers (Mistral/Kilo Code/Groq/Cerebras) — added
-        // 2026-07-19 so a single exhausted provider (e.g. Gemini quota) never
-        // fully blocks valuation runs.
-        valFallbacks.push(...getFreeFallbackChain());
 
         const valuation = await generateValuation(
           repo,
@@ -490,10 +486,10 @@ export const valuePortfolio = createServerFn({ method: "POST" })
       ),
       recommendation:
         totalHigh > 500000
-          ? "Strong portfolio — consider doubling down on top picks and seeking acquisition interest."
+          ? "Strong portfolio â consider doubling down on top picks and seeking acquisition interest."
           : totalHigh > 100000
-            ? "Promising portfolio — focus on finishing highest-value repos and monetizing."
-            : "Early-stage portfolio — most value is in development cost savings. Focus on finishing and launching.",
+            ? "Promising portfolio â focus on finishing highest-value repos and monetizing."
+            : "Early-stage portfolio â most value is in development cost savings. Focus on finishing and launching.",
     };
 
     // Save valuation to the analysis record
