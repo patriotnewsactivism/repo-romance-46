@@ -1,5 +1,5 @@
 // Swarm: plan + execute an entire analysis worth of recommendations in parallel.
-// Careful defaults — fragile / high-impact items get "gentle" additive-only PRs.
+// Careful defaults â fragile / high-impact items get "gentle" additive-only PRs.
 
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -32,7 +32,7 @@ interface ResultItem {
   duration_ms: number;
 }
 
-// ─── PLAN ───────────────────────────────────────────────────────
+// âââ PLAN âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 export const planSwarm = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -122,17 +122,17 @@ export const planSwarm = createServerFn({ method: "POST" })
 
     const sys = `You are a careful engineering lead triaging a repo portfolio for a "swarm" auto-execution run.
 For each recommendation, score:
-- impact (0-100): market_potential × how obvious the win is
+- impact (0-100): market_potential Ã how obvious the win is
 - fragility (0-100): risk that automated PRs would break something already close to shipping. High effort remaining = LOW fragility (lots of room to work). Low effort remaining on a polished repo = HIGH fragility.
 
 Then choose ONE action, obeying these strict rules:
-- kind="combine" with 2+ repos → "combine" (unless impact < 40, then "skip")
-- kind="repurpose" → "vibe_spec" (never touches code)
-- kind="finish" AND fragility >= 60 AND impact >= 60 → "gentle_finish" (additive-only: README, LICENSE, CI, .env.example — NEVER src/)
-- kind="finish" AND fragility < 60 AND impact >= 50 → "iterative_finish" (3 full passes)
-- kind="finish" AND impact >= 70 (any fragility) → at minimum "gentle_finish"
-- impact < 40 → "skip"
-- Anything else → "skip"
+- kind="combine" with 2+ repos â "combine" (unless impact < 40, then "skip")
+- kind="repurpose" â "vibe_spec" (never touches code)
+- kind="finish" AND fragility >= 60 AND impact >= 60 â "gentle_finish" (additive-only: README, LICENSE, CI, .env.example â NEVER src/)
+- kind="finish" AND fragility < 60 AND impact >= 50 â "iterative_finish" (3 full passes)
+- kind="finish" AND impact >= 70 (any fragility) â at minimum "gentle_finish"
+- impact < 40 â "skip"
+- Anything else â "skip"
 
 Write a 2-3 sentence summary explaining the overall plan (how many of each action, what the big bets are).
 Be blunt. Prefer to skip weak items rather than waste PRs.`;
@@ -213,7 +213,7 @@ next_steps: ${(it.next_steps || []).slice(0, 3).join(" | ")}`,
     };
   });
 
-// ─── EXECUTE ────────────────────────────────────────────────────
+// âââ EXECUTE ââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 async function runOne(
   args: {
@@ -266,7 +266,7 @@ async function runOne(
       const repo = item.repos[0];
       if (!repo) throw new Error("No repo");
       const gentleSteps = [
-        "Add or overhaul README.md with install/usage — do NOT touch any file under src/, lib/, app/, or pages/",
+        "Add or overhaul README.md with install/usage â do NOT touch any file under src/, lib/, app/, or pages/",
         "Add MIT LICENSE if missing",
         "Add .github/workflows/ci.yml with lint + build only",
         "Add .env.example if the repo uses env vars",
@@ -285,7 +285,7 @@ async function runOne(
         item_rank: item.item_rank,
         action: "gentle_finish",
         status: "ok",
-        message: `Gentle PR #${res.pr_number} · ${res.files_changed} additive files`,
+        message: `Gentle PR #${res.pr_number} Â· ${res.files_changed} additive files`,
         pr_urls: [res.pr_url],
         duration_ms: Date.now() - started,
       };
@@ -428,7 +428,7 @@ export const executeSwarm = createServerFn({ method: "POST" })
     return { swarmRunId: r.id, results, ok, errored, skipped: skipped.length };
   });
 
-// ─── GET (for polling / re-open) ───────────────────────────────
+// âââ GET (for polling / re-open) âââââââââââââââââââââââââââââââ
 
 export const getSwarmRun = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])

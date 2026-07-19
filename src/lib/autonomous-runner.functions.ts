@@ -1,4 +1,4 @@
-// Autonomous Runner — intelligent background task processing.
+// Autonomous Runner â intelligent background task processing.
 // Reasons about repo state, decides what to do next, executes safely,
 // logs everything, and learns from outcomes.
 //
@@ -16,7 +16,7 @@ import { callAI, resolveAIConfig, type AIProviderConfig } from "@/lib/ai-provide
 import { logLearningEntry, type LearningEntry } from "@/lib/learning-log.functions";
 import type { Json } from "@/integrations/supabase/types";
 
-// ─── Types ─────────────────────────────────────────────────────
+// âââ Types âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 export type JobStatus = "queued" | "running" | "paused" | "complete" | "failed";
 export type JobKind =
@@ -54,7 +54,7 @@ export interface ReasoningDecision {
   context: Record<string, unknown>;
 }
 
-// ─── Queue Management ──────────────────────────────────────────
+// âââ Queue Management ââââââââââââââââââââââââââââââââââââââââââ
 
 /**
  * Enqueue a background job for processing.
@@ -155,10 +155,10 @@ export const getJobHistory = createServerFn({ method: "GET" })
     return { jobs: jobs ?? [] };
   });
 
-// ─── Intelligent Reasoning Layer ───────────────────────────────
+// âââ Intelligent Reasoning Layer âââââââââââââââââââââââââââââââ
 
 /**
- * The "brain" — looks at current state and decides what to do next.
+ * The "brain" â looks at current state and decides what to do next.
  * Considers: repo analyses, learning history, pending jobs, recent outcomes.
  */
 async function reasonAboutNextAction(
@@ -232,11 +232,11 @@ ${(learnings as Record<string, unknown>[] | null)?.map((l) => `- ${l.repo}: ${(l
 ${(patterns as Record<string, unknown>[] | null)?.map((p) => `- [${p.confidence}% confidence] ${p.pattern}: ${p.recommendation}`).join("\n") || "None"}
 
 ### Unfinished Repos (from latest analysis)
-${(unfinishedItems as Record<string, unknown>[]).map((it) => `- [effort ${it.effort}/5, market ${it.market_potential}/5] ${it.title} — repos: ${(it.repos as string[]).join(", ")} — ${it.deep_analysis ? "has deep analysis" : "needs deep analysis"} — ${it.iteration_count || 0} finish passes done`).join("\n") || "None — all caught up!"}
+${(unfinishedItems as Record<string, unknown>[]).map((it) => `- [effort ${it.effort}/5, market ${it.market_potential}/5] ${it.title} â repos: ${(it.repos as string[]).join(", ")} â ${it.deep_analysis ? "has deep analysis" : "needs deep analysis"} â ${it.iteration_count || 0} finish passes done`).join("\n") || "None â all caught up!"}
 `.trim();
 
   const systemPrompt = `You are an intelligent autonomous agent managing a developer's GitHub repo portfolio.
-Your job is to decide what background work to do next — prioritizing high-impact, low-risk actions.
+Your job is to decide what background work to do next â prioritizing high-impact, low-risk actions.
 
 Available actions:
 - deep_analysis: Run a deep structural analysis on a repo (finds stubs, dep health, test coverage, completion %)
@@ -250,12 +250,12 @@ Available actions:
 - wait: Wait for human input before proceeding
 
 DECISION RULES:
-1. Prefer deep_analysis on repos that haven't been analyzed yet — you need data before acting.
+1. Prefer deep_analysis on repos that haven't been analyzed yet â you need data before acting.
 2. Only run finish_step on repos where deep_analysis has been done AND completion < 80%.
 3. Never run finish_step on repos with recurring failure patterns unless the approach has changed.
 4. If all repos are analyzed and healthy, suggest pattern_review or skip.
 5. Prioritize repos with high market_potential and low effort remaining.
-6. Space out operations on the same repo — don't hammer one repo with 5 jobs in a row.
+6. Space out operations on the same repo â don't hammer one repo with 5 jobs in a row.
 7. If recent jobs failed, investigate the pattern before retrying.
 
 Return JSON array of 1-3 decisions, ordered by priority (highest first).
@@ -334,7 +334,7 @@ If nothing to do: [{ action: "skip", repo: null, priority: 0, reasoning: "...", 
   }
 }
 
-// ─── Job Execution ─────────────────────────────────────────────
+// âââ Job Execution âââââââââââââââââââââââââââââââââââââââââââââ
 
 async function executeJob(
   supabase: SupabaseClient,
@@ -579,10 +579,10 @@ async function executeJob(
   }
 }
 
-// ─── Background Runner (cron-triggered) ────────────────────────
+// âââ Background Runner (cron-triggered) ââââââââââââââââââââââââ
 
 /**
- * Main autonomous runner — called by cron or manually.
+ * Main autonomous runner â called by cron or manually.
  * 1. Picks up queued jobs (priority order)
  * 2. If no queued jobs, uses AI reasoning to decide what to do
  * 3. Executes jobs with safety checks
@@ -690,16 +690,16 @@ export const runBackgroundProcessor = createServerFn({ method: "GET" }).handler(
 
           jobsProcessed++;
           decisionsLog.push(
-            `${outcome.success ? "✓" : "✗"} ${job.kind} on ${job.repo || "portfolio"}`,
+            `${outcome.success ? "â" : "â"} ${job.kind} on ${job.repo || "portfolio"}`,
           );
         }
       } else {
-        // 2. No queued jobs — use AI reasoning to decide what to do
+        // 2. No queued jobs â use AI reasoning to decide what to do
         const decisions = await reasonAboutNextAction(supabase, userId, aiConfig);
 
         for (const decision of decisions) {
           if (decision.action === "skip" || decision.action === "wait") {
-            decisionsLog.push(`⏭ ${decision.action}: ${decision.reasoning}`);
+            decisionsLog.push(`â­ ${decision.action}: ${decision.reasoning}`);
             continue;
           }
 
@@ -715,7 +715,7 @@ export const runBackgroundProcessor = createServerFn({ method: "GET" }).handler(
           });
 
           decisionsLog.push(
-            `📋 Queued ${decision.action} on ${decision.repo || "portfolio"}: ${decision.reasoning}`,
+            `ð Queued ${decision.action} on ${decision.repo || "portfolio"}: ${decision.reasoning}`,
           );
           jobsProcessed++;
         }
@@ -735,7 +735,7 @@ export const runBackgroundProcessor = createServerFn({ method: "GET" }).handler(
   return { processed: totalProcessed, results };
 });
 
-// ─── Manual trigger: reason and show plan ──────────────────────
+// âââ Manual trigger: reason and show plan ââââââââââââââââââââââ
 
 /**
  * Let the user see what the autonomous runner WOULD do without executing.

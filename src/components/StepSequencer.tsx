@@ -225,7 +225,7 @@ export function StepSequencer({ repo }: StepSequencerProps) {
               // strategy ({displayPlan.totalSteps} steps, ~{displayPlan.estimatedMinutes}min)
               {displayPlan.deepAnalysisUsed && (
                 <Badge variant="outline" className="ml-2 text-[10px]">
-                  deep analysis ✓
+                  deep analysis â
                 </Badge>
               )}
             </p>

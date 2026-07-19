@@ -1,4 +1,4 @@
-// Activity Feed — centralized event log for all system actions.
+// Activity Feed â centralized event log for all system actions.
 // Every operation (analysis, finish, step, CI check, learning) is logged here
 // to give the user a single timeline of everything happening across their repos.
 
@@ -7,7 +7,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { Json } from "@/integrations/supabase/types";
 
-// ─── Types ─────────────────────────────────────────────────────
+// âââ Types âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 export type EventKind =
   | "analysis_started"
@@ -46,7 +46,7 @@ export interface ActivityEvent {
   created_at: string;
 }
 
-// ─── Logging helper (used by other modules) ────────────────────
+// âââ Logging helper (used by other modules) ââââââââââââââââââââ
 
 /**
  * Log an activity event. Call from any module to record actions in the feed.
@@ -85,7 +85,7 @@ export async function logActivity(
   }
 }
 
-// ─── Server functions ──────────────────────────────────────────
+// âââ Server functions ââââââââââââââââââââââââââââââââââââââââââ
 
 /**
  * Get the activity feed for the current user.
@@ -128,7 +128,7 @@ export const getActivityFeed = createServerFn({ method: "GET" })
   });
 
 /**
- * Get activity stats — summary counts by kind and status.
+ * Get activity stats â summary counts by kind and status.
  */
 export const getActivityStats = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])

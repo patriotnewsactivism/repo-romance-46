@@ -85,12 +85,12 @@ function Landing() {
                 desc: "The repos that are 80% done. We list exactly what's missing to ship.",
                 color: "text-ship",
                 example:
-                  '"Add auth, deploy to Vercel, write a landing page — this is 2 weekends from launch"',
+                  '"Add auth, deploy to Vercel, write a landing page â this is 2 weekends from launch"',
               },
               {
                 icon: GitMerge,
                 title: "Combine",
-                desc: "Repos that individually go nowhere — but together become a product.",
+                desc: "Repos that individually go nowhere â but together become a product.",
                 color: "text-combine",
                 example:
                   '"Merge your scraper + your dashboard + your API wrapper into a SaaS analytics tool"',
@@ -138,7 +138,7 @@ function Landing() {
             <Feature
               icon={<Activity className="h-5 w-5" />}
               title="Repo health"
-              desc="CI status, test coverage, license detection — graded A to F"
+              desc="CI status, test coverage, license detection â graded A to F"
             />
             <Feature
               icon={<Share2 className="h-5 w-5" />}
@@ -159,7 +159,7 @@ function Landing() {
           <div className="grid gap-6 md:grid-cols-4">
             {[
               { step: "01", title: "Sign in", desc: "Create an account with email/password" },
-              { step: "02", title: "Connect GitHub", desc: "One-click OAuth — we read your repos" },
+              { step: "02", title: "Connect GitHub", desc: "One-click OAuth â we read your repos" },
               {
                 step: "03",
                 title: "Run analysis",
@@ -193,7 +193,7 @@ function Landing() {
 
       <footer className="border-t border-border">
         <div className="mx-auto max-w-6xl px-6 py-6 flex items-center justify-between text-xs text-muted-foreground font-mono">
-          <span>repo_finisher — ship what you started</span>
+          <span>repo_finisher â ship what you started</span>
           <span>built with TanStack Start + Supabase</span>
         </div>
       </footer>

@@ -122,7 +122,7 @@ export function AutonomousRunner() {
       {previewMut.data && (
         <div className="space-y-2">
           <div className="text-xs font-mono text-muted-foreground uppercase">
-            AI Reasoning — Planned Actions
+            AI Reasoning â Planned Actions
           </div>
           {previewMut.data.decisions.map((d, i) => (
             <div
@@ -228,7 +228,7 @@ export function AutonomousRunner() {
           onClick={() => setShowHistory(!showHistory)}
           className="text-[10px] font-mono text-muted-foreground hover:text-foreground"
         >
-          {showHistory ? "▾ hide job history" : "▸ show job history"}
+          {showHistory ? "â¾ hide job history" : "â¸ show job history"}
         </button>
       </div>
 

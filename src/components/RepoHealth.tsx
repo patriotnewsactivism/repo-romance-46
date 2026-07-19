@@ -51,12 +51,12 @@ export function RepoHealthCheck({
         onClick={() => setOpen(!open)}
         className="text-xs font-mono text-muted-foreground hover:text-foreground"
       >
-        {open ? "▾ hide health check" : "▸ show health check"}
+        {open ? "â¾ hide health check" : "â¸ show health check"}
       </button>
       {open && (
         <div className="mt-3">
           {q.isLoading && (
-            <p className="text-xs text-muted-foreground font-mono">checking health…</p>
+            <p className="text-xs text-muted-foreground font-mono">checking healthâ¦</p>
           )}
           {q.isError && <p className="text-xs text-destructive">{(q.error as Error).message}</p>}
           {q.data && (

@@ -62,7 +62,7 @@ function SharedAnalysisPage() {
   if (q.isLoading)
     return (
       <div className="min-h-screen grid-bg flex items-center justify-center text-sm text-muted-foreground">
-        Loading…
+        Loadingâ¦
       </div>
     );
   if (q.isError)
@@ -116,7 +116,7 @@ function SharedAnalysisPage() {
       <main className="mx-auto max-w-5xl px-6 py-10 space-y-8">
         <section>
           <div className="font-mono text-xs text-muted-foreground">
-            shared analysis · {analysis.repo_count as number} repos
+            shared analysis Â· {analysis.repo_count as number} repos
           </div>
           <h1 className="mt-2 text-3xl font-bold tracking-tight">Portfolio audit</h1>
           {!!analysis.summary_md && (
@@ -133,27 +133,27 @@ function SharedAnalysisPage() {
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
                   <Package className="h-4 w-4" /> Total repos
                 </div>
-                <div className="text-lg font-semibold">{stats.total_repos ?? "—"}</div>
+                <div className="text-lg font-semibold">{stats.total_repos ?? "â"}</div>
               </div>
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
                   <Star className="h-4 w-4" /> Total stars
                 </div>
-                <div className="text-lg font-semibold">{stats.total_stars ?? "—"}</div>
+                <div className="text-lg font-semibold">{stats.total_stars ?? "â"}</div>
               </div>
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
                   <TrendingUp className="h-4 w-4" /> Most active
                 </div>
                 <div className="text-lg font-semibold">
-                  {stats.most_active_repo?.split("/").pop() ?? "—"}
+                  {stats.most_active_repo?.split("/").pop() ?? "â"}
                 </div>
               </div>
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
               {stats.languages.map((lang) => (
                 <Badge key={lang.name} variant="secondary" className="font-mono text-xs">
-                  {lang.name} · {lang.pct}%
+                  {lang.name} Â· {lang.pct}%
                 </Badge>
               ))}
             </div>
@@ -227,7 +227,7 @@ function SharedAnalysisPage() {
                     <ul className="space-y-1 text-sm">
                       {it.next_steps.map((s, i) => (
                         <li key={i} className="flex gap-2">
-                          <span className="text-primary">▸</span>
+                          <span className="text-primary">â¸</span>
                           <span>{s}</span>
                         </li>
                       ))}

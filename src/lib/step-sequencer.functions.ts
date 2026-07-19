@@ -1,13 +1,13 @@
-// Step Sequencer — "vibe code to completion" done right.
+// Step Sequencer â "vibe code to completion" done right.
 // Breaks repo finishing into small, atomic, testable steps.
-// Each step: analyze → plan 1 change → commit → verify CI → continue or stop.
+// Each step: analyze â plan 1 change â commit â verify CI â continue or stop.
 //
 // Key principles:
-// 1. Small steps — one logical change per step (1-3 files max)
-// 2. CI verification — check if the repo's tests/build pass after each step
-// 3. Stop on failure — don't push forward blindly
-// 4. Deep-analysis-aware — uses stub/dep/test data to prioritize work
-// 5. Learning-integrated — logs every step outcome for future reference
+// 1. Small steps â one logical change per step (1-3 files max)
+// 2. CI verification â check if the repo's tests/build pass after each step
+// 3. Stop on failure â don't push forward blindly
+// 4. Deep-analysis-aware â uses stub/dep/test data to prioritize work
+// 5. Learning-integrated â logs every step outcome for future reference
 
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -25,7 +25,7 @@ import type { CICheckResult } from "@/lib/ci-verifier.functions";
 import type { DeepAnalysisResult } from "@/lib/deep-analysis.functions";
 import type { Json } from "@/integrations/supabase/types";
 
-// ─── Types ─────────────────────────────────────────────────────
+// âââ Types âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 export type StepStatus = "pending" | "running" | "committed" | "ci_checking" | "ci_passed" | "ci_failed" | "fix_attempted" | "failed" | "skipped";
 
@@ -66,7 +66,7 @@ export interface SequencerRun {
   completedAt: string | null;
 }
 
-// ─── GitHub helpers ────────────────────────────────────────────
+// âââ GitHub helpers ââââââââââââââââââââââââââââââââââââââââââââ
 
 function ghHeaders(token: string) {
   return {
@@ -98,18 +98,18 @@ async function ghRaw(token: string, repo: string, path: string, ref?: string): P
   return res.text();
 }
 
-// ─── Step Planning (AI-driven) ─────────────────────────────────
+// âââ Step Planning (AI-driven) âââââââââââââââââââââââââââââââââ
 
 const STEP_PLANNER_PROMPT = `You are a senior engineer planning a step-by-step sequence to complete an unfinished codebase.
 You have the deep structural analysis results showing exactly what's built, what's stubbed, what's missing.
 
 RULES:
-1. Each step must be SMALL — touch 1-3 files maximum. One logical change.
+1. Each step must be SMALL â touch 1-3 files maximum. One logical change.
 2. Order matters: fix foundations first, then build on them.
    - Step 1: Fix broken imports, missing types, or core utilities
    - Step 2-3: Implement stub functions starting with the most-depended-on
    - Step 4+: Add tests, then config, then docs
-3. Each step must be independently testable — the repo should build after each step.
+3. Each step must be independently testable â the repo should build after each step.
 4. Never combine unrelated changes into one step.
 5. Steps must be ordered so each one can be verified before the next begins.
 6. Maximum 8 steps per plan. Focus on highest-impact work.
@@ -119,7 +119,7 @@ RULES:
 For each step, specify:
 - title: 5-10 word description
 - description: What specifically to change and why (1-2 sentences)
-- files: Array of { path, action } — what files will be touched
+- files: Array of { path, action } â what files will be touched
 - priority: 1-8 (1 = do first)
 
 Also provide:
@@ -191,7 +191,7 @@ ${analysisContext}
 ${sourceFiles.slice(0, 10).join("\n\n")}
 
 Plan the step-by-step sequence to bring this repo toward completion.
-Focus on the most impactful changes — don't waste steps on cosmetics.`;
+Focus on the most impactful changes â don't waste steps on cosmetics.`;
 
   const resp = await callAI(
     {
@@ -247,25 +247,25 @@ Focus on the most impactful changes — don't waste steps on cosmetics.`;
   return JSON.parse(resp.content || "{}") as AIStepPlan;
 }
 
-// ─── Execute a single step ─────────────────────────────────────
+// âââ Execute a single step âââââââââââââââââââââââââââââââââââââ
 
 const STEP_EXECUTOR_PROMPT = `You are implementing ONE specific step to improve a codebase.
 You have the plan, the current source files, and context from prior steps.
 
 RULES:
-1. Only produce changes for THIS STEP — nothing else.
+1. Only produce changes for THIS STEP â nothing else.
 2. For "modify" files: output the COMPLETE updated file content.
 3. For "create" files: output the complete new file.
 4. Every file must be syntactically valid and have correct imports.
-5. If you cannot confidently make a change, say so in the analysis — don't guess.
+5. If you cannot confidently make a change, say so in the analysis â don't guess.
 6. Do NOT touch files outside the step's planned scope.
-7. The change must be small and testable — the repo should build after this step.
+7. The change must be small and testable â the repo should build after this step.
 8. If this step builds on prior steps' changes, reference the updated file state (provided).
 
 Return JSON with:
 - analysis: 1-2 sentences about what you changed and why
 - changes: array of { path, status ("created"|"modified"|"deleted"), content, description }
-- confidence: 0-100 — how confident you are this change is correct`;
+- confidence: 0-100 â how confident you are this change is correct`;
 
 interface AIStepExecution {
   analysis: string;
@@ -291,7 +291,7 @@ async function executeStep(
       if (content) {
         return `--- ${f.path} (current content, ${content.length} chars) ---\n${content.slice(0, 4000)}`;
       }
-      return `--- ${f.path} (does not exist yet — will be created) ---`;
+      return `--- ${f.path} (does not exist yet â will be created) ---`;
     })
     .join("\n\n");
 
@@ -303,7 +303,7 @@ Description: ${step.description}
 Files to touch: ${step.files.map((f) => `${f.path} (${f.action})`).join(", ")}
 
 ## Prior steps completed
-${priorStepsSummary || "None yet — this is the first step."}
+${priorStepsSummary || "None yet â this is the first step."}
 
 ## Current file contents
 ${fileContents}`;
@@ -351,7 +351,7 @@ ${fileContents}`;
   return JSON.parse(resp.content || "{}") as AIStepExecution;
 }
 
-// ─── Batch commit (same as repo-finisher but for single step) ──
+// âââ Batch commit (same as repo-finisher but for single step) ââ
 
 async function commitStepToBranch(
   token: string,
@@ -425,7 +425,7 @@ async function commitStepToBranch(
     body: JSON.stringify({ sha: newCommit.sha }),
   });
   if (!refRes.ok) {
-    // Branch doesn't exist yet — create it
+    // Branch doesn't exist yet â create it
     const createRefRes = await ghFetch(token, `/repos/${repo}/git/refs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -440,7 +440,7 @@ async function commitStepToBranch(
   return { commitSha: newCommit.sha, filesChanged };
 }
 
-// ─── Parallel file fetch ───────────────────────────────────────
+// âââ Parallel file fetch âââââââââââââââââââââââââââââââââââââââ
 
 async function fetchFilesParallel(
   token: string,
@@ -461,11 +461,11 @@ async function fetchFilesParallel(
   return results;
 }
 
-// ─── Main server functions ─────────────────────────────────────
+// âââ Main server functions âââââââââââââââââââââââââââââââââââââ
 
 /**
  * Plan a step-by-step completion sequence for a repo.
- * Uses deep analysis results if available. Does NOT execute — just plans.
+ * Uses deep analysis results if available. Does NOT execute â just plans.
  */
 export const planSequence = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -587,7 +587,7 @@ export const planSequence = createServerFn({ method: "POST" })
   });
 
 /**
- * Execute the step sequence — one step at a time with CI verification.
+ * Execute the step sequence â one step at a time with CI verification.
  * Stops on CI failure. Can be resumed after fixing issues.
  */
 export const executeSequence = createServerFn({ method: "POST" })
@@ -638,7 +638,7 @@ export const executeSequence = createServerFn({ method: "POST" })
     const token = (conn as { access_token: string }).access_token;
     const aiConfig = await resolveAIConfig(supabase, context.userId);
 
-    // Set up scope guard — single repo only
+    // Set up scope guard â single repo only
     const scope = createScope(runData.repo);
 
     // Get repo default branch
@@ -730,7 +730,7 @@ export const executeSequence = createServerFn({ method: "POST" })
         // Low confidence warning
         if (execution.confidence < 40) {
           step.status = "skipped";
-          step.error = `AI confidence too low (${execution.confidence}%) — skipping to avoid breakage. ${execution.analysis}`;
+          step.error = `AI confidence too low (${execution.confidence}%) â skipping to avoid breakage. ${execution.analysis}`;
           step.durationMs = Date.now() - stepStart;
           step.completedAt = new Date().toISOString();
           continue;
@@ -762,7 +762,7 @@ export const executeSequence = createServerFn({ method: "POST" })
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                title: `🔧 Step Sequencer: ${plan.steps.length}-step completion plan`,
+                title: `ð§ Step Sequencer: ${plan.steps.length}-step completion plan`,
                 head: branchName,
                 base: defaultBranch,
                 body: `## Step-by-Step Completion\n\n**Strategy:** ${plan.strategy}\n\n${formatScopeStatus(scope)}\n\nThis PR is being built step-by-step with CI verification at each stage.\nSteps will be committed incrementally.`,
@@ -796,7 +796,7 @@ export const executeSequence = createServerFn({ method: "POST" })
               if (ciResult.status === "success") {
                 step.status = "ci_passed";
               } else if (ciResult.status === "no_ci") {
-                // No CI — mark as passed (can't verify)
+                // No CI â mark as passed (can't verify)
                 step.status = "ci_passed";
               } else if (ciResult.status === "failure") {
                 step.status = "ci_failed";
@@ -843,12 +843,12 @@ export const executeSequence = createServerFn({ method: "POST" })
                 }
               }
             } catch (ciError) {
-              // CI check itself failed — continue anyway
+              // CI check itself failed â continue anyway
               step.status = "ci_passed"; // assume ok if can't check
               step.error = `CI check error: ${(ciError as Error).message}`;
             }
           } else {
-            step.status = "ci_passed"; // couldn't create PR — skip CI
+            step.status = "ci_passed"; // couldn't create PR â skip CI
           }
         } else {
           step.status = "ci_passed"; // CI check skipped by user
@@ -924,17 +924,17 @@ export const executeSequence = createServerFn({ method: "POST" })
 
       const stepLog = plan.steps
         .map((s) => {
-          const icon = s.status === "ci_passed" ? "✅" : s.status === "ci_failed" ? "❌" : s.status === "skipped" ? "⏭️" : "⬜";
-          return `${icon} **Step ${s.number}: ${s.title}** — ${s.description}${s.error ? ` *(${s.error.slice(0, 100)})*` : ""}`;
+          const icon = s.status === "ci_passed" ? "â" : s.status === "ci_failed" ? "â" : s.status === "skipped" ? "â­ï¸" : "â¬";
+          return `${icon} **Step ${s.number}: ${s.title}** â ${s.description}${s.error ? ` *(${s.error.slice(0, 100)})*` : ""}`;
         })
         .join("\n");
 
-      const prBody = `## Step-by-Step Completion — ${stepsCompleted}/${plan.totalSteps} steps done\n\n` +
+      const prBody = `## Step-by-Step Completion â ${stepsCompleted}/${plan.totalSteps} steps done\n\n` +
         `**Strategy:** ${plan.strategy}\n\n` +
         `${formatRiskCallout(riskAssessment)}\n\n` +
         `${formatScopeStatus(scope)}\n\n` +
         `### Steps\n${stepLog}\n\n` +
-        `---\n⚠️ **Review before merging.** Built step-by-step with CI verification at each stage.`;
+        `---\nâ ï¸ **Review before merging.** Built step-by-step with CI verification at each stage.`;
 
       await ghFetch(token, `/repos/${runData.repo}/pulls/${prNumber}`, {
         method: "PATCH",
@@ -942,7 +942,7 @@ export const executeSequence = createServerFn({ method: "POST" })
         body: JSON.stringify({
           body: prBody,
           draft: false, // un-draft it
-          title: `🔧 Step Sequencer: ${stepsCompleted}/${plan.totalSteps} steps — ${runData.repo.split("/").pop()}`,
+          title: `ð§ Step Sequencer: ${stepsCompleted}/${plan.totalSteps} steps â ${runData.repo.split("/").pop()}`,
         }),
       });
     }
