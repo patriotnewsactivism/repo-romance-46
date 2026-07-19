@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { callAI, type AIProviderConfig } from "@/lib/ai-provider";
+import { callAI, getFreeFallbackChain, type AIProviderConfig } from "@/lib/ai-provider";
 
 // ─── Types ─────────────────────────────────────────────────────
 
@@ -431,6 +431,10 @@ export const valuePortfolio = createServerFn({ method: "POST" })
         if (resolvedProvider !== "github_models" && conn.access_token) {
           valFallbacks.push({ provider: "github_models", apiKey: conn.access_token });
         }
+        // Free-tier server providers (Mistral/Kilo Code/Groq/Cerebras) — added
+        // 2026-07-19 so a single exhausted provider (e.g. Gemini quota) never
+        // fully blocks valuation runs.
+        valFallbacks.push(...getFreeFallbackChain());
 
         const valuation = await generateValuation(
           repo,

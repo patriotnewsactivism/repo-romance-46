@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { callAI, callAIWithFallback, type AIProviderConfig } from "@/lib/ai-provider";
+import { callAI, callAIWithFallback, getFreeFallbackChain, type AIProviderConfig } from "@/lib/ai-provider";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
@@ -921,6 +921,9 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
     if (resolvedProvider !== "github_models" && token) {
       aiFallbacks.push({ provider: "github_models", apiKey: token });
     }
+    // Free-tier server providers — added 2026-07-19 so a single exhausted
+    // provider (e.g. Gemini quota) never fully blocks the autonomous runner.
+    aiFallbacks.push(...getFreeFallbackChain());
     const aiConfig = { provider: resolvedProvider, apiKey: resolvedKey, fallbacks: aiFallbacks };
 
     await reportProgress(`Running AI analysis on ${digests.length} repos…`);
@@ -1257,7 +1260,7 @@ export const generateActionPlan = createServerFn({ method: "POST" })
       aiKey = conn?.access_token || null;
       ghToken = aiKey;
     }
-    const aiConfig = { provider, apiKey: aiKey, fallbacks: ghToken ? [{ provider: "github_models", apiKey: ghToken }] : [] };
+    const aiConfig = { provider, apiKey: aiKey, fallbacks: [...(ghToken ? [{ provider: "github_models", apiKey: ghToken }] : []), ...getFreeFallbackChain()] };
 
     const recsText = items
       .map(
@@ -1370,7 +1373,7 @@ export const generateMergeInstructions = createServerFn({ method: "POST" })
       aiKey = conn?.access_token || null;
       ghToken = aiKey;
     }
-    const aiConfig = { provider, apiKey: aiKey, fallbacks: ghToken ? [{ provider: "github_models", apiKey: ghToken }] : [] };
+    const aiConfig = { provider, apiKey: aiKey, fallbacks: [...(ghToken ? [{ provider: "github_models", apiKey: ghToken }] : []), ...getFreeFallbackChain()] };
 
     const repos = (item.repos as string[]) || [];
     const techStack = (item.tech_stack as string[]) || [];
