@@ -1,6 +1,6 @@
 // Centralized AI provider routing — handles GitHub Models, OpenAI, Anthropic, Google
 
-const VALID_PROVIDERS = ["github_models", "openai", "anthropic", "google", "custom", "mistral"];
+const VALID_PROVIDERS = ["github_models", "openai", "anthropic", "google", "custom", "mistral", "groq", "cerebras", "kilocode"];
 
 /**
  * Resolve the best available AI config from user prefs → server env → GitHub OAuth token.
@@ -86,6 +86,12 @@ const DEFAULT_MODELS: Record<string, string> = {
   // this repo's whole job is autonomous code completion, so it's the right single default
   // (no per-role persona split exists in this codebase, unlike Apex/autonomous-coder).
   mistral: "devstral-2512",
+  // Free-tier fallbacks (2026-07-19): Google/Gemini quota exhaustion was
+  // taking down the autonomous runner with no working fallback. These are
+  // all free-tier-capable, OpenAI-compatible providers.
+  groq: "llama-3.3-70b-versatile",
+  cerebras: "llama-3.3-70b",
+  kilocode: "qwen/qwen3-coder:free",
 };
 
 // Rate-limit retry config — GitHub Models free tier is very aggressive (5 RPM
@@ -135,6 +141,9 @@ const PROVIDER_ENDPOINTS: Record<string, string> = {
   google: "https://generativelanguage.googleapis.com/v1beta/models",
   custom: "https://api.openai.com/v1/chat/completions",
   mistral: "https://api.mistral.ai/v1/chat/completions",
+  groq: "https://api.groq.com/openai/v1/chat/completions",
+  cerebras: "https://api.cerebras.ai/v1/chat/completions",
+  kilocode: "https://kilocode.ai/api/openrouter/v1/chat/completions",
 };
 
 /**
@@ -222,7 +231,8 @@ export async function callAI(
 
   // ─── OpenAI-compatible (GitHub Models, OpenAI, custom, Mistral) ────
   if (
-    (provider === "github_models" || provider === "openai" || provider === "custom" || provider === "mistral") &&
+    (provider === "github_models" || provider === "openai" || provider === "custom" || provider === "mistral" ||
+      provider === "groq" || provider === "cerebras" || provider === "kilocode") &&
     config.apiKey
   ) {
     // Set max_tokens per provider — github_models (gpt-4o-mini) has an 8000
@@ -232,6 +242,9 @@ export async function callAI(
       openai: 4096,
       custom: 4096,
       mistral: 4096,
+      groq: 4096,
+      cerebras: 4096,
+      kilocode: 4096,
     };
 
     const body: Record<string, unknown> = {
@@ -292,6 +305,23 @@ export async function callAI(
 // ─── Multi-provider fallback ─────────────────────────────────
 // If the primary provider fails after all retries, try fallback configs.
 // This makes the app resilient to any single provider's quota limits.
+
+/**
+ * getFreeFallbackChain — free-tier server-side providers to append to any
+ * fallback list, so a single exhausted provider (e.g. Gemini quota) never
+ * fully blocks the autonomous runner. Reads platform-level keys from env
+ * (set in Vercel), skips any that aren't configured. Added 2026-07-19 after
+ * "AI rate limit exhausted for google" fully halted analysis runs with no
+ * working fallback.
+ */
+export function getFreeFallbackChain(): AIProviderConfig[] {
+  const chain: AIProviderConfig[] = [];
+  if (process.env.MISTRAL_API_KEY) chain.push({ provider: "mistral", apiKey: process.env.MISTRAL_API_KEY });
+  if (process.env.KILOCODE_API_KEY) chain.push({ provider: "kilocode", apiKey: process.env.KILOCODE_API_KEY });
+  if (process.env.GROQ_API_KEY) chain.push({ provider: "groq", apiKey: process.env.GROQ_API_KEY });
+  if (process.env.CEREBRAS_API_KEY) chain.push({ provider: "cerebras", apiKey: process.env.CEREBRAS_API_KEY });
+  return chain;
+}
 
 export async function callAIWithFallback(
   request: AIRequest,
