@@ -1,4 +1,4 @@
-// CI Verifier — checks GitHub Actions workflow status after PR creation.
+// CI Verifier â checks GitHub Actions workflow status after PR creation.
 // Polls for CI completion, extracts failure logs, and reports results.
 // Used by the step sequencer to verify each atomic change before continuing.
 
@@ -6,7 +6,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
-// ─── Types ─────────────────────────────────────────────────────
+// âââ Types âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 export interface CICheckResult {
   status: "pending" | "success" | "failure" | "no_ci" | "timeout";
@@ -25,7 +25,7 @@ export interface CICheck {
   completedAt: string | null;
 }
 
-// ─── GitHub helpers ────────────────────────────────────────────
+// âââ GitHub helpers ââââââââââââââââââââââââââââââââââââââââââââ
 
 function ghHeaders(token: string) {
   return {
@@ -39,7 +39,7 @@ async function ghFetch(token: string, path: string): Promise<Response> {
   return fetch(`https://api.github.com${path}`, { headers: ghHeaders(token) });
 }
 
-// ─── Poll for CI completion ────────────────────────────────────
+// âââ Poll for CI completion ââââââââââââââââââââââââââââââââââââ
 
 async function pollCIStatus(
   token: string,
@@ -56,7 +56,7 @@ async function pollCIStatus(
     return {
       status: "no_ci",
       checks: [],
-      summary: "Could not access GitHub Actions — either not configured or no permissions.",
+      summary: "Could not access GitHub Actions â either not configured or no permissions.",
       failureLogs: [],
       durationMs: Date.now() - started,
     };
@@ -79,7 +79,7 @@ async function pollCIStatus(
       `/repos/${repo}/commits/${commitSha}/check-runs`,
     );
     if (!checkRes.ok) {
-      // May not have checks yet — wait and retry
+      // May not have checks yet â wait and retry
       await sleep(pollIntervalMs);
       continue;
     }
@@ -98,7 +98,7 @@ async function pollCIStatus(
     };
 
     if (checkData.total_count === 0) {
-      // No check runs yet — might still be queuing
+      // No check runs yet â might still be queuing
       if (Date.now() - started > 60000) {
         // After 1 minute with no checks, likely no CI
         return {
@@ -191,7 +191,7 @@ async function pollCIStatus(
       };
     }
 
-    // Still running — wait and poll again
+    // Still running â wait and poll again
     await sleep(pollIntervalMs);
   }
 
@@ -209,7 +209,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// ─── Get PR's head commit SHA ──────────────────────────────────
+// âââ Get PR's head commit SHA ââââââââââââââââââââââââââââââââââ
 
 async function getPRHeadSha(token: string, repo: string, prNumber: number): Promise<string | null> {
   const res = await ghFetch(token, `/repos/${repo}/pulls/${prNumber}`);
@@ -218,7 +218,7 @@ async function getPRHeadSha(token: string, repo: string, prNumber: number): Prom
   return pr.head.sha;
 }
 
-// ─── Get workflow run logs (truncated) ─────────────────────────
+// âââ Get workflow run logs (truncated) âââââââââââââââââââââââââ
 
 async function getWorkflowRunLogs(
   token: string,
@@ -280,7 +280,7 @@ async function getWorkflowRunLogs(
     : `Workflow "${failedRun.name}" failed (no step details available)`;
 }
 
-// ─── Server functions ──────────────────────────────────────────
+// âââ Server functions ââââââââââââââââââââââââââââââââââââââââââ
 
 /**
  * Check CI status for a specific PR.

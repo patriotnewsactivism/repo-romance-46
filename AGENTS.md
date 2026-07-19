@@ -1,8 +1,8 @@
-# AGENTS.md — Repo Triage & Completion Tool
+# AGENTS.md â Repo Triage & Completion Tool
 
 ## Safety Rails (NON-NEGOTIABLE)
 
-These rules are enforced in code via `src/lib/safety-rails.ts`. They are not just prompts — they are runtime checks that throw errors before any GitHub API write.
+These rules are enforced in code via `src/lib/safety-rails.ts`. They are not just prompts â they are runtime checks that throw errors before any GitHub API write.
 
 1. **Never auto-merge PRs.** All changes land as PRs for human review.
 2. **Never force-push.** Blocked at the code level.
@@ -13,16 +13,16 @@ These rules are enforced in code via `src/lib/safety-rails.ts`. They are not jus
 
 ## Architecture
 
-- `src/lib/safety-rails.ts` — Safety enforcement layer. Every GitHub write goes through `safeGitHubWrite()`.
-- `src/lib/deep-analysis.functions.ts` — Deep structural analysis: reads code to detect stubs, check deps, measure test coverage, assess deploy readiness, calculate honest completion %.
-- `src/lib/learning-log.functions.ts` — Persistent memory. Logs outcomes per repo and cross-repo. Checks history before re-suggesting failed patterns.
-- `src/lib/repo-finisher.functions.ts` — AI code generation + PR creation. Integrated with safety rails and learning.
-- `src/lib/analysis.functions.ts` — Portfolio-level AI analysis across all repos.
-- `src/lib/swarm.functions.ts` — Parallel execution with autonomy controls.
+- `src/lib/safety-rails.ts` â Safety enforcement layer. Every GitHub write goes through `safeGitHubWrite()`.
+- `src/lib/deep-analysis.functions.ts` â Deep structural analysis: reads code to detect stubs, check deps, measure test coverage, assess deploy readiness, calculate honest completion %.
+- `src/lib/learning-log.functions.ts` â Persistent memory. Logs outcomes per repo and cross-repo. Checks history before re-suggesting failed patterns.
+- `src/lib/repo-finisher.functions.ts` â AI code generation + PR creation. Integrated with safety rails and learning.
+- `src/lib/analysis.functions.ts` â Portfolio-level AI analysis across all repos.
+- `src/lib/swarm.functions.ts` â Parallel execution with autonomy controls.
 
 ## Key Principles
 
-- **Honest assessments.** If a repo is 20% done, say "20% — early-stage scaffolding." Don't inflate.
+- **Honest assessments.** If a repo is 20% done, say "20% â early-stage scaffolding." Don't inflate.
 - **Verify before declaring done.** Check that imports resolve, TypeScript compiles, and tests aren't broken.
 - **Learn from failures.** Every finish attempt is logged. Before suggesting a fix, check if it's failed before.
-- **Small, sequenced steps.** Break gaps into testable increments. Stop on failure — don't push forward blindly.
+- **Small, sequenced steps.** Break gaps into testable increments. Stop on failure â don't push forward blindly.

@@ -1,4 +1,4 @@
-// Deep Structural Analysis — goes beyond surface-level health checks.
+// Deep Structural Analysis â goes beyond surface-level health checks.
 // Reads actual code to determine: built vs. stubbed, test coverage,
 // dependency health, deploy readiness, and honest completion percentage.
 
@@ -6,7 +6,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
-// ─── Types ─────────────────────────────────────────────────────
+// âââ Types âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 export interface StubDetection {
   file: string;
@@ -73,7 +73,7 @@ export interface DeepAnalysisResult {
   summary: string;
 }
 
-// ─── GitHub helpers ────────────────────────────────────────────
+// âââ GitHub helpers ââââââââââââââââââââââââââââââââââââââââââââ
 
 function ghHeaders(token: string) {
   return {
@@ -101,7 +101,7 @@ async function ghRaw(token: string, repo: string, path: string): Promise<string 
   return res.text();
 }
 
-// ─── Stub / TODO / Incomplete Detection ────────────────────────
+// âââ Stub / TODO / Incomplete Detection ââââââââââââââââââââââââ
 
 const STUB_PATTERNS: {
   pattern: RegExp;
@@ -182,7 +182,7 @@ function countFunctions(content: string): { total: number; stubbed: number } {
   return { total, stubbed: Math.min(stubbed, total) };
 }
 
-// ─── Dependency Health Check ───────────────────────────────────
+// âââ Dependency Health Check âââââââââââââââââââââââââââââââââââ
 
 interface NpmRegistryVersion {
   version: string;
@@ -264,7 +264,7 @@ async function checkDependencyHealth(packageJsonText: string): Promise<Dependenc
   }
 }
 
-// ─── Test Coverage Analysis ────────────────────────────────────
+// âââ Test Coverage Analysis ââââââââââââââââââââââââââââââââââââ
 
 const TEST_FRAMEWORKS: Record<string, RegExp> = {
   jest: /jest|@jest/,
@@ -350,7 +350,7 @@ function analyzeTestCoverage(
   };
 }
 
-// ─── Deploy Readiness Check ────────────────────────────────────
+// âââ Deploy Readiness Check ââââââââââââââââââââââââââââââââââââ
 
 function checkDeployReadiness(
   tree: { path: string; type: string }[],
@@ -421,7 +421,7 @@ function checkDeployReadiness(
   if (!hasBuildScript && packageJson) issues.push("No `build` script in package.json");
   if (!hasStartScript && packageJson) issues.push("No `start` or `dev` script in package.json");
   if (!hasDeployConfig) issues.push("No deployment configuration found (Vercel, Netlify, Docker, etc.)");
-  if (!hasEnvExample && envFile) issues.push("Has .env but no .env.example — others can't set up the project");
+  if (!hasEnvExample && envFile) issues.push("Has .env but no .env.example â others can't set up the project");
   if (missingEnvVars.length > 0) issues.push(`${missingEnvVars.length} env vars need to be configured`);
   if (!hasBuildConfig && packageJson) issues.push("No build tool config (vite, next, webpack, etc.)");
 
@@ -438,7 +438,7 @@ function checkDeployReadiness(
   };
 }
 
-// ─── Completion Percentage Calculation ─────────────────────────
+// âââ Completion Percentage Calculation âââââââââââââââââââââââââ
 
 function calculateCompletion(
   stubs: StubDetection[],
@@ -469,11 +469,11 @@ function calculateCompletion(
   score += codeScore;
   if (stubRatio > 0.5) {
     evidence.push(
-      `${Math.round(stubRatio * 100)}% of detected functions are stubs or empty — most code is scaffolding`,
+      `${Math.round(stubRatio * 100)}% of detected functions are stubs or empty â most code is scaffolding`,
     );
   } else if (stubRatio > 0.2) {
     evidence.push(
-      `${Math.round(stubRatio * 100)}% of functions are stubs — partially implemented`,
+      `${Math.round(stubRatio * 100)}% of functions are stubs â partially implemented`,
     );
   } else if (functionCounts.total > 0) {
     evidence.push(
@@ -499,7 +499,7 @@ function calculateCompletion(
     score += 5;
     evidence.push("Test framework configured but no test files found");
   } else {
-    evidence.push("No test framework or test files — cannot self-check");
+    evidence.push("No test framework or test files â cannot self-check");
   }
 
   // 3. Deploy readiness (20 points max)
@@ -562,7 +562,7 @@ function calculateCompletion(
   };
 }
 
-// ─── File Breakdown ────────────────────────────────────────────
+// âââ File Breakdown ââââââââââââââââââââââââââââââââââââââââââââ
 
 function categorizeFiles(tree: { path: string; type: string }[]) {
   const files = tree.filter((t) => t.type === "blob");
@@ -586,7 +586,7 @@ function categorizeFiles(tree: { path: string; type: string }[]) {
   return { total: files.length, source, test, config, docs, other };
 }
 
-// ─── Parallel file fetch ───────────────────────────────────────
+// âââ Parallel file fetch âââââââââââââââââââââââââââââââââââââââ
 
 async function fetchFilesParallel(
   token: string,
@@ -609,7 +609,7 @@ async function fetchFilesParallel(
   return results;
 }
 
-// ─── Main Server Function ──────────────────────────────────────
+// âââ Main Server Function ââââââââââââââââââââââââââââââââââââââ
 
 export const deepAnalyzeRepo = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -722,7 +722,7 @@ export const deepAnalyzeRepo = createServerFn({ method: "POST" })
     // 10. Build summary
     const outdatedDeps = depHealth.filter((d) => d.status === "major-behind");
     const summaryParts = [
-      `**Completion: ${completion.percentage}%** — ${completion.verdict.replace(/-/g, " ")}`,
+      `**Completion: ${completion.percentage}%** â ${completion.verdict.replace(/-/g, " ")}`,
     ];
     if (allStubs.length > 0) {
       summaryParts.push(
@@ -735,7 +735,7 @@ export const deepAnalyzeRepo = createServerFn({ method: "POST" })
       );
     }
     if (testCoverage.testFileCount === 0) {
-      summaryParts.push("No tests — can't verify anything works");
+      summaryParts.push("No tests â can't verify anything works");
     }
     if (deployReadiness.issues.length > 0) {
       summaryParts.push(`${deployReadiness.issues.length} deploy issue(s)`);

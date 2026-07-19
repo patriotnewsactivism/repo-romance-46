@@ -64,7 +64,7 @@ export function ActionPlan({ analysisId }: { analysisId: string }) {
       <Card className="p-8 text-center">
         <Loader2 className="h-6 w-6 animate-spin mx-auto text-primary" />
         <p className="mt-3 text-sm text-muted-foreground font-mono">
-          AI is sequencing your roadmap…
+          AI is sequencing your roadmapâ¦
         </p>
       </Card>
     );
@@ -93,7 +93,7 @@ export function ActionPlan({ analysisId }: { analysisId: string }) {
             <span className="font-mono font-semibold">~{plan.total_weeks} weeks total</span>
           </div>
           <div className="text-xs font-mono text-muted-foreground">
-            {plan.phases.length} phases · {plan.quick_wins.length} quick wins ·{" "}
+            {plan.phases.length} phases Â· {plan.quick_wins.length} quick wins Â·{" "}
             {plan.moonshots.length} moonshots
           </div>
         </div>
@@ -110,7 +110,7 @@ export function ActionPlan({ analysisId }: { analysisId: string }) {
             <ul className="space-y-1 text-sm">
               {plan.quick_wins.map((w, i) => (
                 <li key={i} className="flex gap-2">
-                  <span className="text-primary">▸</span>
+                  <span className="text-primary">â¸</span>
                   <span>{w}</span>
                 </li>
               ))}
@@ -126,7 +126,7 @@ export function ActionPlan({ analysisId }: { analysisId: string }) {
             <ul className="space-y-1 text-sm">
               {plan.moonshots.map((m, i) => (
                 <li key={i} className="flex gap-2">
-                  <span className="text-primary">▸</span>
+                  <span className="text-primary">â¸</span>
                   <span>{m}</span>
                 </li>
               ))}
@@ -181,7 +181,7 @@ export function ActionPlan({ analysisId }: { analysisId: string }) {
             {plan.dependencies.map((dep, i) => (
               <div key={i} className="text-sm">
                 <span className="font-mono text-xs">{dep.from_title}</span>
-                <span className="text-muted-foreground mx-2">→</span>
+                <span className="text-muted-foreground mx-2">â</span>
                 <span className="font-mono text-xs">{dep.to_title}</span>
                 <p className="text-xs text-muted-foreground mt-0.5">{dep.reason}</p>
               </div>

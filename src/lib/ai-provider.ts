@@ -1,9 +1,9 @@
-// Centralized AI provider routing — handles GitHub Models, OpenAI, Anthropic, Google
+// Centralized AI provider routing â handles GitHub Models, OpenAI, Anthropic, Google
 
-const VALID_PROVIDERS = ["github_models", "openai", "anthropic", "google", "custom", "mistral"];
+const VALID_PROVIDERS = ["github_models", "openai", "anthropic", "google", "custom"];
 
 /**
- * Resolve the best available AI config from user prefs → server env → GitHub OAuth token.
+ * Resolve the best available AI config from user prefs â server env â GitHub OAuth token.
  * Call this from any server function before invoking callAI().
  */
 export async function resolveAIConfig(
@@ -49,7 +49,7 @@ export async function resolveAIConfig(
     return { provider: "github_models", apiKey: ghToken };
   }
 
-  // 4. Last resort — will error in callAI() with a helpful message
+  // 4. Last resort â will error in callAI() with a helpful message
   return { provider: p?.custom_ai_provider || "openai", apiKey: null };
 }
 
@@ -82,16 +82,12 @@ const DEFAULT_MODELS: Record<string, string> = {
   anthropic: "claude-sonnet-4-20250514",
   google: "gemini-2.5-flash",
   custom: "gpt-4o",
-  // Devstral: Mistral's purpose-built agentic coding model (multi-file edits, tool use) —
-  // this repo's whole job is autonomous code completion, so it's the right single default
-  // (no per-role persona split exists in this codebase, unlike Apex/autonomous-coder).
-  mistral: "devstral-2512",
 };
 
-// Rate-limit retry config — GitHub Models free tier is very aggressive (5 RPM
+// Rate-limit retry config â GitHub Models free tier is very aggressive (5 RPM
 // for gpt-4o, 15 RPM for gpt-4o-mini). We retry with exponential backoff.
 const MAX_RETRIES = 4;
-const INITIAL_BACKOFF_MS = 5000; // 5s — must be >= the provider's rate window
+const INITIAL_BACKOFF_MS = 5000; // 5s â must be >= the provider's rate window
 
 async function fetchWithRetry(
   url: string,
@@ -104,7 +100,7 @@ async function fetchWithRetry(
 
     if (res.status !== 429) return res;
 
-    // Rate limited — parse Retry-After header if present, otherwise back off
+    // Rate limited â parse Retry-After header if present, otherwise back off
     const retryAfter = res.headers.get("Retry-After");
     let waitMs: number;
     if (retryAfter) {
@@ -123,7 +119,7 @@ async function fetchWithRetry(
     }
   }
   throw new Error(
-    `AI rate limit exhausted for ${provider}. ${lastError}. Try again in a minute, or switch to a provider with higher limits (OpenAI, Anthropic, Google, Groq, Cerebras, Mistral).`,
+    `AI rate limit exhausted for ${provider}. ${lastError}. Try again in a minute, or switch to a provider with higher limits (OpenAI, Anthropic, Google).`,
   );
 }
 
@@ -134,7 +130,6 @@ const PROVIDER_ENDPOINTS: Record<string, string> = {
   anthropic: "https://api.anthropic.com/v1/messages",
   google: "https://generativelanguage.googleapis.com/v1beta/models",
   custom: "https://api.openai.com/v1/chat/completions",
-  mistral: "https://api.mistral.ai/v1/chat/completions",
 };
 
 /**
@@ -151,7 +146,7 @@ export async function callAI(
 
   try {
 
-  // ─── Anthropic (different API format) ─────────────────────
+  // âââ Anthropic (different API format) âââââââââââââââââââââ
   if (provider === "anthropic" && config.apiKey) {
     const systemMsg = request.messages.find((m) => m.role === "system")?.content || "";
     const userMessages = request.messages.filter((m) => m.role !== "system");
@@ -186,7 +181,7 @@ export async function callAI(
     return { content: json.content?.[0]?.text || "" };
   }
 
-  // ─── Google Gemini (different API format) ─────────────────
+  // âââ Google Gemini (different API format) âââââââââââââââââ
   if (provider === "google" && config.apiKey) {
     const systemMsg = request.messages.find((m) => m.role === "system")?.content || "";
     const userMsg = request.messages.find((m) => m.role === "user")?.content || "";
@@ -220,18 +215,17 @@ export async function callAI(
     return { content: json.candidates?.[0]?.content?.parts?.[0]?.text || "" };
   }
 
-  // ─── OpenAI-compatible (GitHub Models, OpenAI, custom, Mistral) ────
+  // âââ OpenAI-compatible (GitHub Models, OpenAI, custom) ââââ
   if (
-    (provider === "github_models" || provider === "openai" || provider === "custom" || provider === "mistral") &&
+    (provider === "github_models" || provider === "openai" || provider === "custom") &&
     config.apiKey
   ) {
-    // Set max_tokens per provider — github_models (gpt-4o-mini) has an 8000
+    // Set max_tokens per provider â github_models (gpt-4o-mini) has an 8000
     // total token cap, so we keep output small to leave room for input.
     const maxTokens: Record<string, number> = {
       github_models: 3000, // 3000 output + ~4000 input = under 8000 total
       openai: 4096,
       custom: 4096,
-      mistral: 4096,
     };
 
     const body: Record<string, unknown> = {
@@ -266,7 +260,7 @@ export async function callAI(
     return { content: json.choices?.[0]?.message?.content || "" };
   }
 
-  // No matching provider with a valid key — try fallbacks before giving up
+  // No matching provider with a valid key â try fallbacks before giving up
   if (fallbacks && fallbacks.length > 0) {
     console.warn(`[ai-provider] No key for ${provider}, trying fallback providers...`);
     return callAIWithFallback(request, fallbacks);
@@ -289,7 +283,7 @@ export async function callAI(
 }
 
 
-// ─── Multi-provider fallback ─────────────────────────────────
+// âââ Multi-provider fallback âââââââââââââââââââââââââââââââââ
 // If the primary provider fails after all retries, try fallback configs.
 // This makes the app resilient to any single provider's quota limits.
 
@@ -301,7 +295,7 @@ export async function callAIWithFallback(
   for (let i = 0; i < configs.length; i++) {
     const config = configs[i];
     if (!config.apiKey && config.provider !== "github_models") {
-      // No key for this provider — skip it
+      // No key for this provider â skip it
       continue;
     }
     try {

@@ -1,4 +1,4 @@
--- Full schema v2 — improved with better types, indexes, triggers, and new tables
+-- Full schema v2 â improved with better types, indexes, triggers, and new tables
 -- Applied directly via Supabase Management API on 2026-07-02
 
 -- Tables created:
@@ -10,7 +10,7 @@
 -- 6. repo_cache (cached GitHub repo data to speed up analyses)
 
 -- Key improvements over v1:
--- - user_id is UUID everywhere (was TEXT in user_preferences — caused FK issues)
+-- - user_id is UUID everywhere (was TEXT in user_preferences â caused FK issues)
 -- - Added updated_at auto-trigger on user_preferences and analyses
 -- - Added completed_at timestamp on analyses
 -- - Added trigger_type (manual/scheduled/rerun) on analyses

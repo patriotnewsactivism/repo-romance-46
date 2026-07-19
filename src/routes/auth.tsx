@@ -93,7 +93,7 @@ function AuthPage() {
             />
           </div>
           <Button type="submit" disabled={loading} className="w-full">
-            {loading ? "…" : mode === "signin" ? "Sign in" : "Create account"}
+            {loading ? "â¦" : mode === "signin" ? "Sign in" : "Create account"}
           </Button>
         </form>
 
@@ -101,7 +101,7 @@ function AuthPage() {
           onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
           className="mt-6 text-xs text-muted-foreground hover:text-foreground"
         >
-          {mode === "signin" ? "No account? Create one →" : "Already have an account? Sign in →"}
+          {mode === "signin" ? "No account? Create one â" : "Already have an account? Sign in â"}
         </button>
       </Card>
     </div>
