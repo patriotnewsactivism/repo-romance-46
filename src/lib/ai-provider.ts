@@ -1,6 +1,6 @@
 // Centralized AI provider routing â handles GitHub Models, OpenAI, Anthropic, Google
 
-const VALID_PROVIDERS = ["github_models", "openai", "anthropic", "google", "custom"];
+const VALID_PROVIDERS = ["github_models", "openai", "anthropic", "google", "custom", "qwen"];
 
 /**
  * Resolve the best available AI config from user prefs â server env â GitHub OAuth token.
@@ -82,6 +82,12 @@ const DEFAULT_MODELS: Record<string, string> = {
   anthropic: "claude-sonnet-4-20250514",
   google: "gemini-2.5-flash",
   custom: "gpt-4o",
+  // Qwen Cloud (Alibaba Cloud Model Studio) -- PAID pay-as-you-go, selectable
+  // as a custom/admin-configured provider. NOT wired into the always-on free
+  // fallback chain (see PROVIDER_ENDPOINTS comment + PR description) since
+  // that chain currently costs the platform nothing (github_models fallback
+  // uses the requesting user's own GitHub OAuth token).
+  qwen: "qwen3-coder-plus",
 };
 
 // Rate-limit retry config â GitHub Models free tier is very aggressive (5 RPM
@@ -125,11 +131,18 @@ async function fetchWithRetry(
 
 // API endpoints per provider
 const PROVIDER_ENDPOINTS: Record<string, string> = {
-  github_models: "https://models.inference.ai.azure.com/chat/completions",
+  // FIXED 2026-07-20: models.inference.ai.azure.com is a retired GitHub
+  // Models endpoint (Azure-hosted preview, decommissioned) -- every
+  // github_models call was silently failing before this fix. Real current
+  // endpoint is models.github.ai (same OpenAI-compatible shape, same PAT auth).
+  github_models: "https://models.github.ai/inference/chat/completions",
   openai: "https://api.openai.com/v1/chat/completions",
   anthropic: "https://api.anthropic.com/v1/messages",
   google: "https://generativelanguage.googleapis.com/v1beta/models",
   custom: "https://api.openai.com/v1/chat/completions",
+  // Qwen Cloud (Alibaba Cloud Model Studio) international endpoint -- NOT
+  // the mainland Bailian console, separate account/URL. PAID pay-as-you-go.
+  qwen: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
 };
 
 /**
@@ -217,7 +230,7 @@ export async function callAI(
 
   // âââ OpenAI-compatible (GitHub Models, OpenAI, custom) ââââ
   if (
-    (provider === "github_models" || provider === "openai" || provider === "custom") &&
+    (provider === "github_models" || provider === "openai" || provider === "custom" || provider === "qwen") &&
     config.apiKey
   ) {
     // Set max_tokens per provider â github_models (gpt-4o-mini) has an 8000
@@ -226,6 +239,7 @@ export async function callAI(
       github_models: 3000, // 3000 output + ~4000 input = under 8000 total
       openai: 4096,
       custom: 4096,
+      qwen: 4096,
     };
 
     const body: Record<string, unknown> = {
