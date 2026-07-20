@@ -1,9 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { callAI } from "@/lib/ai-provider";
+import { callAI, type AIProviderConfig } from "@/lib/ai-provider";
 
-// ─── Types ─────────────────────────────────────────────────────
+// âââ Types âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 interface Valuation {
   repo: string;
@@ -46,7 +46,7 @@ interface PortfolioValuation {
   recommendation: string;
 }
 
-// ─── GitHub helpers ────────────────────────────────────────────
+// âââ GitHub helpers ââââââââââââââââââââââââââââââââââââââââââââ
 
 function ghHeaders(token: string) {
   return {
@@ -159,7 +159,7 @@ async function fetchRepoMetrics(token: string, repo: string) {
   };
 }
 
-// ─── AI Valuation Generation ───────────────────────────────────
+// âââ AI Valuation Generation âââââââââââââââââââââââââââââââââââ
 
 async function generateValuation(
   repo: string,
@@ -176,9 +176,10 @@ async function generateValuation(
   } | null,
   aiProvider: string,
   aiKey: string | null,
+  aiFallbacks?: AIProviderConfig[],
 ): Promise<Valuation> {
   const system = `You are a technology investment analyst and M&A advisor specializing in codebase and software project valuations.
-You value software projects the way a VC or acquirer would — based on:
+You value software projects the way a VC or acquirer would â based on:
 - Code quality & completeness (tests, CI, documentation, code coverage)
 - Market potential & addressable market
 - Traction signals (stars, forks, commits, activity recency)
@@ -188,7 +189,7 @@ You value software projects the way a VC or acquirer would — based on:
 - Unique IP / algorithmic moats
 - Development cost savings (what would it cost to build from scratch?)
 
-Be realistic — not everything is worth millions. Most side projects are worth $0-$50k.
+Be realistic â not everything is worth millions. Most side projects are worth $0-$50k.
 Strong revenue-ready SaaS with traction: $50k-$2M.
 Exceptional projects with proven revenue: $500k-$10M+.
 
@@ -314,15 +315,16 @@ Analysis Context:
       responseFormat: body.response_format,
     },
     { provider: aiProvider, apiKey: aiKey },
+    aiFallbacks,
   );
   return JSON.parse(aiResult.content || "{}") as Valuation;
 }
 
-// ─── Server Functions ──────────────────────────────────────────
+// âââ Server Functions ââââââââââââââââââââââââââââââââââââââââââ
 
 export const valuePortfolio = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { analysisId: string }) =>
+  .validator((d: { analysisId: string }) =>
     z.object({ analysisId: z.string().uuid() }).parse(d),
   )
   .handler(async ({ context, data }) => {
@@ -357,6 +359,19 @@ export const valuePortfolio = createServerFn({ method: "POST" })
       .eq("user_id", context.userId)
       .maybeSingle();
 
+    // Resolve AI provider â server key overrides github_models default
+    const serverProvider = process.env.SERVER_AI_PROVIDER;
+    const serverKey = process.env.SERVER_AI_KEY;
+    const resolvedProvider =
+      prefs?.custom_ai_key ? (prefs.custom_ai_provider || "openai")
+      : serverProvider && serverKey ? serverProvider
+      : prefs?.custom_ai_provider || "github_models";
+    const resolvedKey =
+      prefs?.custom_ai_key ? prefs.custom_ai_key
+      : serverProvider && serverKey ? serverKey
+      : resolvedProvider === "github_models" ? conn.access_token
+      : null;
+
     // Collect unique repos from all recommendations (dedupe)
     const allRepos = new Set<string>();
     for (const item of items) {
@@ -376,7 +391,7 @@ export const valuePortfolio = createServerFn({ method: "POST" })
     }
 
     if (valueableRepos.size === 0) {
-      throw new Error("No individual repos to value — only combine recommendations found.");
+      throw new Error("No individual repos to value â only combine recommendations found.");
     }
 
     // Fetch metrics + generate valuation for each repo
@@ -408,17 +423,22 @@ export const valuePortfolio = createServerFn({ method: "POST" })
             }
           : null;
 
-        // For GitHub Models, fall back to GitHub connection token
-        let valAiKey = prefs?.custom_ai_key || null;
-        if (prefs?.custom_ai_provider === "github_models" && !valAiKey) {
-          valAiKey = conn.access_token;
+        // Build fallback chain: primary â server â github_models (always free via GitHub token)
+        const valFallbacks: AIProviderConfig[] = [];
+        if (serverProvider && serverKey && serverProvider !== resolvedProvider) {
+          valFallbacks.push({ provider: serverProvider, apiKey: serverKey });
         }
+        if (resolvedProvider !== "github_models" && conn.access_token) {
+          valFallbacks.push({ provider: "github_models", apiKey: conn.access_token });
+        }
+
         const valuation = await generateValuation(
           repo,
           metrics,
           analysisContext,
-          prefs?.custom_ai_provider || "openai",
-          valAiKey,
+          resolvedProvider,
+          resolvedKey,
+          valFallbacks,
         );
 
         valuations.push(valuation);
@@ -466,21 +486,24 @@ export const valuePortfolio = createServerFn({ method: "POST" })
       ),
       recommendation:
         totalHigh > 500000
-          ? "Strong portfolio — consider doubling down on top picks and seeking acquisition interest."
+          ? "Strong portfolio â consider doubling down on top picks and seeking acquisition interest."
           : totalHigh > 100000
-            ? "Promising portfolio — focus on finishing highest-value repos and monetizing."
-            : "Early-stage portfolio — most value is in development cost savings. Focus on finishing and launching.",
+            ? "Promising portfolio â focus on finishing highest-value repos and monetizing."
+            : "Early-stage portfolio â most value is in development cost savings. Focus on finishing and launching.",
     };
 
     // Save valuation to the analysis record
-    await context.supabase.from("analyses").update({ valuation: result as unknown as import("@/integrations/supabase/types").Json }).eq("id", data.analysisId);
+    await context.supabase
+      .from("analyses")
+      .update({ valuation: result as unknown as import("@/integrations/supabase/types").Json })
+      .eq("id", data.analysisId);
 
     return result;
   });
 
 export const getValuation = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { analysisId: string }) =>
+  .validator((d: { analysisId: string }) =>
     z.object({ analysisId: z.string().uuid() }).parse(d),
   )
   .handler(async ({ context, data }) => {

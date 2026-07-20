@@ -218,7 +218,7 @@ export function VibeTools({ analysisId, itemRank, kind, repos, existing }: Props
               <DollarSign className="h-4 w-4 text-emerald-500" />
               <div className="text-sm">
                 <span className="font-semibold">
-                  {fmtUsd(valuation.low_usd)} – {fmtUsd(valuation.high_usd)}
+                  {fmtUsd(valuation.low_usd)} â {fmtUsd(valuation.high_usd)}
                 </span>
                 <span className="text-muted-foreground ml-2">
                   (mid {fmtUsd(valuation.mid_usd)})
@@ -248,7 +248,7 @@ export function VibeTools({ analysisId, itemRank, kind, repos, existing }: Props
                         >
                           {c.name}
                         </a>
-                        <span className="text-muted-foreground">— {c.differentiator}</span>
+                        <span className="text-muted-foreground">â {c.differentiator}</span>
                       </li>
                     ))}
                   </ul>
@@ -352,7 +352,7 @@ export function VibeTools({ analysisId, itemRank, kind, repos, existing }: Props
             <ul className="mt-1 text-xs space-y-0.5">
               {combine.structure.map((s, i) => (
                 <li key={i}>
-                  <code className="bg-muted px-1 rounded">{s.path}</code> — {s.purpose}
+                  <code className="bg-muted px-1 rounded">{s.path}</code> â {s.purpose}
                 </li>
               ))}
             </ul>
@@ -383,9 +383,7 @@ export function VibeTools({ analysisId, itemRank, kind, repos, existing }: Props
                   <span className="text-xs text-red-500">{h.error}</span>
                 )}
               </div>
-              {h.summary && (
-                <div className="text-xs text-muted-foreground mt-0.5">{h.summary}</div>
-              )}
+              {h.summary && <div className="text-xs text-muted-foreground mt-0.5">{h.summary}</div>}
             </div>
           ))}
         </Card>

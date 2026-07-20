@@ -25,6 +25,7 @@ import {
 } from "@/lib/github.functions";
 import { listAnalyses, runAnalysis, deleteAnalysis } from "@/lib/analysis.functions";
 import { getPreferences, getStarredItems } from "@/lib/preferences.functions";
+import { AutonomousRunner } from "@/components/AutonomousRunner";
 import { Link as TanLink } from "@tanstack/react-router";
 import { formatDistanceToNow } from "date-fns";
 
@@ -127,7 +128,7 @@ function Dashboard() {
               <div className="font-medium">GitHub connection</div>
               <div className="text-sm text-muted-foreground font-mono">
                 {status.isLoading
-                  ? "checking…"
+                  ? "checkingâ¦"
                   : connected
                     ? `connected as ${status.data?.login}`
                     : "not connected"}
@@ -149,7 +150,7 @@ function Dashboard() {
                 disabled={connectMut.isPending}
                 className="glow-primary"
               >
-                <Github className="h-4 w-4 mr-2" /> {connectMut.isPending ? "…" : "Connect GitHub"}
+                <Github className="h-4 w-4 mr-2" /> {connectMut.isPending ? "â¦" : "Connect GitHub"}
               </Button>
             )}
           </div>
@@ -188,7 +189,7 @@ function Dashboard() {
               <div className="flex flex-wrap gap-2">
                 {summary.topLanguages.map((lang) => (
                   <Badge key={lang.name} variant="secondary" className="font-mono text-xs">
-                    {lang.name} · {lang.pct}%
+                    {lang.name} Â· {lang.pct}%
                   </Badge>
                 ))}
               </div>
@@ -197,7 +198,7 @@ function Dashboard() {
           {summary.dormantCount > 0 && (
             <div className="mt-3 flex items-center gap-1.5 text-xs text-amber-500/80">
               <AlertTriangle className="h-3.5 w-3.5" />
-              {summary.dormantCount} repos haven't been pushed in 6+ months — prime candidates for
+              {summary.dormantCount} repos haven't been pushed in 6+ months â prime candidates for
               finishing or archiving.
             </div>
           )}
@@ -222,7 +223,7 @@ function Dashboard() {
           >
             {runMut.isPending ? (
               <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Analyzing…
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Analyzingâ¦
               </>
             ) : (
               <>
@@ -236,21 +237,24 @@ function Dashboard() {
             to="/settings"
             className="text-xs font-mono text-muted-foreground hover:text-foreground mt-2 inline-block"
           >
-            Configure filters & schedule →
+            Configure filters & schedule â
           </Link>
         )}
         {runMut.isPending && (
           <p className="mt-3 text-xs text-muted-foreground font-mono">
-            fetching repos → sampling code → asking the AI (this can take 30–90s)…
+            fetching repos â sampling code â asking the AI (this can take 30â90s)â¦
           </p>
         )}
       </Card>
 
       {/* Past Analyses */}
       <section>
+        {/* Autonomous Runner */}
+        <AutonomousRunner />
+
         <h2 className="font-mono text-sm text-muted-foreground mb-3">// past analyses</h2>
         {analyses.isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <p className="text-sm text-muted-foreground">Loadingâ¦</p>
         ) : !analyses.data?.length ? (
           <Card className="p-6 text-center text-sm text-muted-foreground">
             No analyses yet. Run your first analysis above.
@@ -264,7 +268,7 @@ function Dashboard() {
                     <div>
                       <div className="font-mono text-sm">analysis_{a.id.slice(0, 8)}</div>
                       <div className="text-xs text-muted-foreground mt-1">
-                        {formatDistanceToNow(new Date(a.created_at), { addSuffix: true })} ·{" "}
+                        {formatDistanceToNow(new Date(a.created_at), { addSuffix: true })} Â·{" "}
                         {a.repo_count} repos
                       </div>
                     </div>

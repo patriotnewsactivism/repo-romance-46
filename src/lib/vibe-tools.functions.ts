@@ -4,13 +4,14 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { callAI } from "@/lib/ai-provider";
+import { callAI, resolveAIConfig } from "@/lib/ai-provider";
 import type { Json } from "@/integrations/supabase/types";
+import { logLearningEntry } from "@/lib/learning-log.functions";
 
 const ASJSON = "as unknown as Json";
 type Ctx = { supabase: unknown; userId: string };
 
-// ─── shared helpers ────────────────────────────────────────────
+// âââ shared helpers ââââââââââââââââââââââââââââââââââââââââââââ
 
 async function loadItem(
   supabase: {
@@ -54,30 +55,7 @@ async function loadItem(
   };
 }
 
-async function loadPrefs(supabase: unknown, userId: string) {
-  const s = supabase as {
-    from: (t: string) => {
-      select: (c: string) => {
-        eq: (
-          col: string,
-          v: string,
-        ) => { maybeSingle: () => Promise<{ data: unknown }> };
-      };
-    };
-  };
-  const { data } = await s
-    .from("user_preferences")
-    .select("custom_ai_provider, custom_ai_key")
-    .eq("user_id", userId)
-    .maybeSingle();
-  return (data ?? null) as { custom_ai_provider: string | null; custom_ai_key: string | null } | null;
-}
-
-async function updateItem(
-  supabase: unknown,
-  itemId: string,
-  patch: Record<string, unknown>,
-) {
+async function updateItem(supabase: unknown, itemId: string, patch: Record<string, unknown>) {
   const s = supabase as {
     from: (t: string) => {
       update: (p: Record<string, unknown>) => {
@@ -92,10 +70,7 @@ async function loadGhToken(supabase: unknown, userId: string): Promise<string> {
   const s = supabase as {
     from: (t: string) => {
       select: (c: string) => {
-        eq: (
-          col: string,
-          v: string,
-        ) => { maybeSingle: () => Promise<{ data: unknown }> };
+        eq: (col: string, v: string) => { maybeSingle: () => Promise<{ data: unknown }> };
       };
     };
   };
@@ -108,7 +83,7 @@ async function loadGhToken(supabase: unknown, userId: string): Promise<string> {
   return (data as { access_token: string }).access_token;
 }
 
-// ─── 1. MARKET & VALUATION ────────────────────────────────────
+// âââ 1. MARKET & VALUATION ââââââââââââââââââââââââââââââââââââ
 
 const marketSchema = {
   type: "object",
@@ -161,14 +136,12 @@ const marketSchema = {
 
 export const assessMarketAndValue = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { analysisId: string; itemRank: number }) =>
-    z
-      .object({ analysisId: z.string().uuid(), itemRank: z.number().int() })
-      .parse(d),
+  .validator((d: { analysisId: string; itemRank: number }) =>
+    z.object({ analysisId: z.string().uuid(), itemRank: z.number().int() }).parse(d),
   )
   .handler(async ({ context, data }) => {
     const item = await loadItem(context.supabase as never, data.analysisId, data.itemRank);
-    const prefs = await loadPrefs(context.supabase, context.userId);
+    const aiConfig = await resolveAIConfig(context.supabase, context.userId);
 
     const sys = `You are a market analyst and startup valuator. Given a software project idea derived from GitHub repos, produce:
 - a realistic TAM summary (1-2 sentences)
@@ -202,7 +175,7 @@ Existing next steps: ${item.next_steps.slice(0, 5).join(" | ")}`;
           json_schema: { name: "market_and_value", strict: true, schema: marketSchema },
         },
       },
-      { provider: prefs?.custom_ai_provider || "openai", apiKey: prefs?.custom_ai_key || null },
+      aiConfig,
     );
 
     const parsed = JSON.parse(resp.content || "{}");
@@ -216,7 +189,7 @@ Existing next steps: ${item.next_steps.slice(0, 5).join(" | ")}`;
     return { market, valuation };
   });
 
-// ─── 2. VIBE SPEC (PRD + Lovable prompt + landing copy) ───────
+// âââ 2. VIBE SPEC (PRD + Lovable prompt + landing copy) âââââââ
 
 const vibeSchema = {
   type: "object",
@@ -247,14 +220,12 @@ const vibeSchema = {
 
 export const generateVibeSpec = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { analysisId: string; itemRank: number }) =>
-    z
-      .object({ analysisId: z.string().uuid(), itemRank: z.number().int() })
-      .parse(d),
+  .validator((d: { analysisId: string; itemRank: number }) =>
+    z.object({ analysisId: z.string().uuid(), itemRank: z.number().int() }).parse(d),
   )
   .handler(async ({ context, data }) => {
     const item = await loadItem(context.supabase as never, data.analysisId, data.itemRank);
-    const prefs = await loadPrefs(context.supabase, context.userId);
+    const aiConfig = await resolveAIConfig(context.supabase, context.userId);
 
     const sys = `You are a product engineer and copywriter. Turn a GitHub-derived project idea into a ready-to-ship spec:
 - product_name: short, memorable
@@ -282,7 +253,7 @@ Existing next steps: ${item.next_steps.join(" | ")}`;
           json_schema: { name: "vibe_spec", strict: true, schema: vibeSchema },
         },
       },
-      { provider: prefs?.custom_ai_provider || "openai", apiKey: prefs?.custom_ai_key || null },
+      aiConfig,
     );
 
     const spec = JSON.parse(resp.content || "{}");
@@ -290,13 +261,9 @@ Existing next steps: ${item.next_steps.join(" | ")}`;
     return spec;
   });
 
-// ─── 3. COMBINE REPOS (create combined repo + link issues) ────
+// âââ 3. COMBINE REPOS (create combined repo + link issues) ââââ
 
-async function gh(
-  token: string,
-  path: string,
-  init?: RequestInit,
-): Promise<Response> {
+async function gh(token: string, path: string, init?: RequestInit): Promise<Response> {
   return fetch(`https://api.github.com${path}`, {
     ...init,
     headers: {
@@ -310,17 +277,15 @@ async function gh(
 
 export const combineRepos = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { analysisId: string; itemRank: number }) =>
-    z
-      .object({ analysisId: z.string().uuid(), itemRank: z.number().int() })
-      .parse(d),
+  .validator((d: { analysisId: string; itemRank: number }) =>
+    z.object({ analysisId: z.string().uuid(), itemRank: z.number().int() }).parse(d),
   )
   .handler(async ({ context, data }) => {
     const item = await loadItem(context.supabase as never, data.analysisId, data.itemRank);
     if (item.repos.length < 2) throw new Error("Need at least 2 repos to combine.");
 
     const token = await loadGhToken(context.supabase, context.userId);
-    const prefs = await loadPrefs(context.supabase, context.userId);
+    const aiConfig = await resolveAIConfig(context.supabase, context.userId);
 
     // AI plan for the combined repo
     const planSchema = {
@@ -342,7 +307,14 @@ export const combineRepos = createServerFn({ method: "POST" })
         integration_plan_md: { type: "string" },
         first_pr_title: { type: "string" },
       },
-      required: ["repo_name", "description", "readme_md", "structure", "integration_plan_md", "first_pr_title"],
+      required: [
+        "repo_name",
+        "description",
+        "readme_md",
+        "structure",
+        "integration_plan_md",
+        "first_pr_title",
+      ],
     };
 
     const planResp = await callAI(
@@ -363,7 +335,7 @@ export const combineRepos = createServerFn({ method: "POST" })
           json_schema: { name: "combine_plan", strict: true, schema: planSchema },
         },
       },
-      { provider: prefs?.custom_ai_provider || "openai", apiKey: prefs?.custom_ai_key || null },
+      aiConfig,
     );
 
     const plan = JSON.parse(planResp.content || "{}") as {
@@ -381,7 +353,10 @@ export const combineRepos = createServerFn({ method: "POST" })
     const me = (await meRes.json()) as { login: string };
 
     // Create new repo (with auto-init so we can write files immediately)
-    const repoName = plan.repo_name.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 60);
+    const repoName = plan.repo_name
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "-")
+      .slice(0, 60);
     const createRes = await gh(token, "/user/repos", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -396,7 +371,11 @@ export const combineRepos = createServerFn({ method: "POST" })
       const err = await createRes.text();
       throw new Error(`Create repo failed: ${createRes.status} ${err.slice(0, 200)}`);
     }
-    const newRepo = (await createRes.json()) as { full_name: string; html_url: string; default_branch: string };
+    const newRepo = (await createRes.json()) as {
+      full_name: string;
+      html_url: string;
+      default_branch: string;
+    };
 
     // Write README + INTEGRATION_PLAN.md + structure placeholders
     async function putFile(path: string, content: string, message: string) {
@@ -457,20 +436,19 @@ export const combineRepos = createServerFn({ method: "POST" })
     return result;
   });
 
-// ─── 4. ITERATIVE FINISH (multi-pass RepoFinisher) ────────────
+// âââ 4. ITERATIVE FINISH (multi-pass RepoFinisher) ââââââââââââ
 
 export const iterativeFinish = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
-    (d: { analysisId: string; itemRank: number; repo: string; passes?: number }) =>
-      z
-        .object({
-          analysisId: z.string().uuid(),
-          itemRank: z.number().int(),
-          repo: z.string(),
-          passes: z.number().int().min(1).max(4).optional(),
-        })
-        .parse(d),
+  .validator((d: { analysisId: string; itemRank: number; repo: string; passes?: number }) =>
+    z
+      .object({
+        analysisId: z.string().uuid(),
+        itemRank: z.number().int(),
+        repo: z.string(),
+        passes: z.number().int().min(1).max(4).optional(),
+      })
+      .parse(d),
   )
   .handler(async ({ context, data }) => {
     const { finishRepo } = await import("@/lib/repo-finisher.functions");
@@ -538,6 +516,20 @@ export const iterativeFinish = createServerFn({ method: "POST" })
       finish_history: history as unknown as Json,
       iteration_count: history.filter((h) => h.pr_url).length,
     });
+
+    // Log learning entries for each pass
+    for (const h of history) {
+      await logLearningEntry(context.supabase, context.userId, data.repo, {
+        action: `iterative-finish-pass-${h.pass}`,
+        outcome: h.error ? "failure" : "success",
+        duration_ms: 0,
+        details: h.error || h.summary || `Pass ${h.pass} completed`,
+        files_affected: [],
+        error_message: h.error,
+        fix_pattern: `iterative-finish-pass-${h.pass}`,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     return { history, passes_completed: history.filter((h) => h.pr_url).length };
   });

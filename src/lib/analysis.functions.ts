@@ -1,10 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { callAI } from "@/lib/ai-provider";
+import { callAI, callAIWithFallback, type AIProviderConfig } from "@/lib/ai-provider";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-
 
 const GH_API = "https://api.github.com";
 
@@ -19,7 +18,7 @@ async function gh<T>(path: string, token: string): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`GitHub ${path} → ${res.status}: ${body.slice(0, 200)}`);
+    throw new Error(`GitHub ${path} â ${res.status}: ${body.slice(0, 200)}`);
   }
   return res.json() as Promise<T>;
 }
@@ -102,7 +101,7 @@ const SAMPLE_EXT = new Set([
   ".sql",
 ]);
 
-// ─── Concurrency-limited parallel runner ───────────────────────
+// âââ Concurrency-limited parallel runner âââââââââââââââââââââââ
 async function parallelMap<T, R>(
   items: T[],
   concurrency: number,
@@ -129,7 +128,7 @@ async function parallelMap<T, R>(
 
 type ProgressFn = (msg: string) => Promise<void>;
 
-// ─── Parse package.json / pyproject.toml for dependencies ──────
+// âââ Parse package.json / pyproject.toml for dependencies ââââââ
 function extractDepsFromPackageJson(text: string): string[] {
   try {
     const pkg = JSON.parse(text);
@@ -157,17 +156,13 @@ function extractDepsFromPyproject(text: string): string[] {
   return deps;
 }
 
-// ─── Digest a single repo into a text summary for the AI ───────
-async function digestRepo(
-  repo: Repo,
-  token: string,
-  compact = false,
-): Promise<string> {
+// âââ Digest a single repo into a text summary for the AI âââââââ
+async function digestRepo(repo: Repo, token: string, compact = false): Promise<string> {
   const parts: string[] = [];
   parts.push(`REPO: ${repo.full_name}`);
   if (repo.description) parts.push(`DESC: ${repo.description}`);
   parts.push(
-    `LANG: ${repo.language ?? "?"} · stars: ${repo.stargazers_count} · forks: ${repo.forks_count ?? 0} · pushed: ${repo.pushed_at} · size: ${repo.size}KB`,
+    `LANG: ${repo.language ?? "?"} Â· stars: ${repo.stargazers_count} Â· forks: ${repo.forks_count ?? 0} Â· pushed: ${repo.pushed_at} Â· size: ${repo.size}KB`,
   );
   if (repo.topics?.length) parts.push(`TOPICS: ${repo.topics.join(", ")}`);
   if (repo.homepage) parts.push(`HOMEPAGE: ${repo.homepage}`);
@@ -178,7 +173,7 @@ async function digestRepo(
   const readme = await ghText(`/repos/${repo.full_name}/readme`, token);
   if (readme) parts.push(`README:\n${readme.slice(0, readmeChars)}`);
 
-  // File tree — handle truncated trees
+  // File tree â handle truncated trees
   let tree: TreeEntry[] = [];
   let treeTruncated = false;
   try {
@@ -189,7 +184,7 @@ async function digestRepo(
     tree = treeRes.tree.filter((t) => t.type === "blob");
     treeTruncated = treeRes.truncated;
   } catch {
-    // Skip on error — try non-recursive as fallback
+    // Skip on error â try non-recursive as fallback
     try {
       const treeRes = await gh<{ tree: TreeEntry[] }>(
         `/repos/${repo.full_name}/git/trees/${repo.default_branch}`,
@@ -237,7 +232,9 @@ async function digestRepo(
 
   // Parallel fetch of key files
   const fileResults = await Promise.all(
-    samplePaths.map((p) => ghText(`/repos/${repo.full_name}/contents/${encodeURIComponent(p)}`, token)),
+    samplePaths.map((p) =>
+      ghText(`/repos/${repo.full_name}/contents/${encodeURIComponent(p)}`, token),
+    ),
   );
 
   let sampledBytes = 0;
@@ -281,7 +278,7 @@ async function digestRepo(
   return parts.join("\n\n");
 }
 
-// ─── Token budgeting / chunking ────────────────────────────────
+// âââ Token budgeting / chunking ââââââââââââââââââââââââââââââââ
 
 function estimateTokens(s: string): number {
   return Math.ceil(s.length / 4);
@@ -290,7 +287,7 @@ function estimateTokens(s: string): number {
 function maxInputTokensForProvider(provider: string): number {
   switch (provider) {
     case "github_models":
-      return 4000; // GitHub Models free tier caps at 8k total — leave room for system prompt + output
+      return 4500; // GitHub Models gpt-4o-mini: 8k total (system ~400 + input ~4500 + output ~3000 = ~7900)
     case "openai":
       return 12000;
     case "anthropic":
@@ -305,7 +302,7 @@ function maxInputTokensForProvider(provider: string): number {
 }
 
 function chunkDigests(digests: string[], maxTokens: number): string[][] {
-  const OVERHEAD_TOKENS = 1500;
+  const OVERHEAD_TOKENS = 600; // system prompt (~400) + repo index + formatting
   const budget = Math.max(maxTokens - OVERHEAD_TOKENS, 800);
   const chunks: string[][] = [];
   let current: string[] = [];
@@ -370,14 +367,19 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
     promise,
     new Promise<T>((_, reject) =>
       setTimeout(
-        () => reject(new Error(`${label} exceeded ${Math.round(ms / 1000)}s timeout. Try reducing max repos or switching AI provider.`)),
+        () =>
+          reject(
+            new Error(
+              `${label} exceeded ${Math.round(ms / 1000)}s timeout. Try reducing max repos or switching AI provider.`,
+            ),
+          ),
         ms,
       ),
     ),
   ]);
 }
 
-// ─── Apply user filters to the repo shortlist ──────────────────
+// âââ Apply user filters to the repo shortlist ââââââââââââââââââ
 interface FilterPrefs {
   filter_languages: string[] | null;
   filter_min_stars: number;
@@ -393,9 +395,7 @@ function applyFilters(repos: Repo[], prefs: FilterPrefs | null): Repo[] {
     shortlist = shortlist.filter((r) => !r.archived);
   }
   if (prefs.filter_languages && prefs.filter_languages.length > 0) {
-    shortlist = shortlist.filter(
-      (r) => r.language && prefs.filter_languages!.includes(r.language),
-    );
+    shortlist = shortlist.filter((r) => r.language && prefs.filter_languages!.includes(r.language));
   }
   if (prefs.filter_min_stars > 0) {
     shortlist = shortlist.filter((r) => r.stargazers_count >= prefs.filter_min_stars);
@@ -403,17 +403,20 @@ function applyFilters(repos: Repo[], prefs: FilterPrefs | null): Repo[] {
   return shortlist.slice(0, prefs.filter_max_repos || 50);
 }
 
-// ─── Fetch repos with pagination ───────────────────────────────
+// âââ Fetch repos with pagination âââââââââââââââââââââââââââââââ
 async function fetchAllRepos(token: string, maxRepos: number): Promise<Repo[]> {
   const allRepos: Repo[] = [];
   let page = 1;
   const perPage = 100;
-  // Cap pages to avoid excessive API calls — 5 pages = 500 repos max
+  // Cap pages to avoid excessive API calls â 5 pages = 500 repos max
   const maxPages = Math.min(Math.ceil(maxRepos / perPage) + 1, 5);
 
   while (page <= maxPages) {
     const batch = await withTimeout(
-      gh<Repo[]>(`/user/repos?per_page=${perPage}&page=${page}&affiliation=owner&sort=pushed`, token),
+      gh<Repo[]>(
+        `/user/repos?per_page=${perPage}&page=${page}&affiliation=owner&sort=pushed`,
+        token,
+      ),
       20000,
       `GitHub repo fetch (page ${page})`,
     );
@@ -425,11 +428,14 @@ async function fetchAllRepos(token: string, maxRepos: number): Promise<Repo[]> {
   return allRepos;
 }
 
-// ─── Zod schema for AI recommendations ─────────────────────────
+// âââ Zod schema for AI recommendations âââââââââââââââââââââââââ
 const RecommendationSchema = z.object({
   recommendations: z.array(
     z.object({
-      kind: z.string().transform(v => v.toLowerCase() as "finish" | "combine" | "repurpose").pipe(z.enum(["finish", "combine", "repurpose"])),
+      kind: z
+        .string()
+        .transform((v) => v.toLowerCase() as "finish" | "combine" | "repurpose")
+        .pipe(z.enum(["finish", "combine", "repurpose"])),
       title: z.string(),
       repos: z.array(z.string()),
       pitch: z.string(),
@@ -463,34 +469,16 @@ const RecommendationSchema = z.object({
     }),
 });
 
-// ─── AI system prompt ──────────────────────────────────────────
-const AI_SYSTEM_PROMPT = `You are an expert product strategist and technical marketer reviewing a developer's GitHub portfolio.
-You analyze repos to find opportunities to FINISH, COMBINE, or REPURPOSE them into shippable products.
+// âââ AI system prompt ââââââââââââââââââââââââââââââââââââââââââ
+const AI_SYSTEM_PROMPT = `You are a skeptical product strategist evaluating a GitHub portfolio. Only recommend repos with genuine potential.
 
-For each repo digest, identify:
-- FINISH: repos that are close to shippable — describe exactly what's missing and how to get it to v1.
-- COMBINE: 2+ repos that together form a stronger product than any alone. List their full names. Explain the synergy.
-- REPURPOSE: repos whose code could be rebranded/positioned as a marketable tool for a different audience.
+MATURITY: SKELETON (<5 files, no logic)âskip. EARLY (5-20 files, incomplete)âfinish only if clear path. DEVELOPING (20+ files, real functionality)âgood finish candidate. MATUREârepurpose only if strong market fit. ABANDONED (6+mo no push)âonly if code still relevant.
 
-For every recommendation give:
-- kind, title (5-8 words, punchy)
-- repos (full_name array — use the exact full_name from the digest)
-- pitch (2-3 sentence "market as X" — be specific about the target user and value prop)
-- effort (1=hours, 5=months)
-- market_potential (1=niche, 5=broad)
-- next_steps (3-5 concrete, specific todos — reference actual files, features, or APIs from the repo digests)
-- tech_stack (array of detected technologies, frameworks, languages, tools — include those from dependencies and file extensions)
-- marketing_tweet (a punchy, engaging tweet promoting the product — include relevant hashtags, max 280 chars)
-- marketing_linkedin (a professional LinkedIn post — 3-4 sentences with a hook + value prop + CTA)
-- estimated_hours (realistic total hours to complete, 1-500)
+FINISH (need ALL): executable code exists, clear gap to shippable, <40hr work, identifiable target user, can name specific files needing work.
+COMBINE (need ALL): compatible tech/adjacent problems, creates something neither could alone, specific integration point, clearer market position, not just same language.
+REPURPOSE (need ALL): working internal-use code, can be positioned externally with minimal changes, name target market & why they'd pay, plausible transformation.
 
-Also produce:
-- summary_md (markdown, ~200 words) covering the portfolio — note trends, strengths, and gaps
-
-Return 5-12 recommendations. Rank by (market_potential * 2 - effort) desc.
-Be specific and reference actual code, files, and features you see in the digests. Generic advice is useless.
-
-IMPORTANT: In your JSON output, use lowercase for the "kind" field: "finish", "combine", or "repurpose".`;
+OUTPUT: Return 3-7 recommendations ranked by (market_potential*2 - effort) desc. Each needs: kind (lowercase: finish/combine/repurpose), title (5-8 words specific), repos (exact full_names from digest), pitch (2-3 sentences: WHO/WHAT/WHY), effort (1-5), market_potential (1-5, be conservative), next_steps (3-5 todos referencing specific files/functions from digest), tech_stack (only verified from digest), marketing_tweet (280 chars max), marketing_linkedin (3-4 sentences), estimated_hours (realistic 1-500). Also include summary_md (~200 words on portfolio maturity & patterns). Quality over quantityâdon't pad with weak suggestions. Every recommendation must cite specific evidence from digests.`;
 
 // JSON schema for structured output (OpenAI-compatible providers)
 const AI_JSON_SCHEMA = {
@@ -517,8 +505,17 @@ const AI_JSON_SCHEMA = {
           estimated_hours: { type: ["integer", "null"] },
         },
         required: [
-          "kind", "title", "repos", "pitch", "effort", "market_potential",
-          "next_steps", "tech_stack", "marketing_tweet", "marketing_linkedin", "estimated_hours",
+          "kind",
+          "title",
+          "repos",
+          "pitch",
+          "effort",
+          "market_potential",
+          "next_steps",
+          "tech_stack",
+          "marketing_tweet",
+          "marketing_linkedin",
+          "estimated_hours",
         ],
       },
     },
@@ -528,42 +525,123 @@ const AI_JSON_SCHEMA = {
 
 async function callBatchedAI(
   digests: string[],
-  aiConfig: { provider: string; apiKey: string | null },
+  aiConfig: { provider: string; apiKey: string | null; fallbacks?: AIProviderConfig[] },
 ): Promise<z.infer<typeof RecommendationSchema>> {
-  const isSmallCtx = aiConfig.provider === "github_models";
-  const repoBlock = digests.join("\n\n=========\n\n");
-  const user = isSmallCtx
-    ? `Repo digests (be concise — max 3-5 recommendations, short pitches):\n\n${repoBlock}`
-    : `Here are the repo digests:\n\n${repoBlock}`;
+  // Include a compact repo index at the top so the AI can see all repos at a glance
+  const repoIndex = digests
+    .map((d) => {
+      const lines = d.split("\n");
+      const repoLine = lines[0]; // REPO: owner/name
+      const descLine = lines.find((l) => l.startsWith("DESC:"));
+      const langLine = lines.find((l) => l.startsWith("LANG:"));
+      const filesLine = d.match(/FILES \((\d+) total/);
+      const fileCount = filesLine ? filesLine[1] : "?";
+      return `${repoLine} | ${langLine || ""} | ${fileCount} files | ${descLine || ""}`;
+    })
+    .join("\n");
 
-  const aiResult = await callAI(
-    {
-      messages: [
-        { role: "system", content: AI_SYSTEM_PROMPT },
-        { role: "user", content: user },
-      ],
-      responseFormat: {
-        type: "json_schema",
-        json_schema: {
-          name: "recommendations",
-          strict: true,
-          schema: AI_JSON_SCHEMA,
+  const user = `REPO INDEX (${digests.length} repos):
+${repoIndex}
+
+FULL DIGESTS:
+
+${digests.join("\n\n=========\n\n")}`;
+
+  let aiResult;
+  try {
+    aiResult = await callAI(
+      {
+        messages: [
+          { role: "system", content: AI_SYSTEM_PROMPT },
+          { role: "user", content: user },
+        ],
+        responseFormat: {
+          type: "json_schema",
+          json_schema: {
+            name: "recommendations",
+            strict: true,
+            schema: AI_JSON_SCHEMA,
+          },
         },
       },
-    },
-    aiConfig,
-  );
-  const parsed = JSON.parse(aiResult.content || "{}");
+      aiConfig,
+      aiConfig.fallbacks,
+    );
+  } catch (e) {
+    // If structured output fails, retry without responseFormat (some providers don't support it)
+    console.warn("[analysis] Structured output failed, retrying without schema:", e);
+    aiResult = await callAI(
+      {
+        messages: [
+          {
+            role: "system",
+            content:
+              AI_SYSTEM_PROMPT +
+              "\n\nIMPORTANT: Return ONLY valid JSON, no markdown, no code fences.",
+          },
+          { role: "user", content: user },
+        ],
+      },
+      aiConfig,
+      aiConfig.fallbacks,
+    );
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(aiResult.content || "{}");
+  } catch {
+    // Try to extract JSON from markdown code fences
+    const jsonMatch = aiResult.content?.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (jsonMatch) {
+      parsed = JSON.parse(jsonMatch[1]);
+    } else {
+      throw new Error("AI returned non-JSON content â could not parse recommendations.");
+    }
+  }
+
   // Gemini sometimes returns a bare array instead of {recommendations: [...]}
   const normalized = Array.isArray(parsed) ? { recommendations: parsed, summary_md: "" } : parsed;
-  return RecommendationSchema.parse(normalized);
+  const result = RecommendationSchema.parse(normalized);
+
+  // Post-filter: remove weak recommendations that don't meet quality bars
+  const validRepoNames = new Set(digests.map((d) => d.split("\n")[0].replace("REPO: ", "")));
+  result.recommendations = result.recommendations.filter((rec) => {
+    // Must reference at least one repo that actually exists in the digests
+    const repoMatch = rec.repos.some(
+      (r) => validRepoNames.has(r) || validRepoNames.has(r.toLowerCase()),
+    );
+    if (!repoMatch) {
+      console.warn(
+        `[analysis] Filtering out recommendation "${rec.title}" â references unknown repos: ${rec.repos.join(", ")}`,
+      );
+      return false;
+    }
+    // Reject if pitch is too generic (< 40 chars)
+    if (rec.pitch.length < 40) return false;
+    // Reject if next_steps are all generic (no file names or specific features)
+    const hasSpecificSteps = rec.next_steps.some((s) =>
+      /\b(src\/|lib\/|app\/|api\/|\.ts|\.tsx|\.js|\.jsx|\.py|\.go|\.rs|component|route|endpoint|function|class|test|config|docker|ci|workflow)\b/i.test(
+        s,
+      ),
+    );
+    if (!hasSpecificSteps && rec.next_steps.length > 0) {
+      console.warn(
+        `[analysis] Filtering out recommendation "${rec.title}" â next_steps are too generic`,
+      );
+      return false;
+    }
+    return true;
+  });
+
+  return result;
 }
 
-// ─── Cross-batch synthesis: find combine opportunities across batches ──
+// âââ Cross-batch synthesis: find combine opportunities across batches ââ
 async function synthesizeCrossBatch(
   allRecommendations: z.infer<typeof RecommendationSchema>["recommendations"],
   digests: string[],
-  aiConfig: { provider: string; apiKey: string | null },
+  aiConfig: { provider: string; apiKey: string | null; fallbacks?: AIProviderConfig[] },
 ): Promise<z.infer<typeof RecommendationSchema>["recommendations"]> {
   // Only run synthesis if there are existing combine recs or if we had multiple batches
   // Build a compact index of all repos for the AI to reference
@@ -577,28 +655,45 @@ async function synthesizeCrossBatch(
     .join("\n");
 
   const existingRecs = allRecommendations
-    .map((r, i) => `${i + 1}. [${r.kind}] ${r.title} — repos: ${r.repos.join(", ")} — ${r.pitch}`)
+    .map((r, i) => `${i + 1}. [${r.kind}] ${r.title} â repos: ${r.repos.join(", ")} â ${r.pitch}`)
     .join("\n");
 
-  const synthPrompt = `You are reviewing a developer's GitHub portfolio of ${digests.length} repos.
-Here are all the repos (compact index):
+  const synthPrompt = `You are a rigorous product strategist doing a SECOND PASS over a developer's GitHub portfolio.
+You previously generated recommendations for batches of repos. Now look ACROSS batches for combination opportunities that were missed.
+
+Here are all ${digests.length} repos (compact index):
 ${repoIndex}
 
 Here are the recommendations already generated:
 ${existingRecs}
 
-Now find 1-5 ADDITIONAL "combine" recommendations that merge repos which were NOT already paired together.
-Look for synergies across different repos — e.g., a frontend repo + a backend repo = full-stack product.
-Also look for "repurpose" opportunities that weren't caught.
+Find 0-3 ADDITIONAL "combine" recommendations where repos from DIFFERENT batches form a stronger product together.
 
-Return JSON with the same schema as before (summary_md + recommendations array).
-Only include NEW recommendations not already in the list above. If no new opportunities exist, return an empty recommendations array.`;
+STRICT CRITERIA â only include a recommendation if ALL are true:
+1. The repos are from different batches (not already paired above)
+2. The repos share compatible tech stacks or solve adjacent problems
+3. The combination creates something NEITHER repo could do alone
+4. You can describe the specific integration point
+5. The target user and market are clear
+
+Do NOT:
+- Combine repos just because they're the same language
+- Suggest vague "integrate these" without explaining HOW
+- Include more than 3 recommendations
+- Duplicate any existing recommendation
+
+If you cannot find genuine cross-batch opportunities, return an EMPTY recommendations array. Quality over quantity.
+
+Return JSON with: summary_md (string) + recommendations array (same schema as before).`;
 
   try {
     const result = await callAI(
       {
         messages: [
-          { role: "system", content: "You are a product strategist. Always respond with valid JSON." },
+          {
+            role: "system",
+            content: "You are a product strategist. Always respond with valid JSON.",
+          },
           { role: "user", content: synthPrompt },
         ],
         responseFormat: {
@@ -611,22 +706,23 @@ Only include NEW recommendations not already in the list above. If no new opport
         },
       },
       aiConfig,
+      aiConfig.fallbacks,
     );
     const parsed = JSON.parse(result.content || "{}");
     const normalized = Array.isArray(parsed) ? { recommendations: parsed, summary_md: "" } : parsed;
     const validated = RecommendationSchema.parse(normalized);
     return validated.recommendations;
   } catch {
-    // Synthesis is best-effort — don't fail the whole analysis if it errors
+    // Synthesis is best-effort â don't fail the whole analysis if it errors
     console.warn("[analysis] Cross-batch synthesis failed, continuing with batch results");
     return [];
   }
 }
 
-// ─── Batched AI runner with synthesis ──────────────────────────
+// âââ Batched AI runner with synthesis ââââââââââââââââââââââââââ
 async function runBatchedAI(
   digests: string[],
-  aiConfig: { provider: string; apiKey: string | null },
+  aiConfig: { provider: string; apiKey: string | null; fallbacks?: AIProviderConfig[] },
   onProgress?: ProgressFn,
 ): Promise<z.infer<typeof RecommendationSchema>> {
   const budget = maxInputTokensForProvider(aiConfig.provider);
@@ -638,11 +734,12 @@ async function runBatchedAI(
 
   for (let i = 0; i < batches.length; i++) {
     if (batches[i].length === 0) continue;
-    if (onProgress) await onProgress(`AI batch ${i + 1}/${batches.length} (${batches[i].length} repos)`);
+    if (onProgress)
+      await onProgress(`AI batch ${i + 1}/${batches.length} (${batches[i].length} repos)`);
     const result = await callBatchedAI(batches[i], aiConfig);
     allRecommendations.push(...result.recommendations);
     if (i === 0) summaryMd = result.summary_md;
-    // Inter-batch pacing — 4s for GitHub Models (balances rate limits vs timeout), 3s others
+    // Inter-batch pacing â 4s for GitHub Models (balances rate limits vs timeout), 3s others
     if (i < batches.length - 1) {
       const delay = aiConfig.provider === "github_models" ? 4000 : 3000;
       await sleep(delay);
@@ -651,7 +748,7 @@ async function runBatchedAI(
 
   // Cross-batch synthesis: find combine opportunities across batches
   if (hasMultipleBatches && allRecommendations.length > 0 && onProgress) {
-    await onProgress("Synthesizing cross-batch opportunities…");
+    await onProgress("Synthesizing cross-batch opportunitiesâ¦");
     const crossBatchRecs = await synthesizeCrossBatch(allRecommendations, digests, aiConfig);
     if (crossBatchRecs.length > 0) {
       allRecommendations.push(...crossBatchRecs);
@@ -664,7 +761,7 @@ async function runBatchedAI(
   });
 }
 
-// ─── Shared analysis core (used by runAnalysis + rerunAnalysis) ─
+// âââ Shared analysis core (used by runAnalysis + rerunAnalysis) â
 export interface AnalysisContext {
   supabase: SupabaseClient<Database>;
   userId: string;
@@ -684,13 +781,36 @@ export interface AnalysisContext {
 export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: string }> {
   const { supabase, userId, token, prefs, triggerType, onProgress } = ctx;
 
-  // Resolve AI provider early — server key overrides github_models default
+  // Resolve AI provider + key in one pass â avoids mismatched provider/key combos.
+  const VALID_PROVIDERS = ["github_models", "openai", "anthropic", "google", "custom"];
   const serverProvider = process.env.SERVER_AI_PROVIDER;
   const serverKey = process.env.SERVER_AI_KEY;
-  const resolvedProvider =
-    prefs?.custom_ai_key ? (prefs.custom_ai_provider || "openai")
-    : serverProvider && serverKey ? serverProvider
-    : prefs?.custom_ai_provider || "github_models";
+
+  let resolvedProvider: string;
+  let resolvedKey: string | null = null;
+
+  if (prefs?.custom_ai_key) {
+    // User has their own key â use their selected provider, sanitized
+    resolvedProvider = prefs.custom_ai_provider || "openai";
+    if (!VALID_PROVIDERS.includes(resolvedProvider)) {
+      resolvedProvider = "openai"; // safest default when a key is present
+    }
+    resolvedKey = prefs.custom_ai_key;
+  } else if (serverProvider && serverKey) {
+    // No user key â fall back to server-level AI config
+    resolvedProvider = serverProvider;
+    resolvedKey = serverKey;
+  } else {
+    // No user key, no server config â use user's preference or default to github_models
+    // (github_models can reuse the GitHub OAuth token as its API key)
+    resolvedProvider = prefs?.custom_ai_provider || "github_models";
+    if (!VALID_PROVIDERS.includes(resolvedProvider)) {
+      resolvedProvider = "github_models";
+    }
+    if (resolvedProvider === "github_models") {
+      resolvedKey = token; // reuse GitHub OAuth token
+    }
+  }
 
   // Insert pending analysis
   const { data: analysis, error: aErr } = await supabase
@@ -700,7 +820,14 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
       status: "running",
       trigger_type: triggerType,
       ai_provider: resolvedProvider,
-      ai_model: resolvedProvider === "github_models" ? "gpt-4o-mini" : resolvedProvider === "google" ? "gemini-2.5-flash" : resolvedProvider === "anthropic" ? "claude-sonnet-4-20250514" : "gpt-4o",
+      ai_model:
+        resolvedProvider === "github_models"
+          ? "gpt-4o-mini"
+          : resolvedProvider === "google"
+            ? "gemini-2.5-flash"
+            : resolvedProvider === "anthropic"
+              ? "claude-sonnet-4-20250514"
+              : "gpt-4o",
     })
     .select("id")
     .single();
@@ -710,27 +837,26 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
   // Wrap progress to also persist to DB
   const reportProgress: ProgressFn = async (msg: string) => {
     console.log(`[analysis ${analysisId}] ${msg}`);
-    await supabase
-      .from("analyses")
-      .update({ error: msg })
-      .eq("id", analysisId);
+    await supabase.from("analyses").update({ error: msg }).eq("id", analysisId);
   };
 
   try {
     const maxRepos = prefs?.filter_max_repos || 50;
 
-    await reportProgress("Fetching repos from GitHub…");
+    await reportProgress("Fetching repos from GitHubâ¦");
     const repos = await fetchAllRepos(token, maxRepos);
 
     // Apply user filters (language, stars, archived)
-    const shortlist = applyFilters(repos, prefs
-      ? {
-          filter_languages: prefs.filter_languages,
-          filter_min_stars: prefs.filter_min_stars,
-          filter_exclude_archived: prefs.filter_exclude_archived,
-          filter_max_repos: maxRepos,
-        }
-      : null,
+    const shortlist = applyFilters(
+      repos,
+      prefs
+        ? {
+            filter_languages: prefs.filter_languages,
+            filter_min_stars: prefs.filter_min_stars,
+            filter_exclude_archived: prefs.filter_exclude_archived,
+            filter_max_repos: maxRepos,
+          }
+        : null,
     );
 
     if (shortlist.length < 2) {
@@ -739,7 +865,7 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
       );
     }
 
-    await reportProgress(`Digesting ${shortlist.length} repos (parallel)…`);
+    await reportProgress(`Digesting ${shortlist.length} repos (parallel)â¦`);
 
     const provider = resolvedProvider;
     const compactDigest = provider === "github_models";
@@ -753,7 +879,7 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
         const digest = await digestRepo(repo, token, compactDigest);
         digested++;
         if (digested % 5 === 0 || digested === shortlist.length) {
-          await reportProgress(`Digested ${digested}/${shortlist.length} repos…`);
+          await reportProgress(`Digested ${digested}/${shortlist.length} reposâ¦`);
         }
         return digest;
       }),
@@ -774,7 +900,6 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
       }
     }
 
-
     if (digests.length < 2) {
       throw new Error(
         `Only ${digests.length} repos could be digested (${failedDigests} failed). Check GitHub API rate limits.`,
@@ -782,20 +907,23 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
     }
 
     if (failedDigests > 0) {
-      await reportProgress(`${failedDigests} repos failed digestion, continuing with ${digests.length}…`);
+      await reportProgress(
+        `${failedDigests} repos failed digestion, continuing with ${digests.length}â¦`,
+      );
     }
 
-    // Resolve AI key
-    let aiKey = prefs?.custom_ai_key || null;
-    if (!aiKey && serverKey && serverProvider && provider === serverProvider) {
-      aiKey = serverKey;
+    // Key was already resolved above alongside the provider
+    // Build fallback chain: primary â server â github_models (always free via GitHub token)
+    const aiFallbacks: AIProviderConfig[] = [];
+    if (serverProvider && serverKey && serverProvider !== resolvedProvider) {
+      aiFallbacks.push({ provider: serverProvider, apiKey: serverKey });
     }
-    if (provider === "github_models" && !aiKey) {
-      aiKey = token;
+    if (resolvedProvider !== "github_models" && token) {
+      aiFallbacks.push({ provider: "github_models", apiKey: token });
     }
-    const aiConfig = { provider, apiKey: aiKey };
+    const aiConfig = { provider: resolvedProvider, apiKey: resolvedKey, fallbacks: aiFallbacks };
 
-    await reportProgress(`Running AI analysis on ${digests.length} repos…`);
+    await reportProgress(`Running AI analysis on ${digests.length} reposâ¦`);
 
     const ai = await withTimeout(
       runBatchedAI(digests, aiConfig, reportProgress),
@@ -853,12 +981,11 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
   }
 }
 
-// ─── Helper: get GitHub connection + prefs for a user ───────────
+// âââ Helper: get GitHub connection + prefs for a user âââââââââââ
 async function getAnalysisContext(
   supabase: SupabaseClient<Database>,
   userId: string,
   triggerType: string,
-
 ): Promise<AnalysisContext> {
   const { data: conn } = await supabase
     .from("github_connections")
@@ -875,7 +1002,7 @@ async function getAnalysisContext(
     .eq("user_id", userId)
     .maybeSingle();
 
-  // Placeholder onProgress — replaced in executeAnalysis
+  // Placeholder onProgress â replaced in executeAnalysis
   const noopProgress: ProgressFn = async () => {};
 
   return {
@@ -888,11 +1015,11 @@ async function getAnalysisContext(
   };
 }
 
-// ═══════════════════════════════════════════════════════════════
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 //  SERVER FUNCTIONS (exports)
-// ═══════════════════════════════════════════════════════════════
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
-// ─── runAnalysis ────────────────────────────────────────────────
+// âââ runAnalysis ââââââââââââââââââââââââââââââââââââââââââââââââ
 export const runAnalysis = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -900,7 +1027,7 @@ export const runAnalysis = createServerFn({ method: "POST" })
     return executeAnalysis(ctx);
   });
 
-// ─── listAnalyses ───────────────────────────────────────────────
+// âââ listAnalyses âââââââââââââââââââââââââââââââââââââââââââââââ
 export const listAnalyses = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -914,10 +1041,10 @@ export const listAnalyses = createServerFn({ method: "GET" })
     return data ?? [];
   });
 
-// ─── getAnalysis ────────────────────────────────────────────────
+// âââ getAnalysis ââââââââââââââââââââââââââââââââââââââââââââââââ
 export const getAnalysis = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ context, data }) => {
     const { data: analysis, error } = await context.supabase
       .from("analyses")
@@ -937,10 +1064,10 @@ export const getAnalysis = createServerFn({ method: "GET" })
     return { analysis, items: items ?? [] };
   });
 
-// ─── deleteAnalysis ─────────────────────────────────────────────
+// âââ deleteAnalysis âââââââââââââââââââââââââââââââââââââââââââââ
 export const deleteAnalysis = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ context, data }) => {
     const { supabase, userId } = context;
 
@@ -961,12 +1088,11 @@ export const deleteAnalysis = createServerFn({ method: "POST" })
     return { success: true };
   });
 
-// ─── toggleShare ────────────────────────────────────────────────
+// âââ toggleShare ââââââââââââââââââââââââââââââââââââââââââââââââ
 export const toggleShare = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
-    (d: { id: string; isPublic: boolean }) =>
-      z.object({ id: z.string().uuid(), isPublic: z.boolean() }).parse(d),
+  .validator((d: { id: string; isPublic: boolean }) =>
+    z.object({ id: z.string().uuid(), isPublic: z.boolean() }).parse(d),
   )
   .handler(async ({ context, data }) => {
     const { supabase, userId } = context;
@@ -974,8 +1100,9 @@ export const toggleShare = createServerFn({ method: "POST" })
     let slug: string | null = null;
 
     if (data.isPublic) {
-      slug = Array.from({ length: 10 }, () =>
-        "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 36)],
+      slug = Array.from(
+        { length: 10 },
+        () => "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 36)],
       ).join("");
     }
 
@@ -1000,12 +1127,11 @@ export const toggleShare = createServerFn({ method: "POST" })
     };
   });
 
-// ─── rerunAnalysis ──────────────────────────────────────────────
+// âââ rerunAnalysis ââââââââââââââââââââââââââââââââââââââââââââââ
 export const rerunAnalysis = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
-    (d: { analysisId: string }) =>
-      z.object({ analysisId: z.string().uuid() }).parse(d),
+  .validator((d: { analysisId: string }) =>
+    z.object({ analysisId: z.string().uuid() }).parse(d),
   )
   .handler(async ({ context, data }) => {
     const ctx = await getAnalysisContext(context.supabase, context.userId, "rerun");
@@ -1023,13 +1149,12 @@ export const rerunAnalysis = createServerFn({ method: "POST" })
     return executeAnalysis(ctx);
   });
 
-// ─── getPublicAnalysis ──────────────────────────────────────────
+// âââ getPublicAnalysis ââââââââââââââââââââââââââââââââââââââââââ
 export const getPublicAnalysis = createServerFn({ method: "GET" })
-  .inputValidator((d: { slug: string }) => z.object({ slug: z.string().min(1) }).parse(d))
+  .validator((d: { slug: string }) => z.object({ slug: z.string().min(1) }).parse(d))
   .handler(async ({ data }) => {
     const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-    const supabaseKey =
-      process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+    const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
 
     if (!supabaseUrl || !supabaseKey) {
       throw new Error("Server is not configured for Supabase access.");
@@ -1077,12 +1202,11 @@ export const getPublicAnalysis = createServerFn({ method: "GET" })
     return { analysis, items: items ?? [] };
   });
 
-// ─── generateActionPlan ─────────────────────────────────────────
+// âââ generateActionPlan âââââââââââââââââââââââââââââââââââââââââ
 export const generateActionPlan = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
-    (d: { analysisId: string }) =>
-      z.object({ analysisId: z.string().uuid() }).parse(d),
+  .validator((d: { analysisId: string }) =>
+    z.object({ analysisId: z.string().uuid() }).parse(d),
   )
   .handler(async ({ context, data }) => {
     const { supabase, userId } = context;
@@ -1094,7 +1218,8 @@ export const generateActionPlan = createServerFn({ method: "POST" })
       .eq("user_id", userId)
       .order("rank", { ascending: true });
     if (itemsErr) throw new Error(itemsErr.message);
-    if (!items || items.length === 0) throw new Error("No recommendations found for this analysis.");
+    if (!items || items.length === 0)
+      throw new Error("No recommendations found for this analysis.");
 
     const { data: prefs } = await supabase
       .from("user_preferences")
@@ -1104,13 +1229,24 @@ export const generateActionPlan = createServerFn({ method: "POST" })
 
     const srvProvider = process.env.SERVER_AI_PROVIDER;
     const srvKey = process.env.SERVER_AI_KEY;
-    const provider =
-      prefs?.custom_ai_key ? (prefs.custom_ai_provider || "openai")
-      : srvProvider && srvKey ? srvProvider
-      : prefs?.custom_ai_provider || "github_models";
+    const provider = prefs?.custom_ai_key
+      ? prefs.custom_ai_provider || "openai"
+      : srvProvider && srvKey
+        ? srvProvider
+        : prefs?.custom_ai_provider || "github_models";
     let aiKey = prefs?.custom_ai_key || null;
     if (!aiKey && srvKey && srvProvider && provider === srvProvider) {
       aiKey = srvKey;
+    }
+    // Always fetch GitHub token for fallback (even if primary provider isn't github_models)
+    let ghToken = aiKey;
+    if (provider !== "github_models") {
+      const { data: conn } = await supabase
+        .from("github_connections")
+        .select("access_token")
+        .eq("user_id", userId)
+        .maybeSingle();
+      ghToken = conn?.access_token || null;
     }
     if (provider === "github_models" && !aiKey) {
       const { data: conn } = await supabase
@@ -1119,8 +1255,9 @@ export const generateActionPlan = createServerFn({ method: "POST" })
         .eq("user_id", userId)
         .maybeSingle();
       aiKey = conn?.access_token || null;
+      ghToken = aiKey;
     }
-    const aiConfig = { provider, apiKey: aiKey };
+    const aiConfig = { provider, apiKey: aiKey, fallbacks: ghToken ? [{ provider: "github_models", apiKey: ghToken }] : [] };
 
     const recsText = items
       .map(
@@ -1163,22 +1300,26 @@ Sequence phases from quick wins (low effort, high impact) to moonshots. Group re
     const result = await callAI(
       {
         messages: [
-          { role: "system", content: "You are a helpful product strategist assistant. Always respond with valid JSON." },
+          {
+            role: "system",
+            content:
+              "You are a helpful product strategist assistant. Always respond with valid JSON.",
+          },
           { role: "user", content: prompt },
         ],
       },
       aiConfig,
+      aiConfig.fallbacks,
     );
 
     return JSON.parse(result.content || "{}");
   });
 
-// ─── generateMergeInstructions ──────────────────────────────────
+// âââ generateMergeInstructions ââââââââââââââââââââââââââââââââââ
 export const generateMergeInstructions = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
-    (d: { analysisId: string; itemRank: number }) =>
-      z.object({ analysisId: z.string().uuid(), itemRank: z.number().int().min(0) }).parse(d),
+  .validator((d: { analysisId: string; itemRank: number }) =>
+    z.object({ analysisId: z.string().uuid(), itemRank: z.number().int().min(0) }).parse(d),
   )
   .handler(async ({ context, data }) => {
     const { supabase, userId } = context;
@@ -1201,13 +1342,24 @@ export const generateMergeInstructions = createServerFn({ method: "POST" })
 
     const srvP = process.env.SERVER_AI_PROVIDER;
     const srvK = process.env.SERVER_AI_KEY;
-    const provider =
-      prefs?.custom_ai_key ? (prefs.custom_ai_provider || "openai")
-      : srvP && srvK ? srvP
-      : prefs?.custom_ai_provider || "github_models";
+    const provider = prefs?.custom_ai_key
+      ? prefs.custom_ai_provider || "openai"
+      : srvP && srvK
+        ? srvP
+        : prefs?.custom_ai_provider || "github_models";
     let aiKey = prefs?.custom_ai_key || null;
     if (!aiKey && srvK && srvP && provider === srvP) {
       aiKey = srvK;
+    }
+    // Always fetch GitHub token for fallback
+    let ghToken = aiKey;
+    if (provider !== "github_models") {
+      const { data: conn } = await supabase
+        .from("github_connections")
+        .select("access_token")
+        .eq("user_id", userId)
+        .maybeSingle();
+      ghToken = conn?.access_token || null;
     }
     if (provider === "github_models" && !aiKey) {
       const { data: conn } = await supabase
@@ -1216,8 +1368,9 @@ export const generateMergeInstructions = createServerFn({ method: "POST" })
         .eq("user_id", userId)
         .maybeSingle();
       aiKey = conn?.access_token || null;
+      ghToken = aiKey;
     }
-    const aiConfig = { provider, apiKey: aiKey };
+    const aiConfig = { provider, apiKey: aiKey, fallbacks: ghToken ? [{ provider: "github_models", apiKey: ghToken }] : [] };
 
     const repos = (item.repos as string[]) || [];
     const techStack = (item.tech_stack as string[]) || [];
@@ -1243,11 +1396,15 @@ Include actual git commands (clone, remote add, merge --allow-unrelated-historie
     const result = await callAI(
       {
         messages: [
-          { role: "system", content: "You are a helpful senior engineer. Always respond with valid JSON." },
+          {
+            role: "system",
+            content: "You are a helpful senior engineer. Always respond with valid JSON.",
+          },
           { role: "user", content: prompt },
         ],
       },
       aiConfig,
+      aiConfig.fallbacks,
     );
 
     return JSON.parse(result.content || "{}");

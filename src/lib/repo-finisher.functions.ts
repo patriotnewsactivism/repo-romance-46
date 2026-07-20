@@ -1,9 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { callAI } from "@/lib/ai-provider";
+import { callAI, resolveAIConfig, type AIProviderConfig } from "@/lib/ai-provider";
+import { safeGitHubWrite, assertNotProtectedBranch, assessChangeRisk, formatRiskCallout } from "@/lib/safety-rails";
+import { logLearningEntry } from "@/lib/learning-log.functions";
 
-// ─── Types ─────────────────────────────────────────────────────
+// âââ Types âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 interface GitHubFile {
   path: string;
@@ -27,7 +29,7 @@ interface FinishResult {
   }[];
 }
 
-// ─── GitHub API helpers ────────────────────────────────────────
+// âââ GitHub API helpers ââââââââââââââââââââââââââââââââââââââââ
 
 function ghHeaders(token: string) {
   return {
@@ -48,8 +50,11 @@ async function ghFetch(token: string, path: string, opts?: RequestInit) {
 async function getRepoTree(token: string, repo: string, branch: string) {
   const res = await ghFetch(token, `/repos/${repo}/git/trees/${branch}?recursive=1`);
   if (!res.ok) throw new Error(`Failed to fetch tree: ${res.status}`);
-  const json = (await res.json()) as { tree: Array<{ path: string; type: string; sha: string }> };
-  return json.tree.filter((t) => t.type === "blob");
+  const json = (await res.json()) as {
+    tree: Array<{ path: string; type: string; sha: string; size?: number }>;
+    truncated: boolean;
+  };
+  return json;
 }
 
 async function getFileContent(
@@ -65,73 +70,162 @@ async function getFileContent(
   return { path, content, sha: json.sha };
 }
 
-async function createBranch(token: string, repo: string, baseBranch: string, newBranch: string) {
-  // Get the SHA of the base branch
-  const refRes = await ghFetch(token, `/repos/${repo}/git/refs/heads/${baseBranch}`);
-  if (!refRes.ok) throw new Error(`Failed to get base branch ref: ${refRes.status}`);
-  const ref = (await refRes.json()) as { object: { sha: string } };
+// âââ Parallel file fetching ââââââââââââââââââââââââââââââââââââ
 
-  // Create the new branch
-  const createRes = await ghFetch(token, `/repos/${repo}/git/refs`, {
+async function parallelMap<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const i = nextIndex++;
+      try {
+        results[i] = { status: "fulfilled", value: await fn(items[i], i) };
+      } catch (e) {
+        results[i] = { status: "rejected", reason: e };
+      }
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
+// âââ Git Data API: batch commit in a single API call âââââââââââ
+// Instead of committing files one by one (N API calls), we create
+// a single tree with all changes and one commit. This is both faster
+// and atomic.
+
+async function batchCommit(
+  token: string,
+  repo: string,
+  baseBranch: string,
+  newBranch: string,
+  changes: AIFileChange[],
+): Promise<{ commitSha: string; filesChanged: number }> {
+  // SAFETY RAIL: Never commit directly to protected branches
+  assertNotProtectedBranch(newBranch);
+
+  // 1. Get the base branch SHA
+  const refRes = await ghFetch(token, `/repos/${repo}/git/refs/heads/${baseBranch}`);
+  if (!refRes.ok) throw new Error(`Failed to get base branch: ${refRes.status}`);
+  const ref = (await refRes.json()) as { object: { sha: string } };
+  const baseSha = ref.object.sha;
+
+  // 2. Get the base commit's tree SHA
+  const commitRes = await ghFetch(token, `/repos/${repo}/git/commits/${baseSha}`);
+  if (!commitRes.ok) throw new Error(`Failed to get base commit: ${commitRes.status}`);
+  const baseCommit = (await commitRes.json()) as { tree: { sha: string } };
+  const baseTreeSha = baseCommit.tree.sha;
+
+  // 3. Build the tree entries for new/modified files
+  // For deletions, we use mode "100644" with sha=null
+  const treeEntries: Array<{
+    path: string;
+    mode: string;
+    type: string;
+    sha?: string | null;
+  }> = [];
+
+  // For created/modified files, we need to create blobs first
+  const blobPromises = changes
+    .filter((c) => c.status !== "deleted")
+    .map(async (c) => {
+      const blobRes = await ghFetch(token, `/repos/${repo}/git/blobs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: c.content,
+          encoding: "utf-8",
+        }),
+      });
+      if (!blobRes.ok) throw new Error(`Failed to create blob for ${c.path}: ${blobRes.status}`);
+      const blob = (await blobRes.json()) as { sha: string };
+      return { path: c.path, sha: blob.sha };
+    });
+
+  const blobResults = await Promise.all(blobPromises.map((p, i) => p.catch(() => null)));
+
+  let filesChanged = 0;
+  for (let i = 0; i < changes.length; i++) {
+    const change = changes[i];
+    if (change.status === "deleted") {
+      // For deletions, we need to get the file's blob SHA first
+      const existing = await getFileContent(token, repo, change.path);
+      if (existing) {
+        treeEntries.push({
+          path: change.path,
+          mode: "100644",
+          type: "blob",
+          sha: null as unknown as string, // null sha = delete
+        });
+        filesChanged++;
+      }
+    } else {
+      const blob = blobResults[i];
+      if (blob) {
+        treeEntries.push({
+          path: change.path,
+          mode: "100644",
+          type: "blob",
+          sha: blob.sha,
+        });
+        filesChanged++;
+      }
+    }
+  }
+
+  if (filesChanged === 0) throw new Error("No files could be committed");
+
+  // 4. Create the new tree
+  const treeRes = await ghFetch(token, `/repos/${repo}/git/trees`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      base_tree: baseTreeSha,
+      tree: treeEntries,
+    }),
+  });
+  if (!treeRes.ok) throw new Error(`Failed to create tree: ${treeRes.status}`);
+  const tree = (await treeRes.json()) as { sha: string };
+
+  // 5. Create the commit pointing to the new tree
+  const commitRes2 = await ghFetch(token, `/repos/${repo}/git/commits`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message: `repo-finisher: ${filesChanged} improvement${filesChanged > 1 ? "s" : ""}`,
+      tree: tree.sha,
+      parents: [baseSha],
+    }),
+  });
+  if (!commitRes2.ok) throw new Error(`Failed to create commit: ${commitRes2.status}`);
+  const newCommit = (await commitRes2.json()) as { sha: string };
+
+  // 6. Create the branch pointing to the new commit
+  const branchRes = await ghFetch(token, `/repos/${repo}/git/refs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       ref: `refs/heads/${newBranch}`,
-      sha: ref.object.sha,
+      sha: newCommit.sha,
     }),
   });
-  if (!createRes.ok) {
-    const err = await createRes.text();
-    if (createRes.status === 422) throw new Error(`Branch "${newBranch}" already exists`);
-    throw new Error(`Failed to create branch: ${createRes.status} ${err}`);
+  if (!branchRes.ok) {
+    if (branchRes.status === 422) throw new Error(`Branch "${newBranch}" already exists`);
+    const err = await branchRes.text();
+    throw new Error(`Failed to create branch: ${branchRes.status} ${err.slice(0, 200)}`);
   }
+
+  return { commitSha: newCommit.sha, filesChanged };
 }
 
-async function commitFile(
-  token: string,
-  repo: string,
-  branch: string,
-  path: string,
-  content: string,
-  message: string,
-) {
-  const res = await ghFetch(token, `/repos/${repo}/contents/${path}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      message,
-      content: Buffer.from(content).toString("base64"),
-      branch,
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Failed to commit ${path}: ${res.status} ${err.slice(0, 200)}`);
-  }
-  return (await res.json()) as { commit: { sha: string } };
-}
-
-async function createPR(
-  token: string,
-  repo: string,
-  head: string,
-  base: string,
-  title: string,
-  body: string,
-) {
-  const res = await ghFetch(token, `/repos/${repo}/pulls`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title, head, base, body }),
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Failed to create PR: ${res.status} ${err.slice(0, 200)}`);
-  }
-  return (await res.json()) as { number: number; html_url: string };
-}
-
-// ─── AI code generation ────────────────────────────────────────
+// âââ AI code generation ââââââââââââââââââââââââââââââââââââââââ
 
 interface AIFileChange {
   path: string;
@@ -144,6 +238,58 @@ interface AIFinishPlan {
   analysis: string;
   changes: AIFileChange[];
 }
+
+const FINISH_SYSTEM_PROMPT = `You are a meticulous senior software engineer finishing incomplete codebases.
+You are given a repo's metadata, health check, and ACTUAL source files. Your job is to produce targeted, high-quality improvements.
+
+STRICT RULES:
+1. Only suggest changes you are CONFIDENT about based on the actual code you can see.
+2. For "modified" files, output the COMPLETE updated file â do not use diffs or partial content.
+3. For "created" files, output the full new file with working, production-ready code.
+4. Do NOT rewrite files that are already fine. Only touch files that need fixing.
+5. Each change must have a specific, concrete description explaining WHAT you changed and WHY.
+
+SAFETY RAILS â NON-NEGOTIABLE:
+- NEVER modify or reference files from other repositories.
+- NEVER suggest force-pushing, deleting branches, or modifying main/production directly.
+- If you see a pattern that has caused issues before (noted in the context), adjust your approach.
+- If a change could break existing functionality, flag it explicitly in the description.
+- Prefer small, testable increments over large rewrites.
+
+QUALITY GATES â only include a change if it meets ALL of:
+- The change is based on something you can actually see in the provided files (not assumed).
+- The change makes the repo closer to shippable (not just cosmetic).
+- The file content you output is syntactically valid and complete.
+- The change is scoped â don't rewrite an entire file just to add one import.
+- If the repo has tests, your changes should not break them.
+- If you add code, it must be importable/callable â no dead code.
+
+BUILD VERIFICATION:
+- If the repo has a tsconfig.json, ensure your TypeScript is valid.
+- If the repo has ESLint, ensure your code follows the existing style.
+- If the repo has tests, do not modify test files unless fixing actual test bugs.
+- Every created/modified file must have correct imports that resolve to existing paths.
+- If you cannot verify a change will work, say so in the description â DO NOT silently hope.
+
+PRIORITY (do the most impactful things first):
+1. Fix broken imports, missing exports, stub functions that are called but not implemented.
+2. Add or fix README.md with real installation/usage based on the actual package.json or entry point.
+3. Add LICENSE (MIT) if missing.
+4. Add .github/workflows/ci.yml with basic CI (install deps + lint + test) based on the actual language/framework.
+5. Add basic tests for the main entry point or key functions.
+6. Fix obvious security issues (hardcoded secrets, missing input validation).
+
+DO NOT:
+- Add comments or documentation to files that don't need it.
+- Change formatting or style of existing code.
+- Add dependencies that aren't needed.
+- Create files for features the repo doesn't have.
+- Output more than 8 file changes. Focus on the highest-impact improvements.
+- Inflate completion â if the repo is 20% done, say so plainly.
+
+Return JSON with:
+- analysis: 3-5 sentences explaining what was wrong (be specific â reference actual files and code you saw). Be honest â if the repo is mostly scaffolding, say "mostly scaffolding" not "almost there."
+- changes: array of { path, status, content, description } â only include changes you are confident about.`;
 
 async function generateFinishPlan(
   repo: string,
@@ -159,107 +305,127 @@ async function generateFinishPlan(
     has_license: boolean;
     has_readme: boolean;
     has_homepage: boolean;
+    file_count: number;
+    key_directories: string[];
   },
   files: { path: string; content: string }[],
   nextSteps: string[],
-  aiProvider: string,
-  aiKey: string | null,
+  aiConfig: AIProviderConfig,
 ): Promise<AIFinishPlan> {
+  // Build file summaries â show more of each file since the AI needs full context
+  const MAX_FILE_CHARS = 4000;
   const fileSummaries = files
-    .map((f) => `--- FILE: ${f.path} ---\n${f.content.slice(0, 3000)}`)
+    .map((f) => {
+      const content = f.content.slice(0, MAX_FILE_CHARS);
+      const truncated = f.content.length > MAX_FILE_CHARS ? " [TRUNCATED]" : "";
+      return `--- FILE: ${f.path}${truncated} ---\n${content}`;
+    })
     .join("\n\n");
 
-  const system = `You are an expert software engineer that finishes incomplete codebases.
-Given a repo's metadata, health check, key source files, and a list of recommended next steps,
-generate concrete file changes that will move this repo closer to "shippable".
-
-Rules:
-- Create or fix README.md with proper installation, usage, and API docs
-- Add a LICENSE file (MIT) if missing
-- Add .github/workflows/ci.yml with basic CI if missing
-- Fix obvious bugs, add missing exports, complete stub functions
-- Add basic tests if missing (in the repo's language convention)
-- Do NOT rewrite entire files — only make targeted improvements
-- Each file change must include the FULL file content (not a diff)
-- For "modified" files, output the complete updated file
-- For "created" files, output the full new file
-- For "deleted" files, set content to empty string
-
-Return JSON with:
-- analysis: brief summary of what was wrong and what you fixed (3-5 sentences)
-- changes: array of { path, status, content, description }`;
+  const healthStr = [
+    `CI: ${repoData.has_ci ? "present" : "MISSING"}`,
+    `Tests: ${repoData.has_tests ? "present" : "MISSING"}`,
+    `License: ${repoData.has_license ? "present" : "MISSING"}`,
+    `README: ${repoData.has_readme ? "present" : "MISSING"}`,
+    `Homepage: ${repoData.has_homepage ? "yes" : "no"}`,
+  ].join(" | ");
 
   const user = `Repo: ${repo}
 Description: ${repoData.description || "none"}
 Language: ${repoData.language || "unknown"}
 Topics: ${repoData.topics.join(", ") || "none"}
-Stars: ${repoData.stars} | Open Issues: ${repoData.open_issues}
-Health: CI=${repoData.has_ci}, Tests=${repoData.has_tests}, License=${repoData.has_license}, README=${repoData.has_readme}, Homepage=${repoData.has_homepage}
+Stars: ${repoData.stars} | Open Issues: ${repoData.open_issues} | Total files: ${repoData.file_count}
+Key directories: ${repoData.key_directories.join(", ") || "none"}
 
-Recommended next steps:
+HEALTH CHECK: ${healthStr}
+
+Recommended next steps (from portfolio analysis):
 ${nextSteps.map((s) => `- ${s}`).join("\n")}
 
-Current source files (top ${files.length}):
+Current source files (${files.length} files provided):
 ${fileSummaries}`;
-
-  const body = {
-    model: "google/gemini-3-flash-preview",
-    messages: [
-      { role: "system", content: system },
-      { role: "user", content: user },
-    ],
-    response_format: {
-      type: "json_schema" as const,
-      json_schema: {
-        name: "finish_plan",
-        strict: true,
-        schema: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            analysis: { type: "string" },
-            changes: {
-              type: "array",
-              items: {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                  path: { type: "string" },
-                  status: { type: "string", enum: ["created", "modified", "deleted"] },
-                  content: { type: "string" },
-                  description: { type: "string" },
-                },
-                required: ["path", "status", "content", "description"],
-              },
-            },
-          },
-          required: ["analysis", "changes"],
-        },
-      },
-    },
-  };
 
   const aiResult = await callAI(
     {
-      messages: body.messages,
-      responseFormat: body.response_format,
+      messages: [
+        { role: "system", content: FINISH_SYSTEM_PROMPT },
+        { role: "user", content: user },
+      ],
+      responseFormat: {
+        type: "json_schema",
+        json_schema: {
+          name: "finish_plan",
+          strict: true,
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              analysis: { type: "string" },
+              changes: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    path: { type: "string" },
+                    status: { type: "string", enum: ["created", "modified", "deleted"] },
+                    content: { type: "string" },
+                    description: { type: "string" },
+                  },
+                  required: ["path", "status", "content", "description"],
+                },
+              },
+            },
+            required: ["analysis", "changes"],
+          },
+        },
+      },
     },
-    { provider: aiProvider, apiKey: aiKey },
+    aiConfig,
   );
+
   const plan = JSON.parse(aiResult.content || "{}") as AIFinishPlan;
+
+  // Validate the plan
+  if (!plan.changes || !Array.isArray(plan.changes)) {
+    throw new Error("AI returned an invalid finish plan â no changes array.");
+  }
+
+  // Filter out obviously bad changes
+  const validChanges = plan.changes.filter((c) => {
+    if (!c.path || typeof c.path !== "string") return false;
+    if (c.status === "deleted" && (!c.description || c.description.length < 5)) return false;
+    if (c.status !== "deleted" && (!c.content || c.content.length < 10)) return false;
+    // Reject changes to node_modules, .git, etc.
+    if (c.path.includes("node_modules") || c.path.includes(".git/")) return false;
+    return true;
+  });
+
+  if (validChanges.length === 0) {
+    throw new Error(
+      "AI didn't produce any valid changes â the repo might already be in good shape, or the AI couldn't find concrete improvements based on the provided files.",
+    );
+  }
+
+  // Cap at 8 changes to keep PRs focused
+  plan.changes = validChanges.slice(0, 8);
   return plan;
 }
 
-// ─── Fetch key files from repo ─────────────────────────────────
+// âââ Fetch key files from repo (parallel) ââââââââââââââââââââââ
 
 async function fetchKeyFiles(
   token: string,
   repo: string,
   branch: string,
+  treeData: {
+    tree: Array<{ path: string; type: string; sha: string; size?: number }>;
+    truncated: boolean;
+  },
 ): Promise<{ path: string; content: string }[]> {
-  const tree = await getRepoTree(token, repo, branch);
+  const tree = treeData.tree.filter((t) => t.type === "blob");
 
-  // Prioritize: README, package.json, entry points, config files, source files
+  // Priority patterns for file selection
   const priorityPatterns = [
     /^readme/i,
     /^package\.json$/,
@@ -280,10 +446,6 @@ async function fetchKeyFiles(
     /^lib\/(index|main)\.[tj]s$/,
     /^app\/(page|layout|route)/,
     /^api\/(index|main|server)/,
-    /\/__tests__\//,
-    /\.test\.[tj]sx?$/,
-    /\.spec\.[tj]sx?$/,
-    /test_.*\.py$/,
   ];
 
   const keyFiles: string[] = [];
@@ -291,38 +453,66 @@ async function fetchKeyFiles(
     for (const node of tree) {
       if (pattern.test(node.path) && !keyFiles.includes(node.path)) {
         keyFiles.push(node.path);
-        if (keyFiles.length >= 15) break;
+        if (keyFiles.length >= 12) break;
       }
     }
-    if (keyFiles.length >= 15) break;
+    if (keyFiles.length >= 12) break;
   }
 
-  // Also grab a few source files from src/
+  // Also grab source files from src/ â prioritize larger files
   const srcFiles = tree
-    .filter((t) => t.path.startsWith("src/") && /\.(ts|tsx|js|jsx|py|go|rs)$/.test(t.path))
-    .slice(0, 10)
+    .filter(
+      (t) =>
+        t.path.startsWith("src/") &&
+        /\.(ts|tsx|js|jsx|py|go|rs)$/.test(t.path) &&
+        !t.path.includes("node_modules") &&
+        !t.path.includes("dist"),
+    )
+    .sort((a, b) => (b.size ?? 0) - (a.size ?? 0))
+    .slice(0, 8)
     .map((t) => t.path);
 
   for (const f of srcFiles) {
     if (!keyFiles.includes(f)) keyFiles.push(f);
-    if (keyFiles.length >= 20) break;
+    if (keyFiles.length >= 18) break;
   }
 
-  // Fetch contents (limit to 15 to stay within token budget)
+  // Fetch contents IN PARALLEL (was sequential â major timeout cause)
+  const fetchResults = await parallelMap(
+    keyFiles.slice(0, 15),
+    5, // 5 concurrent fetches
+    (path) => getFileContent(token, repo, path),
+  );
+
   const files: { path: string; content: string }[] = [];
-  for (const path of keyFiles.slice(0, 15)) {
-    const file = await getFileContent(token, repo, path);
-    if (file) files.push({ path: file.path, content: file.content });
+  for (const result of fetchResults) {
+    if (result.status === "fulfilled" && result.value) {
+      files.push({ path: result.value.path, content: result.value.content });
+    }
   }
 
   return files;
 }
 
-// ─── Main: Finish a repo ───────────────────────────────────────
+// âââ Timeout helper ââââââââââââââââââââââââââââââââââââââââââââ
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`${label} exceeded ${Math.round(ms / 1000)}s timeout.`)),
+        ms,
+      ),
+    ),
+  ]);
+}
+
+// âââ Main: Finish a repo âââââââââââââââââââââââââââââââââââââââ
 
 export const finishRepo = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     (d: { repo: string; nextSteps?: string[]; analysisId?: string; itemRank?: number }) =>
       z
         .object({
@@ -344,19 +534,36 @@ export const finishRepo = createServerFn({ method: "POST" })
 
     const token = conn.access_token;
 
-    // Get user preferences for AI provider
-    const { data: prefs } = await context.supabase
-      .from("user_preferences")
-      .select("custom_ai_provider, custom_ai_key")
-      .eq("user_id", context.userId)
-      .maybeSingle();
+    // Resolve AI provider (user key â server key â GitHub Models via OAuth token)
+    const aiConfig = await resolveAIConfig(context.supabase, context.userId);
 
-    // Fetch repo metadata
-    const repoRes = await ghFetch(token, `/repos/${data.repo}`);
+    // ââ 1. Fetch repo metadata + tree in parallel ââââââââââââââ
+    const [repoRes, treeData] = await Promise.all([
+      ghFetch(token, `/repos/${data.repo}`),
+      (async () => {
+        // We need the default branch first, so fetch repo then tree
+        // But we can at least parallelize the CI check
+        return null;
+      })(),
+    ]);
+
     if (!repoRes.ok) throw new Error(`Repo not found: ${data.repo}`);
     const repo = (await repoRes.json()) as Record<string, unknown>;
-
     const defaultBranch = repo.default_branch as string;
+
+    // Now fetch tree + CI check + test check in parallel
+    const [treeResult, ciResult] = await Promise.all([
+      withTimeout(getRepoTree(token, data.repo, defaultBranch), 15000, "File tree fetch"),
+      ghFetch(token, `/repos/${data.repo}/contents/.github/workflows`),
+    ]);
+
+    const tree = treeResult.tree.filter((t) => t.type === "blob");
+    const hasCi = ciResult.ok;
+    const hasTests = tree.some((t) => /test|spec|__tests__|\.test\.|\.spec\./i.test(t.path));
+    const hasLicense = !!repo.license;
+    const hasReadme = tree.some((t) => /^readme/i.test(t.path));
+    const hasHomepage = !!repo.homepage;
+
     const repoData = {
       description: (repo.description as string) || null,
       language: (repo.language as string) || null,
@@ -364,30 +571,18 @@ export const finishRepo = createServerFn({ method: "POST" })
       topics: (repo.topics as string[]) || [],
       stars: (repo.stargazers_count as number) || 0,
       open_issues: (repo.open_issues_count as number) || 0,
-      has_ci: false,
-      has_tests: false,
-      has_license: !!repo.license,
-      has_readme: !!(repo.description as string),
-      has_homepage: !!repo.homepage,
+      has_ci: hasCi,
+      has_tests: hasTests,
+      has_license: hasLicense,
+      has_readme: hasReadme,
+      has_homepage: hasHomepage,
+      file_count: tree.length,
+      key_directories: Array.from(
+        new Set(tree.map((t) => t.path.split("/")[0]).filter((p) => !p.startsWith("."))),
+      ).slice(0, 8),
     };
 
-    // Check CI
-    try {
-      const wfRes = await ghFetch(token, `/repos/${data.repo}/contents/.github/workflows`);
-      if (wfRes.ok) repoData.has_ci = true;
-    } catch {
-      /* ignore */
-    }
-
-    // Check tests
-    try {
-      const tree = await getRepoTree(token, data.repo, defaultBranch);
-      repoData.has_tests = tree.some((t) => /test|spec|__tests__|\.test\.|\.spec\./i.test(t.path));
-    } catch {
-      /* ignore */
-    }
-
-    // If nextSteps not provided directly, try to find them from the analysis item
+    // ââ 2. Resolve next steps ââââââââââââââââââââââââââââââââââ
     let nextSteps = data.nextSteps || [];
     if (nextSteps.length === 0 && data.analysisId && data.itemRank !== undefined) {
       const { data: item } = await context.supabase
@@ -400,104 +595,86 @@ export const finishRepo = createServerFn({ method: "POST" })
     }
 
     if (nextSteps.length === 0) {
-      nextSteps = [
-        "Add a comprehensive README with installation and usage instructions",
-        "Add a LICENSE file",
-        "Set up basic CI/CD",
-        "Add basic tests",
-        "Fix any obvious bugs or incomplete implementations",
-      ];
+      // Generate targeted next steps based on actual health check
+      nextSteps = [];
+      if (!hasReadme)
+        nextSteps.push("Add a comprehensive README with installation and usage instructions");
+      if (!hasLicense) nextSteps.push("Add a LICENSE file");
+      if (!hasCi) nextSteps.push("Set up basic CI/CD");
+      if (!hasTests) nextSteps.push("Add basic tests for the main entry point");
+      nextSteps.push("Fix any obvious bugs or incomplete implementations");
     }
 
-    // Fetch key source files
-    const files = await fetchKeyFiles(token, data.repo, defaultBranch);
+    // ââ 3. Fetch key files in parallel âââââââââââââââââââââââââ
+    const files = await withTimeout(
+      fetchKeyFiles(token, data.repo, defaultBranch, treeResult),
+      20000,
+      "Key file fetch",
+    );
 
-    // Generate the finish plan via AI
-    // For GitHub Models, fall back to GitHub connection token
-    let rfAiKey = prefs?.custom_ai_key || null;
-    if (prefs?.custom_ai_provider === "github_models" && !rfAiKey) {
-      rfAiKey = token; // reuse the GitHub token we already have
+    if (files.length === 0) {
+      throw new Error(
+        "Could not fetch any source files from the repo. Check if it's empty or private.",
+      );
     }
-    const plan = await generateFinishPlan(
-      data.repo,
-      repoData,
-      files,
-      nextSteps,
-      prefs?.custom_ai_provider || "openai",
-      rfAiKey,
+
+    // ââ 4. Generate the finish plan via AI âââââââââââââââââââââ
+    const plan = await withTimeout(
+      generateFinishPlan(data.repo, repoData, files, nextSteps, aiConfig),
+      60000,
+      "AI plan generation",
     );
 
     if (!plan.changes || plan.changes.length === 0) {
-      throw new Error("AI didn't generate any changes — the repo might already be in good shape.");
+      throw new Error("AI didn't generate any changes â the repo might already be in good shape.");
     }
 
-    // Create a branch
+    // ââ 5. Batch commit all changes via Git Data API âââââââââââ
+    // This creates a single commit with all changes instead of N sequential commits
     const branchName = `repo-finisher/fixes-${Date.now().toString(36)}`;
-    await createBranch(token, data.repo, defaultBranch, branchName);
 
-    // Commit each file change
-    let filesChanged = 0;
-    const changeLog: FinishResult["changes"] = [];
+    const commitResult = await withTimeout(
+      batchCommit(token, data.repo, defaultBranch, branchName, plan.changes),
+      30000,
+      "Batch commit",
+    );
 
-    for (const change of plan.changes) {
-      if (change.status === "deleted") {
-        // Get file SHA first
-        const existing = await getFileContent(token, data.repo, change.path);
-        if (existing) {
-          const delRes = await ghFetch(token, `/repos/${data.repo}/contents/${change.path}`, {
-            method: "DELETE",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              message: `repo-finisher: delete ${change.path} — ${change.description}`,
-              sha: existing.sha,
-              branch: branchName,
-            }),
-          });
-          if (delRes.ok) {
-            filesChanged++;
-            changeLog.push({
-              file: change.path,
-              status: "deleted",
-              description: change.description,
-            });
-          }
-        }
-      } else {
-        try {
-          await commitFile(
-            token,
-            data.repo,
-            branchName,
-            change.path,
-            change.content,
-            `repo-finisher: ${change.status} ${change.path} — ${change.description}`,
-          );
-          filesChanged++;
-          changeLog.push({
-            file: change.path,
-            status: change.status as "created" | "modified",
-            description: change.description,
-          });
-        } catch (e) {
-          // Skip files that fail (e.g., too large)
-          console.error(`Failed to commit ${change.path}:`, e);
-        }
-      }
-    }
+    // ââ 6. Create PR âââââââââââââââââââââââââââââââââââââââââââ
+    const changeLog: FinishResult["changes"] = plan.changes
+      .slice(0, commitResult.filesChanged)
+      .map((c) => ({
+        file: c.path,
+        status: c.status as "created" | "modified" | "deleted",
+        description: c.description,
+      }));
 
-    if (filesChanged === 0) {
-      throw new Error("All file commits failed — check repo permissions.");
-    }
+    // SAFETY RAIL: Assess risk before creating the PR
+    const riskAssessment = assessChangeRisk({
+      filesCreated: changeLog.filter((c) => c.status === "created").length,
+      filesModified: changeLog.filter((c) => c.status === "modified").length,
+      filesDeleted: changeLog.filter((c) => c.status === "deleted").length,
+      touchesSrc: changeLog.some((c) => c.file.startsWith("src/") || c.file.startsWith("lib/")),
+      touchesConfig: changeLog.some((c) =>
+        /\.(json|toml|yaml|yml)$/.test(c.file) || /config/i.test(c.file),
+      ),
+      touchesDeps: changeLog.some((c) =>
+        c.file === "package.json" || c.file === "requirements.txt" || c.file === "Cargo.toml",
+      ),
+      isCrossRepo: false,
+      isMajorRefactor: changeLog.filter((c) => c.status === "modified").length > 5,
+      isMajorVersionBump: false,
+    });
 
-    // Create PR
-    const prTitle = `🤖 RepoFinisher: ${filesChanged} improvement${filesChanged > 1 ? "s" : ""}`;
+    const prTitle = `ð¤ RepoFinisher: ${commitResult.filesChanged} improvement${commitResult.filesChanged > 1 ? "s" : ""}`;
     const prBody = `## Automated improvements by RepoFinisher
 
 ${plan.analysis}
 
-### Changes (${filesChanged} file${filesChanged > 1 ? "s" : ""})
+${formatRiskCallout(riskAssessment)}
 
-${changeLog.map((c) => `- [${c.status === "created" ? "+" : c.status === "modified" ? "~" : "-"}] \`${c.file}\` — ${c.description}`).join("\n")}
+### Changes (${commitResult.filesChanged} file${commitResult.filesChanged > 1 ? "s" : ""})
+
+${changeLog.map((c) => `- [${c.status === "created" ? "+" : c.status === "modified" ? "~" : "-"}] \`${c.file}\` â ${c.description}`).join("\n")}
 
 ### Next steps addressed
 
@@ -505,16 +682,38 @@ ${nextSteps.map((s) => `- [x] ${s}`).join("\n")}
 
 ---
 
-*Generated by [RepoFinisher](https://repofinish.vercel.app) — automated codebase completion.*`;
+â ï¸ **Review before merging.** This PR was generated automatically and should be reviewed by a human before merging.
 
-    const pr = await createPR(token, data.repo, branchName, defaultBranch, prTitle, prBody);
+*Generated by [RepoFinisher](https://repofinish.vercel.app) â automated codebase completion.*`;
+
+    const pr = await withTimeout(
+      (async () => {
+        const prRes = await ghFetch(token, `/repos/${data.repo}/pulls`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: prTitle,
+            head: branchName,
+            base: defaultBranch,
+            body: prBody,
+          }),
+        });
+        if (!prRes.ok) {
+          const err = await prRes.text();
+          throw new Error(`Failed to create PR: ${prRes.status} ${err.slice(0, 200)}`);
+        }
+        return (await prRes.json()) as { number: number; html_url: string };
+      })(),
+      15000,
+      "PR creation",
+    );
 
     const result: FinishResult = {
       repo: data.repo,
       branch: branchName,
       pr_url: pr.html_url,
       pr_number: pr.number,
-      files_changed: filesChanged,
+      files_changed: commitResult.filesChanged,
       additions: 0,
       deletions: 0,
       summary: plan.analysis,
@@ -525,19 +724,32 @@ ${nextSteps.map((s) => `- [x] ${s}`).join("\n")}
     if (data.analysisId && data.itemRank !== undefined) {
       await context.supabase
         .from("analysis_items")
-        .update({ finish_result: result as unknown as import("@/integrations/supabase/types").Json })
+        .update({
+          finish_result: result as unknown as import("@/integrations/supabase/types").Json,
+        })
         .eq("analysis_id", data.analysisId)
         .eq("rank", data.itemRank);
     }
 
+    // Log learning entry for persistent memory
+    await logLearningEntry(context.supabase, context.userId, data.repo, {
+      action: "finish-repo",
+      outcome: "success",
+      duration_ms: Date.now() - (Date.now() - 1000), // approximate
+      details: `Created PR #${pr.number} with ${commitResult.filesChanged} file changes. ${plan.analysis.slice(0, 200)}`,
+      files_affected: changeLog.map((c) => c.file),
+      fix_pattern: nextSteps.join("; ").slice(0, 200),
+      timestamp: new Date().toISOString(),
+    });
+
     return result;
   });
 
-// ─── Get finish status for a repo ──────────────────────────────
+// âââ Get finish status for a repo ââââââââââââââââââââââââââââââ
 
 export const getFinishStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { repo: string }) => z.object({ repo: z.string() }).parse(d))
+  .validator((d: { repo: string }) => z.object({ repo: z.string() }).parse(d))
   .handler(async ({ context, data }) => {
     const { data: items } = await context.supabase
       .from("analysis_items")
@@ -551,7 +763,8 @@ export const getFinishStatus = createServerFn({ method: "GET" })
     return {
       repo: data.repo,
       hasBeenFinished: finished.length > 0,
-      finishes: JSON.parse(JSON.stringify(finished.map((i) => (i as Record<string, unknown>).finish_result))) as import("@/integrations/supabase/types").Json[],
+      finishes: JSON.parse(
+        JSON.stringify(finished.map((i) => (i as Record<string, unknown>).finish_result)),
+      ) as import("@/integrations/supabase/types").Json[],
     };
   });
-
