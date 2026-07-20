@@ -1,4 +1,4 @@
--- Step Sequencer runs — tracks multi-step completion pipelines.
+-- Step Sequencer runs â tracks multi-step completion pipelines.
 -- Each run contains a plan with steps, their status, CI results, and outcomes.
 
 CREATE TABLE IF NOT EXISTS public.sequencer_runs (
@@ -27,7 +27,7 @@ CREATE POLICY "Users manage their own sequencer runs"
 CREATE INDEX sequencer_runs_user_idx ON public.sequencer_runs(user_id, created_at DESC);
 CREATE INDEX sequencer_runs_repo_idx ON public.sequencer_runs(repo, status);
 
--- Activity feed — unified timeline of all actions across the system.
+-- Activity feed â unified timeline of all actions across the system.
 -- Every operation (analysis, finish, sequencer step, CI check, learning) gets logged here.
 
 CREATE TABLE IF NOT EXISTS public.activity_events (
@@ -56,5 +56,5 @@ CREATE POLICY "Users see their own activity"
 CREATE INDEX activity_events_user_idx ON public.activity_events(user_id, created_at DESC);
 CREATE INDEX activity_events_repo_idx ON public.activity_events(repo, created_at DESC);
 
-COMMENT ON TABLE public.sequencer_runs IS 'Step-by-step completion pipeline runs — each with a plan, step statuses, and CI results.';
-COMMENT ON TABLE public.activity_events IS 'Unified activity feed — timeline of all system actions per user.';
+COMMENT ON TABLE public.sequencer_runs IS 'Step-by-step completion pipeline runs â each with a plan, step statuses, and CI results.';
+COMMENT ON TABLE public.activity_events IS 'Unified activity feed â timeline of all system actions per user.';

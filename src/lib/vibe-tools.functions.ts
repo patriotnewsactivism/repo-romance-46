@@ -11,7 +11,7 @@ import { logLearningEntry } from "@/lib/learning-log.functions";
 const ASJSON = "as unknown as Json";
 type Ctx = { supabase: unknown; userId: string };
 
-// ─── shared helpers ────────────────────────────────────────────
+// âââ shared helpers ââââââââââââââââââââââââââââââââââââââââââââ
 
 async function loadItem(
   supabase: {
@@ -83,7 +83,7 @@ async function loadGhToken(supabase: unknown, userId: string): Promise<string> {
   return (data as { access_token: string }).access_token;
 }
 
-// ─── 1. MARKET & VALUATION ────────────────────────────────────
+// âââ 1. MARKET & VALUATION ââââââââââââââââââââââââââââââââââââ
 
 const marketSchema = {
   type: "object",
@@ -189,7 +189,7 @@ Existing next steps: ${item.next_steps.slice(0, 5).join(" | ")}`;
     return { market, valuation };
   });
 
-// ─── 2. VIBE SPEC (PRD + Lovable prompt + landing copy) ───────
+// âââ 2. VIBE SPEC (PRD + Lovable prompt + landing copy) âââââââ
 
 const vibeSchema = {
   type: "object",
@@ -261,7 +261,7 @@ Existing next steps: ${item.next_steps.join(" | ")}`;
     return spec;
   });
 
-// ─── 3. COMBINE REPOS (create combined repo + link issues) ────
+// âââ 3. COMBINE REPOS (create combined repo + link issues) ââââ
 
 async function gh(token: string, path: string, init?: RequestInit): Promise<Response> {
   return fetch(`https://api.github.com${path}`, {
@@ -436,7 +436,7 @@ export const combineRepos = createServerFn({ method: "POST" })
     return result;
   });
 
-// ─── 4. ITERATIVE FINISH (multi-pass RepoFinisher) ────────────
+// âââ 4. ITERATIVE FINISH (multi-pass RepoFinisher) ââââââââââââ
 
 export const iterativeFinish = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

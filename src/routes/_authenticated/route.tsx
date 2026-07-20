@@ -1,8 +1,19 @@
 // Supabase auth pattern.
 import { createFileRoute, Outlet, redirect, Link, useRouter } from "@tanstack/react-router";
-import { supabase } from "@/integrations/supabase/client";
-import { Button } from "@/components/ui/button";
+import { supabase } from "@integrations/supabase/client";
+import { Button } from "@components/ui/button";
 import { LogOut, Settings, Users } from "lucide-react";
+import { ThemeProvider, useTheme } from "@contexts/ThemeContext";
+import { ThemeToggle } from "@components/ThemeToggle";
+
+const ThemeWrapper = () => {
+  const { theme } = useTheme();
+  return (
+    <div className={`theme-${theme}`}>
+      <AuthedShell />
+    </div>
+  );
+};
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -11,7 +22,11 @@ export const Route = createFileRoute("/_authenticated")({
     if (error || !data.user) throw redirect({ to: "/auth" });
     return { user: data.user };
   },
-  component: AuthedShell,
+  component: () => (
+    <ThemeProvider>
+      <ThemeWrapper />
+    </ThemeProvider>
+  )
 });
 
 function AuthedShell() {
@@ -32,6 +47,7 @@ function AuthedShell() {
             <span className="font-bold tracking-tight">repo_finisher</span>
           </Link>
           <div className="flex items-center gap-3">
+            <ThemeToggle />
             <span className="hidden sm:inline text-xs text-muted-foreground font-mono">
               {user.email}
             </span>

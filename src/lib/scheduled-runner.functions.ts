@@ -129,7 +129,7 @@ export const runScheduledAnalyses = createServerFn({ method: "GET" }).handler(as
 
           if (email && analysis) {
             // Send via Supabase edge function or external email service
-            // For now, log — wire up your email provider here
+            // For now, log â wire up your email provider here
             console.log(
               `[scheduled] Email notification for ${email}: analysis ${result.id} complete (${analysis.repo_count} repos)`,
             );

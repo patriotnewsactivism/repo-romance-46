@@ -77,13 +77,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "RepoFinisher — Ship the repos you already started" },
+      { title: "RepoFinisher â Ship the repos you already started" },
       {
         name: "description",
         content:
           "AI-powered audit of your GitHub portfolio. Find which repos to finish, which to combine, and how to market them.",
       },
-      { property: "og:title", content: "RepoFinisher — Ship the repos you already started" },
+      { property: "og:title", content: "RepoFinisher â Ship the repos you already started" },
       {
         property: "og:description",
         content:
@@ -91,7 +91,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:title", content: "RepoFinisher — Ship the repos you already started" },
+      { name: "twitter:title", content: "RepoFinisher â Ship the repos you already started" },
       {
         name: "twitter:description",
         content:

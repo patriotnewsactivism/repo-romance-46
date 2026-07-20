@@ -1,7 +1,7 @@
 -- Learning & Deep Analysis tables
 -- Supports persistent memory per repo and cross-repo pattern detection.
 
--- 1. repo_learnings — per-repo history of what worked, what broke, analysis results
+-- 1. repo_learnings â per-repo history of what worked, what broke, analysis results
 CREATE TABLE IF NOT EXISTS public.repo_learnings (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -27,7 +27,7 @@ CREATE POLICY "Users manage their own repo learnings"
 
 CREATE INDEX repo_learnings_user_repo_idx ON public.repo_learnings(user_id, repo);
 
--- 2. cross_repo_patterns — recurring patterns across multiple repos
+-- 2. cross_repo_patterns â recurring patterns across multiple repos
 CREATE TABLE IF NOT EXISTS public.cross_repo_patterns (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -58,5 +58,5 @@ CREATE INDEX cross_repo_patterns_confidence_idx ON public.cross_repo_patterns(co
 ALTER TABLE public.analysis_items
   ADD COLUMN IF NOT EXISTS deep_analysis jsonb;
 
-COMMENT ON TABLE public.repo_learnings IS 'Per-repo persistent memory — logs successes, failures, patterns across finish attempts';
-COMMENT ON TABLE public.cross_repo_patterns IS 'Cross-repo pattern log — recurring fix patterns with success/failure tracking';
+COMMENT ON TABLE public.repo_learnings IS 'Per-repo persistent memory â logs successes, failures, patterns across finish attempts';
+COMMENT ON TABLE public.cross_repo_patterns IS 'Cross-repo pattern log â recurring fix patterns with success/failure tracking';

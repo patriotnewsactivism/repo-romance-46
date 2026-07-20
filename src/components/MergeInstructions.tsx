@@ -45,14 +45,14 @@ export function MergeInstructions({
         className="text-xs font-mono text-muted-foreground hover:text-foreground flex items-center gap-1.5"
       >
         <GitMerge className="h-3.5 w-3.5" />
-        {open ? "▾ hide merge plan" : "▸ generate merge plan"}
+        {open ? "â¾ hide merge plan" : "â¸ generate merge plan"}
       </button>
 
       {open && (
         <div className="mt-3 space-y-3">
           {mut.isPending && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> generating merge instructions…
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> generating merge instructionsâ¦
             </div>
           )}
 

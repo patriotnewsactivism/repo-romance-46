@@ -111,7 +111,7 @@ function SettingsPage() {
           <h2 className="font-mono text-sm font-semibold">Starred recommendations</h2>
         </div>
         {starred.isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <p className="text-sm text-muted-foreground">Loadingâ¦</p>
         ) : !starred.data?.length ? (
           <p className="text-sm text-muted-foreground">
             No starred recommendations yet. Star items from an analysis to track them here.
@@ -214,7 +214,7 @@ function SettingsPage() {
               className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm"
             >
               <option value="github_models">
-                GitHub Models — GPT-4o (free, uses your GitHub token)
+                GitHub Models â GPT-4o (free, uses your GitHub token)
               </option>
               <option value="openai">OpenAI (bring your own key)</option>
               <option value="anthropic">Anthropic / Claude (bring your own key)</option>
@@ -225,12 +225,12 @@ function SettingsPage() {
             <Label className="text-sm">
               API Key{" "}
               {(prefs.data as unknown as Record<string, unknown> | undefined)?.custom_ai_key
-                ? "(saved — leave blank to keep)"
+                ? "(saved â leave blank to keep)"
                 : ""}
             </Label>
             {customProvider === "github_models" && (
               <p className="text-xs text-muted-foreground mt-1">
-                Create a GitHub token at Settings → Developer settings → Personal access tokens
+                Create a GitHub token at Settings â Developer settings â Personal access tokens
                 (needs <code>read:user</code> scope). Or leave blank to use your connected GitHub
                 account.
               </p>
@@ -260,7 +260,7 @@ function SettingsPage() {
               onChange={(e) => setCustomKey(e.target.value)}
               placeholder={
                 prefs.data && (prefs.data as unknown as Record<string, unknown>).custom_ai_key
-                  ? "••••••••••••"
+                  ? "â¢â¢â¢â¢â¢â¢â¢â¢â¢â¢â¢â¢"
                   : customProvider === "github_models"
                     ? "ghp_... (your GitHub Personal Access Token)"
                     : "sk-..."
@@ -338,7 +338,7 @@ function SettingsPage() {
         >
           {updateMut.isPending ? (
             <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving…
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Savingâ¦
             </>
           ) : (
             <>

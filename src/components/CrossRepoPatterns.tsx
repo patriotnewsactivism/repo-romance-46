@@ -51,7 +51,7 @@ export function CrossRepoPatterns() {
             <div className="flex flex-wrap gap-1">
               {pattern.occurrences.slice(-5).map((occ, j) => (
                 <Badge key={j} variant="secondary" className="text-[9px] font-mono">
-                  {occ.repo.split("/").pop()} · {occ.outcome}
+                  {occ.repo.split("/").pop()} Â· {occ.outcome}
                 </Badge>
               ))}
             </div>
