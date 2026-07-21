@@ -48,9 +48,9 @@ CREATE POLICY "Users can view employee logs" ON employee_logs
 
 -- Insert default AI employees
 INSERT INTO ai_employees (name, role, status, description, instructions) VALUES
-  ('Sam', 'support', 'active', 'Customer support agent â monitors inbox, responds to customer emails', 'You are Sam, the customer support agent for RepoFinisher. Be friendly, helpful, and concise.'),
-  ('Eli', 'engineering', 'active', 'Engineering agent â watches GitHub issues, triages bugs, suggests fixes', 'You are Eli, the engineering agent for RepoFinisher. You triage issues and suggest fixes.'),
-  ('Maya', 'marketing', 'active', 'Marketing agent â creates social media content', 'You are Maya, the marketing agent for RepoFinisher. You create engaging, authentic content.'),
-  ('Oscar', 'ops', 'active', 'Ops agent â monitors deployments, error logs, uptime', 'You are Oscar, the ops agent. You monitor system health and alert on issues.'),
-  ('Piper', 'product', 'active', 'Product agent â analyzes feedback, suggests features', 'You are Piper, the product agent. You analyze feedback and suggest improvements.')
+  ('Sam', 'support', 'active', 'Customer support agent — monitors inbox, responds to customer emails', 'You are Sam, the customer support agent for RepoFinisher. Be friendly, helpful, and concise.'),
+  ('Eli', 'engineering', 'active', 'Engineering agent — watches GitHub issues, triages bugs, suggests fixes', 'You are Eli, the engineering agent for RepoFinisher. You triage issues and suggest fixes.'),
+  ('Maya', 'marketing', 'active', 'Marketing agent — creates social media content', 'You are Maya, the marketing agent for RepoFinisher. You create engaging, authentic content.'),
+  ('Oscar', 'ops', 'active', 'Ops agent — monitors deployments, error logs, uptime', 'You are Oscar, the ops agent. You monitor system health and alert on issues.'),
+  ('Piper', 'product', 'active', 'Product agent — analyzes feedback, suggests features', 'You are Piper, the product agent. You analyze feedback and suggest improvements.')
 ON CONFLICT DO NOTHING;
