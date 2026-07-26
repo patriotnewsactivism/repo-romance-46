@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { callAI, resolveAIConfig, type AIProviderConfig } from "@/lib/ai-provider";
 import { safeGitHubWrite, assertNotProtectedBranch, assessChangeRisk, formatRiskCallout } from "@/lib/safety-rails";
-import { logLearningEntry } from "@/lib/learning-log.functions";
+import { logLearningEntry, lookupFixHistory } from "@/lib/learning-log.functions";
 
 // âââ Types âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
@@ -605,7 +605,35 @@ export const finishRepo = createServerFn({ method: "POST" })
       nextSteps.push("Fix any obvious bugs or incomplete implementations");
     }
 
-    // ââ 3. Fetch key files in parallel âââââââââââââââââââââââââ
+
+    // Consult learning history before proposing the same failed patterns again
+    const historyWarnings: string[] = [];
+    try {
+      const patternKey = nextSteps.slice(0, 3).join("; ").slice(0, 200) || "finish-repo";
+      const hist = await lookupFixHistory(context.supabase, context.userId, data.repo, patternKey);
+      if (hist.warning) historyWarnings.push(hist.warning);
+      if (hist.crossRepoInsight?.recommendation) {
+        historyWarnings.push(
+          `Cross-repo pattern note: ${hist.crossRepoInsight.recommendation}`,
+        );
+      }
+      // Also check each next step briefly
+      for (const step of nextSteps.slice(0, 5)) {
+        const stepHist = await lookupFixHistory(
+          context.supabase,
+          context.userId,
+          data.repo,
+          step.slice(0, 120),
+        );
+        if (stepHist.failures > 0 && stepHist.warning) {
+          historyWarnings.push(stepHist.warning);
+        }
+      }
+    } catch (e) {
+      console.warn("[finish] history lookup failed:", e);
+    }
+
+        // ââ 3. Fetch key files in parallel âââââââââââââââââââââââââ
     const files = await withTimeout(
       fetchKeyFiles(token, data.repo, defaultBranch, treeResult),
       20000,
@@ -676,7 +704,7 @@ ${formatRiskCallout(riskAssessment)}
 
 ${changeLog.map((c) => `- [${c.status === "created" ? "+" : c.status === "modified" ? "~" : "-"}] \`${c.file}\` â ${c.description}`).join("\n")}
 
-### Next steps addressed
+${historyWarnings.length > 0 ? `### Learning history warnings\n\n${historyWarnings.map((w) => `- ${w}`).join("\n")}\n\n` : ""}### Next steps addressed
 
 ${nextSteps.map((s) => `- [x] ${s}`).join("\n")}
 

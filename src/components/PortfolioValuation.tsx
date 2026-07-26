@@ -49,6 +49,7 @@ interface PortfolioValuationData {
   top_picks: { repo: string; reason: string }[];
   diversification_score: number;
   recommendation: string;
+  disclaimer?: string;
 }
 
 function formatMoney(n: number) {
@@ -160,6 +161,9 @@ export function PortfolioValuation({ analysisId }: { analysisId: string }) {
           </div>
           <p className="text-sm">{data.recommendation}</p>
         </div>
+        {data.disclaimer && (
+          <p className="mt-3 text-[11px] text-muted-foreground">{data.disclaimer}</p>
+        )}
       </Card>
 
       {/* Top picks */}
@@ -170,7 +174,8 @@ export function PortfolioValuation({ analysisId }: { analysisId: string }) {
               <div className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground">
                 <Target className="h-3 w-3" /> TOP PICK #{i + 1}
               </div>
-              <p className="text-sm">{pick.reason}</p>
+              <p className="text-sm font-medium font-mono">{pick.repo}</p>
+              <p className="text-sm text-muted-foreground">{pick.reason}</p>
             </Card>
           ))}
         </div>
@@ -186,7 +191,10 @@ export function PortfolioValuation({ analysisId }: { analysisId: string }) {
             {/* Header */}
             <div className="flex items-start justify-between gap-3">
               <div className="space-y-1">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {v.repo && (
+                    <span className="text-sm font-medium font-mono">{v.repo}</span>
+                  )}
                   <span
                     className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-mono ${CONFIDENCE_STYLES[v.confidence]}`}
                   >

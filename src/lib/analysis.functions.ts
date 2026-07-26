@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { callAI, callAIWithFallback, type AIProviderConfig } from "@/lib/ai-provider";
+import { clampScore1to5, rankRecommendations } from "@/lib/scoring";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
@@ -478,7 +479,7 @@ FINISH (need ALL): executable code exists, clear gap to shippable, <40hr work, i
 COMBINE (need ALL): compatible tech/adjacent problems, creates something neither could alone, specific integration point, clearer market position, not just same language.
 REPURPOSE (need ALL): working internal-use code, can be positioned externally with minimal changes, name target market & why they'd pay, plausible transformation.
 
-OUTPUT: Return 3-7 recommendations ranked by (market_potential*2 - effort) desc. Each needs: kind (lowercase: finish/combine/repurpose), title (5-8 words specific), repos (exact full_names from digest), pitch (2-3 sentences: WHO/WHAT/WHY), effort (1-5), market_potential (1-5, be conservative), next_steps (3-5 todos referencing specific files/functions from digest), tech_stack (only verified from digest), marketing_tweet (280 chars max), marketing_linkedin (3-4 sentences), estimated_hours (realistic 1-500). Also include summary_md (~200 words on portfolio maturity & patterns). Quality over quantityâdon't pad with weak suggestions. Every recommendation must cite specific evidence from digests.`;
+OUTPUT: Return 3-7 recommendations ranked by impact: prefer high market_potential, lower effort, fewer hours, and finishable work with clear evidence. Score roughly (market*2 - effort) with bonuses for <40hr finishes. Each needs: kind (lowercase: finish/combine/repurpose), title (5-8 words specific), repos (exact full_names from digest), pitch (2-3 sentences: WHO/WHAT/WHY), effort (1-5), market_potential (1-5, be conservative), next_steps (3-5 todos referencing specific files/functions from digest), tech_stack (only verified from digest), marketing_tweet (280 chars max), marketing_linkedin (3-4 sentences), estimated_hours (realistic 1-500). Also include summary_md (~200 words on portfolio maturity & patterns). Quality over quantityâdon't pad with weak suggestions. Every recommendation must cite specific evidence from digests.`;
 
 // JSON schema for structured output (OpenAI-compatible providers)
 const AI_JSON_SCHEMA = {
@@ -934,9 +935,13 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
     );
     ai.portfolio_stats = computePortfolioStats(shortlist);
 
-    // Rank and persist
-    const ranked = [...ai.recommendations].sort(
-      (a, b) => b.market_potential * 2 - b.effort - (a.market_potential * 2 - a.effort),
+    // Rank with shared scorer (market, effort, hours, kind) then persist
+    const ranked = rankRecommendations(
+      ai.recommendations.map((r) => ({
+        ...r,
+        effort: clampScore1to5(r.effort),
+        market_potential: clampScore1to5(r.market_potential),
+      })),
     );
 
     const rows = ranked.map((r, i) => ({
@@ -946,8 +951,8 @@ export async function executeAnalysis(ctx: AnalysisContext): Promise<{ id: strin
       title: r.title,
       repos: r.repos,
       pitch: r.pitch,
-      effort: Math.max(1, Math.min(5, r.effort)),
-      market_potential: Math.max(1, Math.min(5, r.market_potential)),
+      effort: clampScore1to5(r.effort),
+      market_potential: clampScore1to5(r.market_potential),
       next_steps: r.next_steps,
       tech_stack: r.tech_stack ?? [],
       marketing_tweet: r.marketing_tweet ?? null,
@@ -1312,7 +1317,31 @@ Sequence phases from quick wins (low effort, high impact) to moonshots. Group re
       aiConfig.fallbacks,
     );
 
-    return JSON.parse(result.content || "{}");
+    const plan = JSON.parse(result.content || "{}");
+
+    // Persist so refresh keeps the plan (stored on analyses.portfolio_stats.action_plan)
+    try {
+      const { data: existing } = await supabase
+        .from("analyses")
+        .select("portfolio_stats")
+        .eq("id", data.analysisId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      const prev =
+        existing && typeof existing.portfolio_stats === "object" && existing.portfolio_stats
+          ? (existing.portfolio_stats as Record<string, unknown>)
+          : {};
+      await supabase
+        .from("analyses")
+        .update({
+          portfolio_stats: { ...prev, action_plan: plan } as unknown as import("@/integrations/supabase/types").Json,
+        })
+        .eq("id", data.analysisId);
+    } catch (e) {
+      console.warn("[action-plan] failed to persist:", e);
+    }
+
+    return plan;
   });
 
 // âââ generateMergeInstructions ââââââââââââââââââââââââââââââââââ

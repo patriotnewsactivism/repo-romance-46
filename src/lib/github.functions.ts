@@ -3,6 +3,7 @@ import { getRequest } from "@tanstack/react-start/server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { createHmac } from "crypto";
 import { z } from "zod";
+import { computeHealthScore } from "@/lib/scoring";
 
 function hmac(userId: string) {
   const secret = process.env.GITHUB_CLIENT_SECRET;
@@ -207,8 +208,9 @@ export const getRepoHealth = createServerFn({ method: "GET" })
       /* ignore */
     }
 
-    // Check for tests (common test file patterns)
+    // Tree: tests + real README presence (not description)
     let hasTests = false;
+    let hasReadme = false;
     try {
       const treeRes = await fetch(
         `https://api.github.com/repos/${data.repo}/git/trees/${repo.default_branch as string}?recursive=1`,
@@ -217,70 +219,41 @@ export const getRepoHealth = createServerFn({ method: "GET" })
       if (treeRes.ok) {
         const tree = (await treeRes.json()) as { tree: Array<{ path: string }> };
         hasTests = tree.tree.some((t) => /test|spec|__tests__|\.test\.|\.spec\./i.test(t.path));
+        hasReadme = tree.tree.some((t) => /(^|\/)readme(\.|$)/i.test(t.path));
       }
     } catch {
       /* ignore */
     }
 
-    // Calculate health score
-    let score = 0;
-    const factors: { name: string; status: boolean; weight: number }[] = [];
-
-    // Has README
-    const hasReadme = !!repo.description;
-    factors.push({ name: "Has description", status: hasReadme, weight: 10 });
-    if (hasReadme) score += 10;
-
-    // Has CI
-    factors.push({ name: "CI configured", status: hasCI, weight: 20 });
-    if (hasCI) score += 20;
-
-    // Has tests
-    factors.push({ name: "Has tests", status: hasTests, weight: 20 });
-    if (hasTests) score += 20;
-
-    // Has license
-    factors.push({ name: "Has license", status: !!license, weight: 10 });
-    if (license) score += 10;
-
-    // Has topics
-    const hasTopics = (repo.topics as string[])?.length > 0;
-    factors.push({ name: "Has topics", status: hasTopics, weight: 10 });
-    if (hasTopics) score += 10;
-
-    // Recently pushed (within 3 months)
     const pushedAt = new Date(repo.pushed_at as string);
-    const recentlyPushed = Date.now() - pushedAt.getTime() < 90 * 24 * 60 * 60 * 1000;
-    factors.push({ name: "Active (pushed <3mo)", status: recentlyPushed, weight: 15 });
-    if (recentlyPushed) score += 15;
+    const daysSincePush = Number.isFinite(pushedAt.getTime())
+      ? Math.floor((Date.now() - pushedAt.getTime()) / (1000 * 60 * 60 * 24))
+      : null;
 
-    // Has stars
-    const hasStars = (repo.stargazers_count as number) > 0;
-    factors.push({ name: "Has stars", status: hasStars, weight: 5 });
-    if (hasStars) score += 5;
-
-    // Has homepage
-    const hasHomepage = !!repo.homepage;
-    factors.push({ name: "Has homepage/demo", status: hasHomepage, weight: 10 });
-    if (hasHomepage) score += 10;
+    const { healthScore, grade, factors } = computeHealthScore({
+      hasReadme,
+      hasDescription: !!repo.description,
+      hasCI,
+      hasTests,
+      hasLicense: !!license,
+      hasTopics: ((repo.topics as string[]) || []).length > 0,
+      daysSincePush,
+      stars: (repo.stargazers_count as number) ?? 0,
+      hasHomepage: !!repo.homepage,
+      openIssues: (repo.open_issues_count as number) ?? 0,
+      isArchived: !!repo.archived,
+    });
 
     return {
       repo: data.repo,
-      healthScore: score,
-      grade: (score >= 80
-        ? "A"
-        : score >= 60
-          ? "B"
-          : score >= 40
-            ? "C"
-            : score >= 20
-              ? "D"
-              : "F") as string,
+      healthScore,
+      grade,
       factors,
       ciProvider,
       license,
       hasTests,
       hasCI,
+      hasReadme,
       stars: (repo.stargazers_count as number) ?? 0,
       openIssues: (repo.open_issues_count as number) ?? 0,
       lastPush: (repo.pushed_at as string) ?? new Date().toISOString(),
