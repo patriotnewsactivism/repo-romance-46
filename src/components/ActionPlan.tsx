@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { useMutation } from "@tanstack/react-query";
-import { generateActionPlan } from "@/lib/analysis.functions";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { generateActionPlan, getAnalysis } from "@/lib/analysis.functions";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, Zap, Rocket, GitBranch, Target, Calendar } from "lucide-react";
@@ -29,11 +29,25 @@ export function ActionPlan({ analysisId }: { analysisId: string }) {
   const [plan, setPlan] = useState<ActionPlanData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const cached = useQuery({
+    queryKey: ["action-plan", analysisId],
+    queryFn: async () => {
+      const res = await getAnalysis({ data: { id: analysisId } });
+      const stats = (res.analysis as { portfolio_stats?: { action_plan?: ActionPlanData } })
+        ?.portfolio_stats;
+      return stats?.action_plan ?? null;
+    },
+    enabled: !!analysisId,
+  });
+
+  const effectivePlan = plan ?? cached.data ?? null;
+
   const mut = useMutation({
     mutationFn: () => fn({ data: { analysisId } }),
     onSuccess: (data) => {
       setPlan(data as unknown as ActionPlanData);
       setError(null);
+      cached.refetch();
     },
     onError: (e: Error) => {
       setError(e.message);
@@ -41,7 +55,16 @@ export function ActionPlan({ analysisId }: { analysisId: string }) {
     },
   });
 
-  if (!plan && !mut.isPending && !error) {
+  if (cached.isLoading && !effectivePlan) {
+    return (
+      <Card className="p-8 text-center">
+        <Loader2 className="h-6 w-6 animate-spin mx-auto text-primary" />
+        <p className="mt-3 text-sm text-muted-foreground font-mono">Loading saved plan…</p>
+      </Card>
+    );
+  }
+
+  if (!effectivePlan && !mut.isPending && !error) {
     return (
       <Card className="p-6 text-center space-y-4">
         <Target className="h-10 w-10 mx-auto text-primary" />
@@ -81,34 +104,39 @@ export function ActionPlan({ analysisId }: { analysisId: string }) {
     );
   }
 
-  if (!plan) return null;
+  if (!effectivePlan) return null;
 
   return (
     <div className="space-y-6">
       {/* Overview */}
       <Card className="p-5">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <Calendar className="h-5 w-5 text-primary" />
-            <span className="font-mono font-semibold">~{plan.total_weeks} weeks total</span>
+            <span className="font-mono font-semibold">~{effectivePlan.total_weeks} weeks total</span>
           </div>
-          <div className="text-xs font-mono text-muted-foreground">
-            {plan.phases.length} phases Â· {plan.quick_wins.length} quick wins Â·{" "}
-            {plan.moonshots.length} moonshots
+          <div className="flex items-center gap-3">
+            <div className="text-xs font-mono text-muted-foreground">
+              {effectivePlan.phases.length} phases · {effectivePlan.quick_wins.length} quick wins ·{" "}
+              {effectivePlan.moonshots.length} moonshots
+            </div>
+            <Button variant="outline" size="sm" onClick={() => mut.mutate()} disabled={mut.isPending}>
+              Regenerate
+            </Button>
           </div>
         </div>
       </Card>
 
       {/* Quick Wins + Moonshots */}
       <div className="grid gap-4 md:grid-cols-2">
-        {plan.quick_wins.length > 0 && (
+        {effectivePlan.quick_wins.length > 0 && (
           <Card className="p-5 space-y-2">
             <div className="flex items-center gap-2">
               <Zap className="h-4 w-4 text-primary" />
               <h3 className="font-mono text-sm font-semibold">Quick wins (&lt;1 week)</h3>
             </div>
             <ul className="space-y-1 text-sm">
-              {plan.quick_wins.map((w, i) => (
+              {effectivePlan.quick_wins.map((w, i) => (
                 <li key={i} className="flex gap-2">
                   <span className="text-primary">â¸</span>
                   <span>{w}</span>
@@ -117,14 +145,14 @@ export function ActionPlan({ analysisId }: { analysisId: string }) {
             </ul>
           </Card>
         )}
-        {plan.moonshots.length > 0 && (
+        {effectivePlan.moonshots.length > 0 && (
           <Card className="p-5 space-y-2">
             <div className="flex items-center gap-2">
               <Rocket className="h-4 w-4 text-primary" />
               <h3 className="font-mono text-sm font-semibold">Moonshots (highest reward)</h3>
             </div>
             <ul className="space-y-1 text-sm">
-              {plan.moonshots.map((m, i) => (
+              {effectivePlan.moonshots.map((m, i) => (
                 <li key={i} className="flex gap-2">
                   <span className="text-primary">â¸</span>
                   <span>{m}</span>
@@ -137,7 +165,7 @@ export function ActionPlan({ analysisId }: { analysisId: string }) {
 
       {/* Phases */}
       <div className="space-y-4">
-        {plan.phases.map((phase, i) => (
+        {effectivePlan.phases.map((phase, i) => (
           <Card key={i} className="p-5 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -171,14 +199,14 @@ export function ActionPlan({ analysisId }: { analysisId: string }) {
       </div>
 
       {/* Dependencies */}
-      {plan.dependencies.length > 0 && (
+      {effectivePlan.dependencies.length > 0 && (
         <Card className="p-5 space-y-3">
           <div className="flex items-center gap-2">
             <GitBranch className="h-4 w-4 text-muted-foreground" />
             <h3 className="font-mono text-sm font-semibold">Dependencies</h3>
           </div>
           <div className="space-y-2">
-            {plan.dependencies.map((dep, i) => (
+            {effectivePlan.dependencies.map((dep, i) => (
               <div key={i} className="text-sm">
                 <span className="font-mono text-xs">{dep.from_title}</span>
                 <span className="text-muted-foreground mx-2">â</span>

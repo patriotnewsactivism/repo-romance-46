@@ -5,15 +5,18 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import {
+  calculateCompletion as calcCompletionShared,
+  countFunctions,
+  detectStubs,
+  sampleSourceFiles,
+  type CompletionBreakdown,
+  type StubHit,
+} from "@/lib/scoring";
 
-// âââ Types âââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ── Types ──────────────────────────────────────────────────────────────────
 
-export interface StubDetection {
-  file: string;
-  line: number;
-  kind: "stub" | "todo" | "fixme" | "hack" | "unimplemented" | "placeholder";
-  snippet: string;
-}
+export type StubDetection = StubHit;
 
 export interface DependencyHealth {
   name: string;
@@ -45,14 +48,7 @@ export interface DeployReadiness {
   issues: string[];
 }
 
-export interface CompletionBreakdown {
-  percentage: number;
-  verdict: "abandoned-scaffolding" | "early-stage" | "half-built" | "mostly-done" | "shippable";
-  builtCount: number;
-  stubbedCount: number;
-  totalFunctions: number;
-  evidence: string[];
-}
+export type { CompletionBreakdown };
 
 export interface DeepAnalysisResult {
   repo: string;
@@ -101,86 +97,7 @@ async function ghRaw(token: string, repo: string, path: string): Promise<string 
   return res.text();
 }
 
-// âââ Stub / TODO / Incomplete Detection ââââââââââââââââââââââââ
-
-const STUB_PATTERNS: {
-  pattern: RegExp;
-  kind: StubDetection["kind"];
-}[] = [
-  { pattern: /\bTODO\b[:\s]/i, kind: "todo" },
-  { pattern: /\bFIXME\b[:\s]/i, kind: "fixme" },
-  { pattern: /\bHACK\b[:\s]/i, kind: "hack" },
-  { pattern: /\btodo!\(\)/i, kind: "todo" }, // Rust
-  { pattern: /\bunimplemented!\(\)/i, kind: "unimplemented" }, // Rust
-  { pattern: /\bNotImplementedError\b/i, kind: "unimplemented" }, // Python
-  { pattern: /throw new Error\(['"]not implemented/i, kind: "unimplemented" },
-  { pattern: /\/\/\s*stub\b/i, kind: "stub" },
-  { pattern: /\/\*\s*stub\b/i, kind: "stub" },
-  { pattern: /#\s*stub\b/i, kind: "stub" },
-  { pattern: /\bplaceholder\b/i, kind: "placeholder" },
-  { pattern: /\bconsole\.log\(['"]TODO/i, kind: "todo" },
-  { pattern: /pass\s*#\s*(todo|stub|placeholder)/i, kind: "stub" }, // Python
-];
-
-// Patterns indicating a function is just a stub body
-const STUB_BODY_PATTERNS = [
-  /^\s*\{\s*\}\s*$/, // empty braces
-  /^\s*\{\s*\/\/.*\}\s*$/, // braces with only a comment
-  /^\s*\{\s*return\s*(null|undefined|void 0|''|""|\{\}|\[\])\s*;?\s*\}\s*$/, // returns nothing useful
-  /^\s*\{\s*throw\s+new\s+Error\s*\(/, // throws "not implemented"
-  /^\s*pass\s*$/, // Python pass
-];
-
-function detectStubs(content: string, filePath: string): StubDetection[] {
-  const stubs: StubDetection[] = [];
-  const lines = content.split("\n");
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    for (const { pattern, kind } of STUB_PATTERNS) {
-      if (pattern.test(line)) {
-        stubs.push({
-          file: filePath,
-          line: i + 1,
-          kind,
-          snippet: line.trim().slice(0, 120),
-        });
-        break; // one match per line
-      }
-    }
-  }
-
-  return stubs;
-}
-
-// Count exported/declared functions and check if they're stubbed
-function countFunctions(content: string): { total: number; stubbed: number } {
-  // Match function declarations, arrow functions, class methods
-  const fnPatterns = [
-    /(?:export\s+)?(?:async\s+)?function\s+\w+/g,
-    /(?:export\s+)?const\s+\w+\s*=\s*(?:async\s+)?\(/g,
-    /(?:export\s+)?const\s+\w+\s*=\s*(?:async\s+)?\w+\s*=>/g,
-    /^\s+(?:async\s+)?\w+\s*\([^)]*\)\s*(?::\s*\w+)?\s*\{/gm, // class methods
-    /def\s+\w+\s*\(/g, // Python
-    /fn\s+\w+\s*\(/g, // Rust
-    /func\s+\w+\s*\(/g, // Go
-  ];
-
-  let total = 0;
-  for (const pattern of fnPatterns) {
-    const matches = content.match(pattern);
-    if (matches) total += matches.length;
-  }
-
-  // Count stubbed function bodies
-  let stubbed = 0;
-  for (const pattern of STUB_BODY_PATTERNS) {
-    const matches = content.match(pattern);
-    if (matches) stubbed += matches.length;
-  }
-
-  return { total, stubbed: Math.min(stubbed, total) };
-}
+// Stub/TODO detection + function counting: @/lib/scoring
 
 // âââ Dependency Health Check âââââââââââââââââââââââââââââââââââ
 
@@ -438,8 +355,7 @@ function checkDeployReadiness(
   };
 }
 
-// âââ Completion Percentage Calculation âââââââââââââââââââââââââ
-
+// Completion percentage — delegated to shared scoring
 function calculateCompletion(
   stubs: StubDetection[],
   testCoverage: TestCoverage,
@@ -448,121 +364,19 @@ function calculateCompletion(
   tree: { path: string; type: string }[],
   hasReadme: boolean,
   hasLicense: boolean,
+  majorBehindRatio?: number,
 ): CompletionBreakdown {
-  const evidence: string[] = [];
-  let score = 0;
-  const maxScore = 100;
-
-  const files = tree.filter((t) => t.type === "blob");
-  const sourceFiles = files.filter(
-    (f) =>
-      /\.(ts|tsx|js|jsx|py|go|rs|rb|java)$/.test(f.path) &&
-      !f.path.includes("node_modules") &&
-      !f.path.includes("dist") &&
-      !/test|spec|__tests__/i.test(f.path),
-  );
-
-  // 1. Source code completeness (40 points max)
-  const stubRatio =
-    functionCounts.total > 0 ? functionCounts.stubbed / functionCounts.total : 0;
-  const codeScore = Math.round((1 - stubRatio) * 40);
-  score += codeScore;
-  if (stubRatio > 0.5) {
-    evidence.push(
-      `${Math.round(stubRatio * 100)}% of detected functions are stubs or empty â most code is scaffolding`,
-    );
-  } else if (stubRatio > 0.2) {
-    evidence.push(
-      `${Math.round(stubRatio * 100)}% of functions are stubs â partially implemented`,
-    );
-  } else if (functionCounts.total > 0) {
-    evidence.push(
-      `${functionCounts.total - functionCounts.stubbed}/${functionCounts.total} functions appear implemented`,
-    );
-  }
-
-  // Penalize for TODO/FIXME density
-  const todosPerFile = sourceFiles.length > 0 ? stubs.length / sourceFiles.length : 0;
-  if (todosPerFile > 1) {
-    score -= 5;
-    evidence.push(`High density of TODOs/FIXMEs: ${stubs.length} across ${sourceFiles.length} files`);
-  }
-
-  // 2. Test coverage (20 points max)
-  if (testCoverage.hasTestFramework && testCoverage.testFileCount > 0) {
-    const testScore = Math.min(20, Math.round(testCoverage.testToSourceRatio * 40));
-    score += testScore;
-    evidence.push(
-      `${testCoverage.testFileCount} test files covering ${testCoverage.coveredPaths.length} directories`,
-    );
-  } else if (testCoverage.hasTestFramework) {
-    score += 5;
-    evidence.push("Test framework configured but no test files found");
-  } else {
-    evidence.push("No test framework or test files â cannot self-check");
-  }
-
-  // 3. Deploy readiness (20 points max)
-  let deployScore = 0;
-  if (deployReadiness.hasBuildScript) deployScore += 5;
-  if (deployReadiness.hasStartScript) deployScore += 3;
-  if (deployReadiness.hasBuildConfig) deployScore += 4;
-  if (deployReadiness.hasDeployConfig) deployScore += 5;
-  if (deployReadiness.hasEnvExample) deployScore += 3;
-  score += Math.min(20, deployScore);
-  if (deployReadiness.issues.length > 0) {
-    evidence.push(`Deploy issues: ${deployReadiness.issues.slice(0, 3).join("; ")}`);
-  } else {
-    evidence.push("Deploy configuration looks complete");
-  }
-
-  // 4. Documentation (10 points max)
-  let docScore = 0;
-  if (hasReadme) {
-    docScore += 6;
-    evidence.push("Has README");
-  } else {
-    evidence.push("Missing README");
-  }
-  if (hasLicense) {
-    docScore += 4;
-  } else {
-    evidence.push("Missing LICENSE");
-  }
-  score += docScore;
-
-  // 5. Project structure (10 points max)
-  const hasSrcDir = files.some((f) => f.path.startsWith("src/"));
-  const hasEntryPoint = files.some((f) =>
-    /^(src\/)?(index|main|app|server)\.(ts|tsx|js|jsx|py|go|rs)$/.test(f.path),
-  );
-  let structureScore = 0;
-  if (hasSrcDir) structureScore += 5;
-  if (hasEntryPoint) structureScore += 5;
-  score += structureScore;
-  if (!hasEntryPoint) evidence.push("No clear entry point found");
-
-  // Clamp and determine verdict
-  const percentage = Math.max(0, Math.min(maxScore, score));
-
-  let verdict: CompletionBreakdown["verdict"];
-  if (percentage < 15) verdict = "abandoned-scaffolding";
-  else if (percentage < 35) verdict = "early-stage";
-  else if (percentage < 60) verdict = "half-built";
-  else if (percentage < 85) verdict = "mostly-done";
-  else verdict = "shippable";
-
-  return {
-    percentage,
-    verdict,
-    builtCount: functionCounts.total - functionCounts.stubbed,
-    stubbedCount: functionCounts.stubbed,
-    totalFunctions: functionCounts.total,
-    evidence,
-  };
+  return calcCompletionShared({
+    stubs,
+    testCoverage,
+    deployReadiness,
+    functionCounts,
+    tree,
+    hasReadme,
+    hasLicense,
+    majorBehindRatio,
+  });
 }
-
-// âââ File Breakdown ââââââââââââââââââââââââââââââââââââââââââââ
 
 function categorizeFiles(tree: { path: string; type: string }[]) {
   const files = tree.filter((t) => t.type === "blob");
@@ -651,18 +465,19 @@ export const deepAnalyzeRepo = createServerFn({ method: "POST" })
 
     // 3. Identify key files to fetch for deep analysis
     const sourceExts = /\.(ts|tsx|js|jsx|py|go|rs|rb|java)$/;
-    const sourceFiles = blobs
-      .filter(
+    const sourceFiles = sampleSourceFiles(
+      blobs.filter(
         (f) =>
           sourceExts.test(f.path) &&
           !/test|spec|__tests__|\.test\.|\.spec\./i.test(f.path) &&
           !f.path.includes("dist") &&
           !f.path.includes(".next") &&
           !f.path.includes("node_modules"),
-      )
-      .sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+      ),
+      20,
+    );
 
-    // Fetch the top source files + key config files
+    // Fetch diverse source sample + key config files
     const filesToFetch = [
       "package.json",
       "README.md",
@@ -671,7 +486,7 @@ export const deepAnalyzeRepo = createServerFn({ method: "POST" })
       ".env.sample",
       ".env",
       "tsconfig.json",
-      ...sourceFiles.slice(0, 15).map((f) => f.path),
+      ...sourceFiles.map((f) => f.path),
     ].filter((p) => blobs.some((b) => b.path === p));
 
     const fileContents = await fetchFilesParallel(token, data.repo, filesToFetch, 5);
@@ -706,6 +521,10 @@ export const deepAnalyzeRepo = createServerFn({ method: "POST" })
     // 8. Calculate completion
     const hasReadme = blobs.some((f) => /^readme/i.test(f.path));
     const hasLicense = !!repoMeta.license || blobs.some((f) => /^license/i.test(f.path));
+    const majorBehindRatio =
+      depHealth.length > 0
+        ? depHealth.filter((d) => d.status === "major-behind").length / depHealth.length
+        : undefined;
     const completion = calculateCompletion(
       allStubs,
       testCoverage,
@@ -714,6 +533,7 @@ export const deepAnalyzeRepo = createServerFn({ method: "POST" })
       tree,
       hasReadme,
       hasLicense,
+      majorBehindRatio,
     );
 
     // 9. File breakdown

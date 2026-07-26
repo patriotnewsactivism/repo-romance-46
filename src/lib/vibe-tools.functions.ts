@@ -7,8 +7,12 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { callAI, resolveAIConfig } from "@/lib/ai-provider";
 import type { Json } from "@/integrations/supabase/types";
 import { logLearningEntry } from "@/lib/learning-log.functions";
+import {
+  calibrateValuationRange,
+  clampPct,
+  costReplacementBounds,
+} from "@/lib/scoring";
 
-const ASJSON = "as unknown as Json";
 type Ctx = { supabase: unknown; userId: string };
 
 // âââ shared helpers ââââââââââââââââââââââââââââââââââââââââââââ
@@ -143,16 +147,23 @@ export const assessMarketAndValue = createServerFn({ method: "POST" })
     const item = await loadItem(context.supabase as never, data.analysisId, data.itemRank);
     const aiConfig = await resolveAIConfig(context.supabase, context.userId);
 
+    const bounds = costReplacementBounds({
+      estimatedHours: item.estimated_hours,
+      marketPotential: item.market_potential,
+      completionPct: Math.max(10, 100 - item.effort * 15),
+    });
+
     const sys = `You are a market analyst and startup valuator. Given a software project idea derived from GitHub repos, produce:
 - a realistic TAM summary (1-2 sentences)
 - target users (3-5 concrete personas)
 - 3-5 direct competitors with URL + one-line differentiator
 - 2-4 monetization paths ranked by fit
-- demand_score 0-100 (real current market pull)
-- ship_readiness_score 0-100 (how close to launchable)
+- demand_score 0-100 (real current market pull — be conservative; 70+ requires clear demand evidence)
+- ship_readiness_score 0-100 (how close to launchable given effort/hours)
 - top risks (3-5 items)
 - verdict (ship_now | finish_first | combine_first | shelve)
 - USD valuation range as an indie/bootstrapped micro-SaaS acquisition target (low/mid/high) with reasoning
+Anchor valuation near cost-replacement guide when traction is unknown. Most ideas without users are worth under $50k.
 Be blunt and specific. No fluff.`;
 
     const usr = `Project: ${item.title}
@@ -160,8 +171,10 @@ Pitch: ${item.pitch}
 Kind: ${item.kind}
 Source repos: ${item.repos.join(", ")}
 Tech stack: ${item.tech_stack.join(", ") || "unknown"}
-Effort remaining (0-10): ${item.effort}
+Effort remaining (1-5): ${item.effort}
+Market potential (1-5): ${item.market_potential}
 Estimated hours: ${item.estimated_hours ?? "unknown"}
+Cost-replacement guide (USD): floor=${bounds.floor}, mid=${bounds.midpoint}, ceiling=${bounds.ceiling}
 Existing next steps: ${item.next_steps.slice(0, 5).join(" | ")}`;
 
     const resp = await callAI(
@@ -179,7 +192,39 @@ Existing next steps: ${item.next_steps.slice(0, 5).join(" | ")}`;
     );
 
     const parsed = JSON.parse(resp.content || "{}");
-    const { valuation, ...market } = parsed;
+    const { valuation: rawVal, ...marketRaw } = parsed;
+
+    // Clamp AI scores and calibrate USD range against cost-replacement bounds
+    const market = {
+      ...marketRaw,
+      demand_score: clampPct(Number(marketRaw.demand_score) || 0),
+      ship_readiness_score: clampPct(Number(marketRaw.ship_readiness_score) || 0),
+    };
+
+    const conf: "low" | "medium" | "high" =
+      market.demand_score >= 70 && market.ship_readiness_score >= 60
+        ? "high"
+        : market.demand_score >= 40
+          ? "medium"
+          : "low";
+
+    const calibrated = calibrateValuationRange(
+      Number(rawVal?.low_usd) || 0,
+      Number(rawVal?.high_usd) || 0,
+      bounds,
+      conf,
+    );
+    const mid = Math.round((calibrated.low + calibrated.high) / 2);
+    const valuation = {
+      low_usd: calibrated.low,
+      mid_usd: Math.min(Math.max(mid, calibrated.low), calibrated.high),
+      high_usd: calibrated.high,
+      reasoning:
+        (rawVal?.reasoning || "Calibrated estimate") +
+        ` ${calibrated.method_note}`,
+      confidence: conf,
+      cost_replacement_mid: bounds.midpoint,
+    };
 
     await updateItem(context.supabase, item.id, {
       market_analysis: market as Json,

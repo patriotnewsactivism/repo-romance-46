@@ -196,6 +196,78 @@ export const getRepoLearnings = createServerFn({ method: "GET" })
 
 // âââ Check if a fix pattern has been tried before ââââââââââââââ
 
+
+/**
+ * Internal helper — same logic as checkFixHistory server fn, callable from other server modules.
+ */
+export async function lookupFixHistory(
+  supabase: unknown,
+  userId: string,
+  repo: string,
+  fixPattern: string,
+): Promise<{
+  hasBeenTried: boolean;
+  previousAttempts: number;
+  failures: number;
+  lastAttempt: LearningEntry | null;
+  crossRepoInsight: {
+    pattern: string;
+    totalOccurrences: number;
+    recommendation: string;
+    confidence: number;
+  } | null;
+  warning: string | null;
+}> {
+  const sb = supabase as SupabaseOps;
+
+  const { data: record } = await sb
+    .from("repo_learnings")
+    .select("history")
+    .eq("user_id", userId)
+    .eq!("repo", repo)
+    .maybeSingle!();
+
+  const history = (record as { history: LearningEntry[] } | null)?.history ?? [];
+
+  const previousAttempts = history.filter(
+    (h) =>
+      h.fix_pattern &&
+      h.fix_pattern.toLowerCase().includes(fixPattern.toLowerCase()),
+  );
+
+  const failures = previousAttempts.filter((h) => h.outcome === "failure");
+
+  const { data: crossRepo } = await sb
+    .from("cross_repo_patterns")
+    .select("*")
+    .eq("user_id", userId)
+    .eq!("pattern", fixPattern)
+    .maybeSingle!();
+
+  const crossRepoData = crossRepo as CrossRepoPattern | null;
+
+  return {
+    hasBeenTried: previousAttempts.length > 0,
+    previousAttempts: previousAttempts.length,
+    failures: failures.length,
+    lastAttempt: previousAttempts.length > 0 ? previousAttempts[previousAttempts.length - 1] : null,
+    crossRepoInsight: crossRepoData
+      ? {
+          pattern: crossRepoData.pattern,
+          totalOccurrences: crossRepoData.occurrences.length,
+          recommendation: crossRepoData.recommendation,
+          confidence: crossRepoData.confidence,
+        }
+      : null,
+    warning:
+      failures.length > 0
+        ? `This fix pattern has failed ${failures.length} time(s) on this repo. ` +
+          `Last failure: "${failures[failures.length - 1].error_message || "unknown error"}". ` +
+          `Consider adjusting the approach.`
+        : null,
+  };
+}
+
 export const checkFixHistory = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator(
