@@ -1,5 +1,4 @@
 // Centralized AI provider routing — handles GitHub Models, OpenAI, Anthropic, Google.
-// Ported as-is from the original TanStack Start backend.
 
 export interface AIProviderConfig {
   provider: string; // "github_models" | "openai" | "anthropic" | "google" | "custom"
@@ -17,10 +16,12 @@ export interface AIRequest {
     };
   };
   model?: string; // override model
+  thinkingBudgetTokens?: number; // Anthropic extended thinking budget
 }
 
 export interface AIResponse {
   content: string;
+  thinkingContent?: string; // Anthropic thinking block (if extended thinking)
 }
 
 // Default models per provider
@@ -81,23 +82,40 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
   if (provider === "anthropic" && config.apiKey) {
     const systemMsg = request.messages.find((m) => m.role === "system")?.content || "";
     const userMessages = request.messages.filter((m) => m.role !== "system");
+    const useThinking = !!request.thinkingBudgetTokens && request.thinkingBudgetTokens > 0;
+    const thinkingBudget = request.thinkingBudgetTokens ?? 0;
 
     const body: Record<string, unknown> = {
       model,
-      max_tokens: 4096,
+      // Extended thinking requires max_tokens > budget_tokens; add 4096 for output
+      max_tokens: useThinking ? thinkingBudget + 4096 : 4096,
       system: systemMsg,
       messages: userMessages.map((m) => ({ role: m.role, content: m.content })),
     };
+
+    if (useThinking) {
+      body.thinking = { type: "enabled", budget_tokens: thinkingBudget };
+      // JSON schema response_format is incompatible with extended thinking
+      // (thinking interleaves with text blocks; structured output forces a single text format)
+    } else if (request.responseFormat) {
+      // Anthropic uses tool_choice for structured output — simpler: just ask in system prompt
+      // and parse the JSON content. Strict JSON schema enforcement is done client-side via Zod.
+    }
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "x-api-key": config.apiKey,
+      "anthropic-version": "2023-06-01",
+    };
+    if (useThinking) {
+      headers["anthropic-beta"] = "interleaved-thinking-2025-05-14";
+    }
 
     const res = await fetchWithRetry(
       PROVIDER_ENDPOINTS.anthropic,
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": config.apiKey,
-          "anthropic-version": "2023-06-01",
-        },
+        headers,
         body: JSON.stringify(body),
       },
       "anthropic",
@@ -108,8 +126,18 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       throw new Error(`Anthropic API error ${res.status}: ${text.slice(0, 300)}`);
     }
 
-    const json = (await res.json()) as { content: { text: string }[] };
-    return { content: json.content?.[0]?.text || "" };
+    const json = (await res.json()) as {
+      content: Array<{ type: string; text?: string; thinking?: string }>;
+    };
+
+    // Extended thinking returns multiple content blocks — extract text and thinking separately
+    const textBlock = json.content?.find((b) => b.type === "text");
+    const thinkingBlock = json.content?.find((b) => b.type === "thinking");
+
+    return {
+      content: textBlock?.text || json.content?.[0]?.text || "",
+      thinkingContent: thinkingBlock?.thinking,
+    };
   }
 
   if (provider === "google" && config.apiKey) {
@@ -154,6 +182,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       messages: request.messages,
     };
 
+    // o3/o4-mini/o3-mini support structured outputs via response_format just like gpt-4o
     if (request.responseFormat) {
       body.response_format = request.responseFormat;
     }

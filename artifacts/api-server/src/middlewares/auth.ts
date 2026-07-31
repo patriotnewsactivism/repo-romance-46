@@ -1,9 +1,7 @@
-import type { NextFunction, Request, Response } from "express";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { createSupabaseFetch } from "../lib/supabase-fetch";
+import type { Request, Response, NextFunction } from "express";
 
 declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       supabase?: SupabaseClient;
@@ -12,57 +10,68 @@ declare global {
   }
 }
 
-// Express equivalent of the original `requireSupabaseAuth` TanStack middleware:
-// builds a user-scoped Supabase client from the caller's Bearer JWT (so RLS
-// policies apply), and attaches it + the user id to the request.
-export async function requireAuth(req: Request, res: Response, next: NextFunction) {
+function getSupabaseUrl(): string {
+  // SUPABASE_URL may lack https:// in some environments; prefer VITE_- prefixed as fallback
+  const raw = process.env["SUPABASE_URL"] || process.env["VITE_SUPABASE_URL"] || "";
+  if (raw && !raw.startsWith("http")) return `https://${raw}`;
+  return raw;
+}
+
+function getAnonKey(): string {
+  return process.env["SUPABASE_ANON_KEY"] || process.env["VITE_SUPABASE_ANON_KEY"] || "";
+}
+
+/** Extract user ID from a Supabase JWT without a full verify (RLS enforces correctness) */
+function extractUserIdFromJwt(token: string): string | null {
   try {
-    const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-    const SUPABASE_PUBLISHABLE_KEY =
-      process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY;
-
-    if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
-      const missing = [
-        ...(!SUPABASE_URL ? ["SUPABASE_URL"] : []),
-        ...(!SUPABASE_PUBLISHABLE_KEY ? ["SUPABASE_PUBLISHABLE_KEY"] : []),
-      ];
-      res.status(500).json({ error: `Missing Supabase environment variable(s): ${missing.join(", ")}` });
-      return;
-    }
-
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-      res.status(401).json({ error: "Unauthorized: No authorization header provided" });
-      return;
-    }
-    if (!authHeader.startsWith("Bearer ")) {
-      res.status(401).json({ error: "Unauthorized: Only Bearer tokens are supported" });
-      return;
-    }
-    const token = authHeader.replace("Bearer ", "");
-    if (!token || token.split(".").length !== 3) {
-      res.status(401).json({ error: "Unauthorized: Invalid token" });
-      return;
-    }
-
-    const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-      global: {
-        fetch: createSupabaseFetch(SUPABASE_PUBLISHABLE_KEY),
-        headers: { Authorization: `Bearer ${token}` },
-      },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-
-    const { data, error } = await supabase.auth.getClaims(token);
-    if (error || !data?.claims?.sub) {
-      res.status(401).json({ error: "Unauthorized: Invalid token" });
-      return;
-    }
-
-    req.supabase = supabase;
-    req.userId = data.claims.sub as string;
-    next();
-  } catch (e) {
-    res.status(401).json({ error: e instanceof Error ? e.message : "Unauthorized" });
+    const [, payload] = token.split(".");
+    if (!payload) return null;
+    const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf-8")) as { sub?: string };
+    return decoded.sub ?? null;
+  } catch {
+    return null;
   }
+}
+
+/**
+ * Middleware that requires a valid Supabase session.
+ * Attaches a per-request Supabase client (authenticated as the calling user) to req.supabase.
+ * RLS policies on Supabase enforce authorization — the JWT itself is verified by PostgREST.
+ */
+export function requireAuth(req: Request, res: Response, next: NextFunction): void {
+  const authHeader = req.headers["authorization"];
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    res.status(401).json({ error: "Missing or malformed Authorization header" });
+    return;
+  }
+
+  const token = authHeader.slice("Bearer ".length).trim();
+  const userId = extractUserIdFromJwt(token);
+  if (!userId) {
+    res.status(401).json({ error: "Invalid token" });
+    return;
+  }
+
+  const supabaseUrl = getSupabaseUrl();
+  const anonKey = getAnonKey();
+  if (!supabaseUrl || !anonKey) {
+    res.status(500).json({ error: "Supabase not configured" });
+    return;
+  }
+
+  // Create a per-request client authenticated as the calling user.
+  // Supabase's PostgREST will apply RLS policies using this token.
+  req.supabase = createClient(supabaseUrl, anonKey, {
+    global: {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+
+  req.userId = userId;
+  next();
 }

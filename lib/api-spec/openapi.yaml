@@ -1,6 +1,5 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
   description: API specification
@@ -10,6 +9,12 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: github
+    description: GitHub connection
+  - name: analysis
+    description: Portfolio analysis
+  - name: preferences
+    description: User preferences
 paths:
   /healthz:
     get:
@@ -24,13 +29,597 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /github/status:
+    get:
+      operationId: getGithubStatus
+      tags: [github]
+      summary: Get GitHub connection status
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Connection info or null
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GithubStatus"
+
+  /github/portfolio-summary:
+    get:
+      operationId: getPortfolioSummary
+      tags: [github]
+      summary: Get portfolio summary stats
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Portfolio stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortfolioSummary"
+
+  /github/connect:
+    post:
+      operationId: connectGithub
+      tags: [github]
+      summary: Exchange OAuth code for GitHub access token
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GithubConnectInput"
+      responses:
+        "200":
+          description: Connected successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GithubConnection"
+
+  /github/connection:
+    delete:
+      operationId: disconnectGithub
+      tags: [github]
+      summary: Disconnect GitHub
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Disconnected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResult"
+
+  /analysis/run:
+    post:
+      operationId: runAnalysis
+      tags: [analysis]
+      summary: Start a new analysis
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Analysis started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisRunResult"
+
+  /analysis:
+    get:
+      operationId: listAnalyses
+      tags: [analysis]
+      summary: List all analyses for the current user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of analyses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AnalysisSummary"
+
+  /analysis/{id}:
+    get:
+      operationId: getAnalysis
+      tags: [analysis]
+      summary: Get a single analysis with its recommendations
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Analysis detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisDetail"
+    delete:
+      operationId: deleteAnalysis
+      tags: [analysis]
+      summary: Delete an analysis
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResult"
+
+  /analysis/{id}/rerun:
+    post:
+      operationId: rerunAnalysis
+      tags: [analysis]
+      summary: Run a fresh analysis based on an existing one
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: New analysis started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisRunResult"
+
+  /analysis/{id}/share:
+    post:
+      operationId: shareAnalysis
+      tags: [analysis]
+      summary: Toggle public sharing for an analysis
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShareInput"
+      responses:
+        "200":
+          description: Share result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShareResult"
+
+  /analysis/{id}/action-plan:
+    post:
+      operationId: getActionPlan
+      tags: [analysis]
+      summary: Generate a phased action plan for recommendations
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Action plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActionPlan"
+
+  /analysis/{id}/merge-instructions:
+    post:
+      operationId: getMergeInstructions
+      tags: [analysis]
+      summary: Generate merge/combine instructions for a recommendation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MergeInput"
+      responses:
+        "200":
+          description: Merge instructions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MergeInstructions"
+
+  /preferences:
+    get:
+      operationId: getPreferences
+      tags: [preferences]
+      summary: Get current user preferences
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Preferences
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserPreferences"
+    patch:
+      operationId: updatePreferences
+      tags: [preferences]
+      summary: Update user preferences
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PreferencesUpdate"
+      responses:
+        "200":
+          description: Updated preferences
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserPreferences"
+
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
   schemas:
     HealthStatus:
       type: object
+      required: [status]
       properties:
         status:
           type: string
-      required:
-        - status
 
+    GithubStatus:
+      type: object
+      properties:
+        connected:
+          type: boolean
+        login:
+          type: ["string", "null"]
+        avatarUrl:
+          type: ["string", "null"]
+        displayName:
+          type: ["string", "null"]
+        repoCount:
+          type: ["integer", "null"]
+      required: [connected]
+
+    PortfolioSummary:
+      type: object
+      properties:
+        repoCount:
+          type: integer
+        languages:
+          type: array
+          items:
+            type: object
+            required: [name, count]
+            properties:
+              name:
+                type: string
+              count:
+                type: integer
+        totalStars:
+          type: integer
+        lastPushed:
+          type: ["string", "null"]
+      required: [repoCount, languages, totalStars]
+
+    GithubConnectInput:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+
+    GithubConnection:
+      type: object
+      required: [login]
+      properties:
+        login:
+          type: string
+        avatarUrl:
+          type: ["string", "null"]
+        displayName:
+          type: ["string", "null"]
+
+    SuccessResult:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+
+    AnalysisRunResult:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+
+    AnalysisSummary:
+      type: object
+      required: [id, status, created_at]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [running, complete, failed]
+        repo_count:
+          type: ["integer", "null"]
+        created_at:
+          type: string
+        error:
+          type: ["string", "null"]
+        trigger_type:
+          type: ["string", "null"]
+        ai_provider:
+          type: ["string", "null"]
+
+    Recommendation:
+      type: object
+      required: [id, kind, title, repos, pitch, effort, market_potential, next_steps, rank]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [finish, combine, repurpose]
+        title:
+          type: string
+        repos:
+          type: array
+          items:
+            type: string
+        pitch:
+          type: string
+        effort:
+          type: integer
+        market_potential:
+          type: integer
+        next_steps:
+          type: array
+          items:
+            type: string
+        tech_stack:
+          type: array
+          items:
+            type: string
+        marketing_tweet:
+          type: ["string", "null"]
+        marketing_linkedin:
+          type: ["string", "null"]
+        estimated_hours:
+          type: ["integer", "null"]
+        rank:
+          type: integer
+
+    AnalysisDetail:
+      type: object
+      required: [analysis, items]
+      properties:
+        analysis:
+          type: object
+          required: [id, status, created_at]
+          properties:
+            id:
+              type: string
+            status:
+              type: string
+              enum: [running, complete, failed]
+            repo_count:
+              type: ["integer", "null"]
+            created_at:
+              type: string
+            completed_at:
+              type: ["string", "null"]
+            error:
+              type: ["string", "null"]
+            summary_md:
+              type: ["string", "null"]
+            portfolio_stats:
+              type: ["object", "null"]
+            developer_profile:
+              type: ["string", "null"]
+            generated_system_prompt:
+              type: ["string", "null"]
+            critique_md:
+              type: ["string", "null"]
+            strategy_summary:
+              type: ["string", "null"]
+            is_public:
+              type: ["boolean", "null"]
+            share_slug:
+              type: ["string", "null"]
+            analyzed_repo_names:
+              type: array
+              items:
+                type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Recommendation"
+
+    ShareInput:
+      type: object
+      required: [isPublic]
+      properties:
+        isPublic:
+          type: boolean
+
+    ShareResult:
+      type: object
+      required: [isPublic]
+      properties:
+        isPublic:
+          type: boolean
+        slug:
+          type: ["string", "null"]
+
+    ActionPlanItem:
+      type: object
+      required: [title, recommendation_index, why_now, key_deliverable]
+      properties:
+        title:
+          type: string
+        recommendation_index:
+          type: integer
+        why_now:
+          type: string
+        key_deliverable:
+          type: string
+
+    ActionPlanPhase:
+      type: object
+      required: [name, duration_weeks, items]
+      properties:
+        name:
+          type: string
+        duration_weeks:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActionPlanItem"
+
+    ActionPlan:
+      type: object
+      required: [total_weeks, phases]
+      properties:
+        total_weeks:
+          type: integer
+        phases:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActionPlanPhase"
+        quick_wins:
+          type: array
+          items:
+            type: string
+        moonshots:
+          type: array
+          items:
+            type: string
+
+    MergeInput:
+      type: object
+      required: [itemRank]
+      properties:
+        itemRank:
+          type: integer
+
+    MergeInstructions:
+      type: object
+      required: [instructions, newRepoName, mergedRepos]
+      properties:
+        instructions:
+          type: string
+        newRepoName:
+          type: string
+        newRepoUrl:
+          type: ["string", "null"]
+        primaryRepo:
+          type: ["string", "null"]
+        mergedRepos:
+          type: array
+          items:
+            type: string
+
+    UserPreferences:
+      type: object
+      properties:
+        email_notifications:
+          type: ["boolean", "null"]
+        schedule_enabled:
+          type: ["boolean", "null"]
+        schedule_frequency:
+          type: ["string", "null"]
+          enum: [weekly, monthly, null]
+        custom_ai_provider:
+          type: ["string", "null"]
+        custom_ai_key:
+          type: ["string", "null"]
+        filter_languages:
+          type: array
+          items:
+            type: string
+        filter_exclude_archived:
+          type: ["boolean", "null"]
+        filter_min_stars:
+          type: ["integer", "null"]
+        filter_max_repos:
+          type: ["integer", "null"]
+        analysis_tier:
+          type: ["string", "null"]
+          enum: [fast, balanced, deep, null]
+
+    PreferencesUpdate:
+      type: object
+      properties:
+        email_notifications:
+          type: boolean
+        schedule_enabled:
+          type: boolean
+        schedule_frequency:
+          type: string
+          enum: [weekly, monthly]
+        custom_ai_provider:
+          type: string
+        custom_ai_key:
+          type: ["string", "null"]
+        filter_languages:
+          type: array
+          items:
+            type: string
+        filter_exclude_archived:
+          type: boolean
+        filter_min_stars:
+          type: integer
+        filter_max_repos:
+          type: integer
+        analysis_tier:
+          type: string
+          enum: [fast, balanced, deep]

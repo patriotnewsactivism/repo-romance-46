@@ -1,0 +1,273 @@
+import { useEffect } from 'react';
+import { useLocation, Link } from 'wouter';
+import { useGetGithubStatus, useGetPortfolioSummary, useListAnalyses, useRunAnalysis } from '@workspace/api-client-react';
+import { getSession } from '@/lib/auth';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Badge } from '@/components/ui/badge';
+import { GitBranch, Plus, Star, Code, Clock, AlertCircle, CheckCircle, Loader2, Settings } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
+import { toast } from 'sonner';
+
+export default function Dashboard() {
+  const [, setLocation] = useLocation();
+  const { data: githubStatus, isLoading: githubLoading } = useGetGithubStatus();
+  const { data: portfolio, isLoading: portfolioLoading } = useGetPortfolioSummary();
+  const { data: analyses, isLoading: analysesLoading } = useListAnalyses();
+  const runAnalysis = useRunAnalysis();
+
+  useEffect(() => {
+    getSession().then(session => {
+      if (!session) {
+        setLocation('/auth');
+      }
+    });
+  }, [setLocation]);
+
+  const handleRunAnalysis = async () => {
+    runAnalysis.mutate(undefined, {
+      onSuccess: (data) => {
+        toast.success('Analysis started');
+        setLocation(`/analysis/${data.id}`);
+      },
+      onError: (error) => {
+        toast.error('Failed to start analysis', {
+          description: error.message
+        });
+      }
+    });
+  };
+
+  if (githubLoading) {
+    return (
+      <div className="min-h-screen bg-background dark">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <Skeleton className="h-8 w-64 mb-8" />
+          <div className="grid gap-4 md:grid-cols-3 mb-8">
+            <Skeleton className="h-32" />
+            <Skeleton className="h-32" />
+            <Skeleton className="h-32" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!githubStatus?.connected) {
+    return (
+      <div className="min-h-screen bg-background dark flex items-center justify-center p-4">
+        <Card className="max-w-md">
+          <CardHeader>
+            <CardTitle>GitHub Not Connected</CardTitle>
+            <CardDescription>Please connect your GitHub account to continue</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Link href="/auth">
+              <Button className="w-full">Connect GitHub</Button>
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background dark">
+      {/* Header */}
+      <div className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <div className="flex items-center gap-6">
+              <Link href="/dashboard" className="flex items-center gap-2">
+                <GitBranch className="w-6 h-6 text-primary" />
+                <span className="font-bold text-xl">RepoFinisher</span>
+              </Link>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <img 
+                  src={githubStatus.avatarUrl || ''} 
+                  alt={githubStatus.login || ''} 
+                  className="w-6 h-6 rounded-full"
+                />
+                <span>{githubStatus.displayName || githubStatus.login}</span>
+              </div>
+            </div>
+            <Link href="/settings">
+              <Button variant="ghost" size="sm" data-testid="button-settings">
+                <Settings className="w-4 h-4" />
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        {/* Stats */}
+        <div className="grid gap-4 md:grid-cols-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardDescription className="text-xs uppercase tracking-wide">Repositories</CardDescription>
+              <CardTitle className="text-3xl font-bold">
+                {portfolioLoading ? <Skeleton className="h-9 w-16" /> : portfolio?.repoCount || 0}
+              </CardTitle>
+            </CardHeader>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardDescription className="text-xs uppercase tracking-wide">Total Stars</CardDescription>
+              <CardTitle className="text-3xl font-bold">
+                {portfolioLoading ? <Skeleton className="h-9 w-16" /> : portfolio?.totalStars || 0}
+              </CardTitle>
+            </CardHeader>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardDescription className="text-xs uppercase tracking-wide">Languages</CardDescription>
+              <CardTitle className="text-3xl font-bold">
+                {portfolioLoading ? <Skeleton className="h-9 w-16" /> : portfolio?.languages.length || 0}
+              </CardTitle>
+            </CardHeader>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardDescription className="text-xs uppercase tracking-wide">Analyses</CardDescription>
+              <CardTitle className="text-3xl font-bold">
+                {analysesLoading ? <Skeleton className="h-9 w-16" /> : analyses?.length || 0}
+              </CardTitle>
+            </CardHeader>
+          </Card>
+        </div>
+
+        {/* Top languages */}
+        {!portfolioLoading && portfolio && portfolio.languages.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Top Languages</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-2">
+                {portfolio.languages.slice(0, 10).map(lang => (
+                  <Badge key={lang.name} variant="secondary" className="font-mono text-xs">
+                    {lang.name} <span className="ml-1 text-muted-foreground">({lang.count})</span>
+                  </Badge>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Run Analysis CTA */}
+        <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
+          <CardHeader>
+            <CardTitle>Run New Analysis</CardTitle>
+            <CardDescription>
+              AI will analyze your entire portfolio to find product opportunities
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button 
+              onClick={handleRunAnalysis} 
+              disabled={runAnalysis.isPending}
+              size="lg"
+              data-testid="button-run-analysis"
+            >
+              {runAnalysis.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Starting...
+                </>
+              ) : (
+                <>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Start Analysis
+                </>
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Analysis History */}
+        <div>
+          <h2 className="text-2xl font-bold mb-4">Analysis History</h2>
+          {analysesLoading ? (
+            <div className="space-y-4">
+              {[1, 2, 3].map(i => (
+                <Skeleton key={i} className="h-24" />
+              ))}
+            </div>
+          ) : analyses && analyses.length > 0 ? (
+            <div className="grid gap-4">
+              {analyses.map(analysis => (
+                <Link key={analysis.id} href={`/analysis/${analysis.id}`}>
+                  <Card className="hover:border-primary/40 transition-colors cursor-pointer" data-testid={`card-analysis-${analysis.id}`}>
+                    <CardContent className="pt-6">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1 space-y-2">
+                          <div className="flex items-center gap-3">
+                            {analysis.status === 'running' && (
+                              <Badge variant="secondary" className="bg-primary/10 text-primary border-primary/20">
+                                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                Running
+                              </Badge>
+                            )}
+                            {analysis.status === 'complete' && (
+                              <Badge variant="secondary" className="bg-green-500/10 text-green-500 border-green-500/20">
+                                <CheckCircle className="w-3 h-3 mr-1" />
+                                Complete
+                              </Badge>
+                            )}
+                            {analysis.status === 'failed' && (
+                              <Badge variant="destructive">
+                                <AlertCircle className="w-3 h-3 mr-1" />
+                                Failed
+                              </Badge>
+                            )}
+                            <span className="text-sm text-muted-foreground font-mono">
+                              {formatDistanceToNow(new Date(analysis.created_at), { addSuffix: true })}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                            {analysis.repo_count && (
+                              <div className="flex items-center gap-1">
+                                <Code className="w-4 h-4" />
+                                {analysis.repo_count} repos
+                              </div>
+                            )}
+                            {analysis.ai_provider && (
+                              <div className="font-mono text-xs">
+                                {analysis.ai_provider}
+                              </div>
+                            )}
+                          </div>
+                          {analysis.error && analysis.status === 'running' && (
+                            <p className="text-sm text-muted-foreground italic">
+                              {analysis.error}
+                            </p>
+                          )}
+                          {analysis.error && analysis.status === 'failed' && (
+                            <p className="text-sm text-destructive">
+                              {analysis.error}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <Card>
+              <CardContent className="pt-12 pb-12 text-center">
+                <p className="text-muted-foreground">No analyses yet. Run your first analysis to get started.</p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
