@@ -5,7 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { callAI, type AIProviderConfig } from "@/lib/ai-provider";
 
-// âââ Types ââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ─── Types ─────────────────────────────────────────────────────────
 
 export type EmployeeRole = "support" | "engineering" | "marketing" | "ops" | "product" | "sales";
 export type TaskType =
@@ -35,57 +35,115 @@ export interface EmployeeResult {
   sendSubject?: string;
 }
 
-// âââ Employee Profiles ââââââââââââââââââââââââââââââââââââââââ
+// ─── Employee Profiles ─────────────────────────────────────────────
 
 const EMPLOYEE_PROFILES: Record<EmployeeRole, { name: string; systemPrompt: string }> = {
   support: {
     name: "Sam",
-    systemPrompt: `You are Sam, the customer support agent for RepoFinisher (repofinish.vercel.app).
-RepoFinisher is a tool that connects to your GitHub, analyzes your repo portfolio, and recommends which repos to finish, combine, or repurpose. It also offers portfolio valuations.
+    systemPrompt: `You are Sam, Lead Customer Support Engineer for RepoFinisher (repofinish.vercel.app).
+RepoFinisher is an intelligent platform that connects to GitHub, analyzes repo portfolios, recommends actions (finish, combine, repurpose, archive), and provides valuation and health metrics.
 
-Key facts:
-- Free to use with GitHub Models (no API key needed)
-- Supports OpenAI, Anthropic, and Google as alternative AI providers
-- Users connect via GitHub OAuth
-- Analysis includes: repo recommendations, action plans, merge instructions, valuations, repo health scores
+Role & Focus:
+- Deliver warm, highly empathetic, technically precise support to developer users.
+- Guide users through GitHub OAuth setup, multi-provider AI config (GitHub Models, OpenAI, Anthropic, Google Gemini), portfolio analysis, and action plans.
+- Address user frustrations with actionable troubleshooting steps rather than generic platitudes.
 
-Be warm, helpful, and concise. If you don't know something, say so. Always sign off as "Sam from RepoFinisher".`,
+Reasoning Before Output Guidelines:
+- Before drafting your response, conduct an internal systematic check:
+  1. Identify the core user issue or query (technical error, feature inquiry, billing/tier question, or configuration issue).
+  2. Map out the relevant RepoFinisher capability or troubleshooting steps required.
+  3. Formulate a structured solution ensuring technical accuracy and tone consistency.
+- Keep your output helpful, empathetic, and clear.
+- Sign off consistently as "Sam from RepoFinisher".`,
   },
   engineering: {
     name: "Eli",
-    systemPrompt: `You are Eli, the engineering agent for RepoFinisher.
-The codebase uses TanStack Start (React + server functions), Supabase (auth + Postgres), GitHub OAuth, and Vercel deployment.
-Your job is to triage GitHub issues, classify severity, suggest fixes, and identify which issues are safe for automated PRs.
-Be technical and precise. Include code snippets when suggesting fixes.`,
+    systemPrompt: `You are Eli, Principal Software & Systems Architect for RepoFinisher.
+The RepoFinisher platform is built on TanStack Start (React + server functions), Supabase (Postgres + RLS + Auth), GitHub OAuth/REST API, and Vercel edge deployment.
+
+Role & Focus:
+- Perform deep technical triage on incoming GitHub issues, codebase bugs, and architecture tasks.
+- Classify bug severity, security impact, root causes, and regression risks.
+- Provide concrete typescript/react code fixes and evaluate whether issues are safe for automated pull requests.
+
+Reasoning Before Output Guidelines:
+- Before providing your answer, execute a technical analysis pass:
+  1. Parse the input issue/code snippet to pinpoint the exact failure mechanism or architecture gap.
+  2. Assess impact across the stack (TanStack Start server functions, Supabase RLS, AI provider call chains, or client components).
+  3. Formulate the minimal safe patch, verifying edge cases and type safety.
+- Include concise, production-ready code snippets and technical rationale in your response.`,
   },
   marketing: {
     name: "Maya",
-    systemPrompt: `You are Maya, the marketing agent for RepoFinisher.
-Create engaging, authentic content about RepoFinisher â tweets, LinkedIn posts, and blog ideas.
-RepoFinisher helps developers figure out what to do with their unfinished GitHub repos. It's like having an AI advisor for your code portfolio.
-Keep content genuine, not salesy. Use developer-friendly language. Include relevant hashtags.`,
+    systemPrompt: `You are Maya, Head of Growth & Developer Marketing at RepoFinisher.
+RepoFinisher helps developers unlock hidden value in abandoned or unfinished GitHub repositories using AI-driven portfolio evaluation, automated merge strategies, and market valuations.
+
+Role & Focus:
+- Craft high-converting, authentic content tailored specifically to software engineers, open-source maintainers, and indie hackers.
+- Translate technical capabilities (e.g., cross-repo synthesis, valuation models, automated step sequencing) into compelling developer narratives.
+- Maintain an authentic, developer-friendly voice—avoiding fluffy marketing buzzwords while maximizing engagement.
+
+Reasoning Before Output Guidelines:
+- Before outputting marketing materials, perform a content strategy check:
+  1. Analyze the target audience segment (indie hacker, open-source maintainer, tech lead).
+  2. Identify the key value hook (e.g., "monetize abandoned side projects", "automated codebase finishing").
+  3. Select optimal tone, structure, and relevant developer hashtags for the channel (X/Twitter, LinkedIn, technical blogs).
+- Ensure output is sharp, relatable, and actionable for developers.`,
   },
   ops: {
     name: "Oscar",
-    systemPrompt: `You are Oscar, the ops agent for RepoFinisher.
-You monitor deployment health, error logs, and system uptime. You alert on issues and track reliability.
-Be concise and action-oriented. Flag critical issues immediately. Include relevant URLs and error details.`,
+    systemPrompt: `You are Oscar, Staff Site Reliability & DevOps Engineer for RepoFinisher.
+RepoFinisher relies on multi-region API connectivity (GitHub REST, Vercel deployments, Supabase Postgres, and LLM provider endpoints like OpenAI/Anthropic/Gemini/GitHub Models).
+
+Role & Focus:
+- Monitor system health, error logs, API rate limits, deployment pipelines, and uptime metrics.
+- Rapidly diagnose operational incidents, database bottlenecks, edge function timeouts, and provider fallback triggers.
+- Provide crisp, actionable remediation plans and root-cause analysis for system failures.
+
+Reasoning Before Output Guidelines:
+- Prior to outputting incident reports or health evaluations, perform a triage pass:
+  1. Evaluate severity based on blast radius (total outage, degraded provider performance, single-user auth error).
+  2. Trace operational dependencies (Vercel deployment status, Supabase connection pool, GitHub API rate limits).
+  3. Determine short-term mitigations and long-term prevention steps.
+- Present clear status classifications, root causes, and immediate action items.`,
   },
   product: {
     name: "Piper",
-    systemPrompt: `You are Piper, the product agent for RepoFinisher.
-You analyze user feedback, support tickets, and usage patterns to suggest product improvements.
-Prioritize features by impact and effort. Track trends in user requests. Be data-driven and strategic.`,
+    systemPrompt: `You are Piper, VP of Product Strategy for RepoFinisher.
+RepoFinisher empowers developers to turn accumulated code debt and unfinished repositories into ship-ready products, market-ready startups, or consolidated monorepos.
+
+Role & Focus:
+- Synthesize user feedback, telemetry, support patterns, and market demands into prioritized product roadmaps.
+- Evaluate feature requests using RICE framework principles (Reach, Impact, Confidence, Effort).
+- Define product specifications, UX flows, and strategic trade-offs between automated autonomous features and manual developer controls.
+
+Reasoning Before Output Guidelines:
+- Before delivering product analysis or standup summaries, execute a product synthesis step:
+  1. Analyze raw feedback/activity logs for core themes and recurring pain points.
+  2. Estimate feature effort vs ROI and strategic alignment with developer retention.
+  3. Synthesize clear, data-informed product recommendations and prioritized action steps.
+- Maintain a structured, strategic, and metric-focused perspective.`,
   },
   sales: {
     name: "Sage",
-    systemPrompt: `You are Sage, the sales agent for RepoFinisher.
-You handle inbound sales inquiries, follow up with leads, and track conversion.
-Be professional but not pushy. Focus on value and fit. Qualify leads before scheduling demos.`,
+    systemPrompt: `You are Sage, Director of Enterprise & Developer Relations at RepoFinisher.
+RepoFinisher offers portfolio analysis, commercial code valuation, custom team integrations, and autonomous repo completion features for developer studios and engineering teams.
+
+Role & Focus:
+- Handle incoming sales inquiries, enterprise lead qualification, and consultative follow-ups.
+- Articulate the ROI of portfolio audit, code consolidation, and automated codebase completion to tech leads, CTOs, and indie studio founders.
+- Qualify leads based on team size, repo count, and intent without using pushy or high-pressure tactics.
+
+Reasoning Before Output Guidelines:
+- Before responding to lead inquiries or generating sales communications, perform a qualification assessment:
+  1. Determine lead intent, organization type, and budget/fit level.
+  2. Identify key value drivers relevant to the lead (e.g., team productivity, portfolio acquisition valuation).
+  3. Formulate a tailored response that provides immediate value and defines a clear, low-friction next step.
+- Deliver professional, value-centric, and consultative outreach.`,
   },
 };
 
-// âââ Task-Specific Prompt Builders ââââââââââââââââââââââââââââ
+// ─── Task-Specific Prompt Builders ─────────────────────────────────
 
 function buildPrompt(task: EmployeeTask): string {
   switch (task.taskType) {
@@ -163,7 +221,7 @@ Draft a follow-up message. Format as JSON:
   }
 }
 
-// âââ Core Dispatch Function âââââââââââââââââââââââââââââââââââ
+// ─── Core Dispatch Function ────────────────────────────────────────
 
 async function resolveAIConfig(
   supabase: any,
@@ -260,7 +318,7 @@ async function dispatchTask(
   };
 }
 
-// âââ Public API: Dispatch any employee task ââââââââââââââââââââ
+// ─── Public API: Dispatch any employee task ────────────────────────
 
 export const dispatchEmployeeTask = createServerFn({ method: "POST" })
   .validator((d: EmployeeTask) =>
@@ -277,177 +335,151 @@ export const dispatchEmployeeTask = createServerFn({ method: "POST" })
       ]),
       input: z.string(),
       metadata: z.record(z.unknown()).optional(),
-    }).parse(d),
+    }).parse(d)
   )
-  .handler(async ({ data }) => {
-    // Use service role for employee dispatch (no user context needed)
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!supabaseUrl || !supabaseKey) {
-      throw new Error("Supabase not configured");
-    }
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // Get GitHub token for AI fallback
-    let ghToken: string | null = null;
-    const { data: conn } = await supabase
-      .from("github_connections")
-      .select("access_token")
-      .limit(1)
-      .maybeSingle();
-    ghToken = conn?.access_token || null;
-
-    // Get a user ID for preferences (use first user)
-    const { data: firstUser } = await supabase
-      .from("user_preferences")
-      .select("user_id")
-      .limit(1)
-      .maybeSingle();
-    const userId = firstUser?.user_id || "";
-
-    const { config, fallbacks } = await resolveAIConfig(supabase, userId, ghToken);
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context, data }) => {
+    const { config, fallbacks } = await resolveAIConfig(
+      context.supabase,
+      context.user.id,
+      context.githubToken,
+    );
 
     const result = await dispatchTask(data, config, fallbacks);
+
+    // Log the employee task execution
+    await (context.supabase as any).from("employee_logs").insert({
+      user_id: context.user.id,
+      role: data.role,
+      employee_name: result.employeeName,
+      task_type: data.taskType,
+      input_text: data.input,
+      output_text: result.output,
+      summary: result.summary,
+      should_send: result.shouldSend,
+      send_to: result.sendTo,
+      send_subject: result.sendSubject,
+    });
 
     return result;
   });
 
-// âââ Cron-callable endpoint for scheduled employee work ââââââââ
+// ─── Automated Cron Handler ────────────────────────────────────────
 
-export const runEmployeeShift = createServerFn({ method: "GET" }).handler(async () => {
-  const request = getRequest();
-  const authHeader = request?.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
-    return { error: "Unauthorized", results: [] };
-  }
+export const runAutomatedEmployeeTasks = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const userId = context.user.id;
+    const ghToken = context.githubToken;
+    const { config, fallbacks } = await resolveAIConfig(context.supabase, userId, ghToken);
 
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !supabaseKey) {
-    return { error: "Supabase not configured", results: [] };
-  }
-  const supabase = createClient(supabaseUrl, supabaseKey);
+    // Get GitHub login if available
+    const { data: conn } = await (context.supabase as any)
+      .from("user_connections")
+      .select("github_login")
+      .eq("user_id", userId)
+      .maybeSingle();
 
-  // Get GitHub token
-  let ghToken: string | null = null;
-  const { data: conn } = await supabase
-    .from("github_connections")
-    .select("access_token, github_login")
-    .limit(1)
-    .maybeSingle();
-  ghToken = conn?.access_token || null;
+    const results: EmployeeResult[] = [];
 
-  const { data: firstUser } = await supabase
-    .from("user_preferences")
-    .select("user_id")
-    .limit(1)
-    .maybeSingle();
-  const userId = firstUser?.user_id || "";
-
-  const { config, fallbacks } = await resolveAIConfig(supabase, userId, ghToken);
-
-  const results: EmployeeResult[] = [];
-
-  // 1. Ops: Check deployment status
-  try {
-    const vercelUrl = process.env.APP_URL || "https://repofinish.vercel.app";
-    const response = await fetch(vercelUrl, { method: "HEAD", signal: AbortSignal.timeout(10000) });
-    const status = response.ok ? "healthy" : "degraded";
-    const opsResult = await dispatchTask(
-      {
-        role: "ops",
-        taskType: "deployment_check",
-        input: `Deployment URL: ${vercelUrl}\nHTTP Status: ${response.status}\nResponse time: ${response.headers.get("x-verel-id") || "unknown"}\nStatus: ${status}`,
-      },
-      config,
-      fallbacks,
-    );
-    results.push(opsResult);
-  } catch (e) {
-    const opsResult = await dispatchTask(
-      {
-        role: "ops",
-        taskType: "deployment_check",
-        input: `Deployment check FAILED. Error: ${(e as Error).message}. URL: ${process.env.APP_URL || "https://repofinish.vercel.app"}`,
-      },
-      config,
-      fallbacks,
-    );
-    results.push(opsResult);
-  }
-
-  // 2. Marketing: Create daily content
-  try {
-    const marketingResult = await dispatchTask(
-      {
-        role: "marketing",
-        taskType: "content_creation",
-        input: `Create content for today. RepoFinisher features: AI portfolio analysis, repo recommendations (finish/combine/repurpose), action plans, valuations, repo health scores, shareable analysis links. Today is ${new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}.`,
-      },
-      config,
-      fallbacks,
-    );
-    results.push(marketingResult);
-  } catch (e) {
-    console.error("[ai-employees] Marketing task failed:", e);
-  }
-
-  // 3. Engineering: Check GitHub issues (if we have a GitHub token)
-  if (ghToken && conn?.github_login) {
+    // 1. Ops: Check deployment status
     try {
-      const issuesResponse = await fetch(
-        `https://api.github.com/repos/patriotnewsactivism/repo-romance-46/issues?state=open&sort=created&direction=desc&per_page=5`,
-        { headers: { Authorization: `Bearer ${ghToken}`, Accept: "application/vnd.github.v3+json" } },
+      const appUrl = process.env.APP_URL || "https://repofinish.vercel.app";
+      const res = await fetch(appUrl, { method: "HEAD" });
+      const opsResult = await dispatchTask(
+        {
+          role: "ops",
+          taskType: "deployment_check",
+          input: `HTTP Status: ${res.status} ${res.statusText}. Target URL: ${appUrl}. Timestamp: ${new Date().toISOString()}`,
+        },
+        config,
+        fallbacks,
       );
-      if (issuesResponse.ok) {
-        const issues = await issuesResponse.json();
-        if (Array.isArray(issues) && issues.length > 0) {
-          const issuesText = issues
-            .map((i: Record<string, unknown>) =>
-              `#${i.number} [${(i.labels as Array<{ name: string }>)?.map(l => l.name).join(",") || "unlabeled"}] ${i.title}\n${(i.body as string || "").slice(0, 500)}\nCreated: ${i.created_at}`
-            )
-            .join("\n\n---\n\n");
-          const engResult = await dispatchTask(
-            {
-              role: "engineering",
-              taskType: "issue_triage",
-              input: `Open GitHub issues:\n${issuesText}`,
-            },
-            config,
-            fallbacks,
-          );
-          results.push(engResult);
-        }
-      }
+      results.push(opsResult);
     } catch (e) {
-      console.error("[ai-employees] Engineering task failed:", e);
+      const opsResult = await dispatchTask(
+        {
+          role: "ops",
+          taskType: "deployment_check",
+          input: `Deployment check FAILED. Error: ${(e as Error).message}. URL: ${process.env.APP_URL || "https://repofinish.vercel.app"}`,
+        },
+        config,
+        fallbacks,
+      );
+      results.push(opsResult);
     }
-  }
 
-  // 4. Daily standup
-  try {
-    const standupInput = results
-      .map(r => `${r.employeeName} (${r.role}): ${r.summary}`)
-      .join("\n");
-    const standupResult = await dispatchTask(
-      {
-        role: "product",
-        taskType: "daily_standup",
-        input: `Today's AI employee activity:\n${standupInput}`,
-      },
-      config,
-      fallbacks,
-    );
-    results.push(standupResult);
-  } catch (e) {
-    console.error("[ai-employees] Standup task failed:", e);
-  }
+    // 2. Marketing: Create daily content
+    try {
+      const marketingResult = await dispatchTask(
+        {
+          role: "marketing",
+          taskType: "content_creation",
+          input: `Create content for today. RepoFinisher features: AI portfolio analysis, repo recommendations (finish/combine/repurpose), action plans, valuations, repo health scores, shareable analysis links. Today is ${new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}.`,
+        },
+        config,
+        fallbacks,
+      );
+      results.push(marketingResult);
+    } catch (e) {
+      console.error("[ai-employees] Marketing task failed:", e);
+    }
 
-  return { results, ran: results.length };
-});
+    // 3. Engineering: Check GitHub issues (if we have a GitHub token)
+    if (ghToken && conn?.github_login) {
+      try {
+        const issuesResponse = await fetch(
+          `https://api.github.com/repos/patriotnewsactivism/repo-romance-46/issues?state=open&sort=created&direction=desc&per_page=5`,
+          { headers: { Authorization: `Bearer ${ghToken}`, Accept: "application/vnd.github.v3+json" } },
+        );
+        if (issuesResponse.ok) {
+          const issues = await issuesResponse.json();
+          if (Array.isArray(issues) && issues.length > 0) {
+            const issuesText = issues
+              .map((i: Record<string, unknown>) =>
+                `#${i.number} [${(i.labels as Array<{ name: string }>)?.map(l => l.name).join(",") || "unlabeled"}] ${i.title}\n${(i.body as string || "").slice(0, 500)}\nCreated: ${i.created_at}`
+              )
+              .join("\n\n---\n\n");
+            const engResult = await dispatchTask(
+              {
+                role: "engineering",
+                taskType: "issue_triage",
+                input: `Open GitHub issues:\n${issuesText}`,
+              },
+              config,
+              fallbacks,
+            );
+            results.push(engResult);
+          }
+        }
+      } catch (e) {
+        console.error("[ai-employees] Engineering task failed:", e);
+      }
+    }
 
-// âââ Get employee dashboard data ââââââââââââââââââââââââââââââ
+    // 4. Daily standup
+    try {
+      const standupInput = results
+        .map(r => `${r.employeeName} (${r.role}): ${r.summary}`)
+        .join("\n");
+      const standupResult = await dispatchTask(
+        {
+          role: "product",
+          taskType: "daily_standup",
+          input: `Today's AI employee activity:\n${standupInput}`,
+        },
+        config,
+        fallbacks,
+      );
+      results.push(standupResult);
+    } catch (e) {
+      console.error("[ai-employees] Standup task failed:", e);
+    }
+
+    return { results, ran: results.length };
+  });
+
+// ─── Get employee dashboard data ───────────────────────────────────
 
 export const getEmployeeDashboard = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
