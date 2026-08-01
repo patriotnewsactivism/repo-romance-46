@@ -13,9 +13,11 @@ import { VibeToolsPanel } from '@/components/vibe-tools-panel';
 interface RecommendationCardProps {
   recommendation: Recommendation;
   analysisId: string;
+  /** True on the unauthenticated public share page — hides actions that require a session. */
+  isPublic?: boolean;
 }
 
-export function RecommendationCard({ recommendation, analysisId }: RecommendationCardProps) {
+export function RecommendationCard({ recommendation, analysisId, isPublic = false }: RecommendationCardProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const getMergeInstructions = useGetMergeInstructions();
@@ -180,7 +182,7 @@ export function RecommendationCard({ recommendation, analysisId }: Recommendatio
             )}
 
             {/* One-click finish */}
-            {(recommendation.kind === 'finish' || recommendation.kind === 'repurpose') && (
+            {!isPublic && (recommendation.kind === 'finish' || recommendation.kind === 'repurpose') && (
               <div className="space-y-3">
                 <h4 className="font-semibold text-sm">Auto-Finish</h4>
                 {recommendation.repos.map((repo) => (
@@ -196,7 +198,7 @@ export function RecommendationCard({ recommendation, analysisId }: Recommendatio
             )}
 
             {/* Merge Instructions */}
-            {recommendation.kind === 'combine' && (
+            {!isPublic && recommendation.kind === 'combine' && (
               <div className="space-y-3">
                 {!showMerge ? (
                   <Button
@@ -236,12 +238,14 @@ export function RecommendationCard({ recommendation, analysisId }: Recommendatio
               </div>
             )}
 
-            <VibeToolsPanel
-              analysisId={analysisId}
-              itemRank={recommendation.rank}
-              kind={recommendation.kind}
-              repos={recommendation.repos}
-            />
+            {!isPublic && (
+              <VibeToolsPanel
+                analysisId={analysisId}
+                itemRank={recommendation.rank}
+                kind={recommendation.kind}
+                repos={recommendation.repos}
+              />
+            )}
           </CollapsibleContent>
         </Collapsible>
       </CardContent>

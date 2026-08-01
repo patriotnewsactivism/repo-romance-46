@@ -52,8 +52,34 @@ export function ValuationView({ analysisId }: { analysisId: string }) {
   };
 
   const data = existing.data;
+  // existing.isFetching covers both the very first load AND the background
+  // refetch triggered by invalidateQueries after a run — without it, the
+  // empty-state CTA below would briefly flash back on top of (or instead of)
+  // real data while either fetch is still in flight.
+  const isBusy = runValuation.isPending || existing.isFetching;
 
-  if (!data && !runValuation.isPending) {
+  if (isBusy && !data) {
+    return (
+      <Card className="p-6 space-y-3">
+        <div className="flex items-center gap-2">
+          <Loader2 className="h-5 w-5 animate-spin text-emerald-500" />
+          <h3 className="font-semibold">
+            {runValuation.isPending ? 'Valuing your portfolio...' : 'Loading valuation...'}
+          </h3>
+        </div>
+        {runValuation.isPending && (
+          <div className="text-xs text-muted-foreground space-y-1 pl-7">
+            <p>• Fetching GitHub metrics for each repo (stars, commits, CI, tests)</p>
+            <p>• Analyzing code quality, market potential, and traction signals</p>
+            <p>• Finding comparable acquisitions and exits</p>
+            <p>• Calculating estimated value ranges and revenue potential</p>
+          </div>
+        )}
+      </Card>
+    );
+  }
+
+  if (!data) {
     return (
       <Card className="p-6 space-y-4">
         <div className="flex items-center gap-2">
@@ -71,25 +97,6 @@ export function ValuationView({ analysisId }: { analysisId: string }) {
       </Card>
     );
   }
-
-  if (runValuation.isPending) {
-    return (
-      <Card className="p-6 space-y-3">
-        <div className="flex items-center gap-2">
-          <Loader2 className="h-5 w-5 animate-spin text-emerald-500" />
-          <h3 className="font-semibold">Valuing your portfolio...</h3>
-        </div>
-        <div className="text-xs text-muted-foreground space-y-1 pl-7">
-          <p>• Fetching GitHub metrics for each repo (stars, commits, CI, tests)</p>
-          <p>• Analyzing code quality, market potential, and traction signals</p>
-          <p>• Finding comparable acquisitions and exits</p>
-          <p>• Calculating estimated value ranges and revenue potential</p>
-        </div>
-      </Card>
-    );
-  }
-
-  if (!data) return null;
 
   return (
     <div className="space-y-4">
@@ -153,11 +160,12 @@ export function ValuationView({ analysisId }: { analysisId: string }) {
           Individual Repo Valuations ({data.repo_valuations.length})
         </h3>
         {data.repo_valuations.map((v, i) => (
-          <Card key={i} className="p-4 space-y-3">
+          <Card key={v.repo || i} className="p-4 space-y-3">
             {/* Header */}
             <div className="flex items-start justify-between gap-3">
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
+                  <span className="font-mono text-sm font-semibold">{v.repo}</span>
                   <span
                     className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-mono ${CONFIDENCE_STYLES[v.confidence]}`}
                   >

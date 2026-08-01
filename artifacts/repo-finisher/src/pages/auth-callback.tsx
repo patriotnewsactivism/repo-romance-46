@@ -3,6 +3,7 @@ import { useLocation } from 'wouter';
 import { supabase } from '@/integrations/supabase/client';
 import { useConnectGithub } from '@workspace/api-client-react';
 import { Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 
 export default function AuthCallback() {
   const [, setLocation] = useLocation();
@@ -46,8 +47,13 @@ export default function AuthCallback() {
         if (providerToken) {
           try {
             await connectGithub.mutateAsync({ data: { providerToken } });
-          } catch {
-            // Non-fatal — dashboard falls back to a "Connect GitHub" prompt.
+          } catch (connectError) {
+            // Non-fatal — dashboard falls back to a "Connect GitHub" prompt
+            // that re-triggers OAuth. Still surface it so it isn't a silent
+            // dead end.
+            toast.error('Could not finish connecting GitHub', {
+              description: connectError instanceof Error ? connectError.message : undefined,
+            });
           }
         }
 

@@ -91,10 +91,11 @@ export default function SharedAnalysis() {
           <div className="space-y-4">
             <h2 className="text-2xl font-bold">Recommendations ({items.length})</h2>
             {items.map(item => (
-              <RecommendationCard 
-                key={item.id} 
-                recommendation={item} 
+              <RecommendationCard
+                key={item.id}
+                recommendation={item}
                 analysisId={analysis.id}
+                isPublic
               />
             ))}
           </div>

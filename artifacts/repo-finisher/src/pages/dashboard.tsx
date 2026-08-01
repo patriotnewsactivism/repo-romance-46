@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useLocation, Link } from 'wouter';
 import { useGetGithubStatus, useGetPortfolioSummary, useListAnalyses, useRunAnalysis } from '@workspace/api-client-react';
-import { getSession } from '@/lib/auth';
+import { getSession, signInWithGitHub } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -55,6 +55,12 @@ export default function Dashboard() {
   }
 
   if (!githubStatus?.connected) {
+    // Note: this deliberately calls signInWithGitHub() directly rather than
+    // linking to /auth — the user already has a Supabase session at this
+    // point, and /auth's own redirect guard would bounce straight back to
+    // /dashboard without ever re-prompting GitHub OAuth, trapping the user
+    // in a loop. A fresh GitHub OAuth round-trip is what's actually needed
+    // to obtain a new provider_token for auth-callback.tsx to persist.
     return (
       <div className="min-h-screen bg-background dark flex items-center justify-center p-4">
         <Card className="max-w-md">
@@ -63,9 +69,9 @@ export default function Dashboard() {
             <CardDescription>Please connect your GitHub account to continue</CardDescription>
           </CardHeader>
           <CardContent>
-            <Link href="/auth">
-              <Button className="w-full">Connect GitHub</Button>
-            </Link>
+            <Button className="w-full" onClick={() => signInWithGitHub()} data-testid="button-connect-github">
+              Connect GitHub
+            </Button>
           </CardContent>
         </Card>
       </div>

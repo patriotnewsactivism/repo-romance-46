@@ -323,6 +323,10 @@ router.post(
         let valAiKey = prefs?.custom_ai_key || null;
         if (prefs?.custom_ai_provider === "github_models" && !valAiKey) valAiKey = conn.access_token;
         const valuation = await generateValuation(repo, metrics, analysisContext, prefs?.custom_ai_provider || "openai", valAiKey);
+        // Assigned here rather than trusted from the AI response — we already
+        // know which repo this is from the loop, and the AI JSON schema
+        // doesn't ask for it.
+        valuation.repo = repo;
 
         valuations.push(valuation);
       } catch (e) {

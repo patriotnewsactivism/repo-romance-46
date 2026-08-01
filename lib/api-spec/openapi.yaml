@@ -928,10 +928,12 @@ components:
       type: object
       required:
         [
-          estimated_value_low, estimated_value_high, currency, valuation_method,
+          repo, estimated_value_low, estimated_value_high, currency, valuation_method,
           confidence, factors, revenue_potential, comparables, risks, upsides, summary,
         ]
       properties:
+        repo:
+          type: string
         estimated_value_low:
           type: integer
         estimated_value_high:
