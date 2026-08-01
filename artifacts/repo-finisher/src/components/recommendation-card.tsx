@@ -192,6 +192,7 @@ export function RecommendationCard({ recommendation, analysisId, isPublic = fals
                     nextSteps={recommendation.next_steps}
                     analysisId={analysisId}
                     itemRank={recommendation.rank}
+                    initialResult={recommendation.finish_result}
                   />
                 ))}
               </div>
@@ -244,6 +245,13 @@ export function RecommendationCard({ recommendation, analysisId, isPublic = fals
                 itemRank={recommendation.rank}
                 kind={recommendation.kind}
                 repos={recommendation.repos}
+                existing={{
+                  market_analysis: recommendation.market_analysis,
+                  valuation: recommendation.valuation,
+                  vibe_spec: recommendation.vibe_spec,
+                  combine_result: recommendation.combine_result,
+                  finish_history: recommendation.finish_history,
+                }}
               />
             )}
           </CollapsibleContent>
