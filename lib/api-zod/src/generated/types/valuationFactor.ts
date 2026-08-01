@@ -6,6 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface GithubConnectInput {
-  providerToken: string;
+export interface ValuationFactor {
+  label: string;
+  score: number;
+  weight: number;
+  detail: string;
 }

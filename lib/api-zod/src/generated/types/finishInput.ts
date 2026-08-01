@@ -6,6 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface GithubConnectInput {
-  providerToken: string;
+export interface FinishInput {
+  repo: string;
+  nextSteps?: string[];
+  analysisId?: string;
+  itemRank?: number;
 }

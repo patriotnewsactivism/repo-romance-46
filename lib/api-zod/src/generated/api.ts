@@ -47,7 +47,7 @@ export const GetPortfolioSummaryResponse = zod.object({
  * @summary Exchange OAuth code for GitHub access token
  */
 export const ConnectGithubBody = zod.object({
-  "code": zod.string()
+  "providerToken": zod.string()
 })
 
 export const ConnectGithubResponse = zod.object({
@@ -262,6 +262,307 @@ export const UpdatePreferencesResponse = zod.object({
   "filter_min_stars": zod.number().nullish(),
   "filter_max_repos": zod.number().nullish(),
   "analysis_tier": zod.union([zod.literal('fast'),zod.literal('balanced'),zod.literal('deep'),zod.literal(null)]).nullish()
+})
+
+
+/**
+ * @summary Get a publicly shared analysis by its share slug
+ */
+export const GetPublicAnalysisParams = zod.object({
+  "slug": zod.coerce.string()
+})
+
+export const GetPublicAnalysisResponse = zod.object({
+  "analysis": zod.object({
+  "id": zod.string(),
+  "status": zod.enum(['running', 'complete', 'failed']),
+  "repo_count": zod.number().nullish(),
+  "created_at": zod.string(),
+  "completed_at": zod.string().nullish(),
+  "error": zod.string().nullish(),
+  "summary_md": zod.string().nullish(),
+  "portfolio_stats": zod.object({
+
+}).passthrough().nullish(),
+  "developer_profile": zod.string().nullish(),
+  "generated_system_prompt": zod.string().nullish(),
+  "critique_md": zod.string().nullish(),
+  "strategy_summary": zod.string().nullish(),
+  "is_public": zod.boolean().nullish(),
+  "share_slug": zod.string().nullish(),
+  "analyzed_repo_names": zod.array(zod.string()).optional()
+}),
+  "items": zod.array(zod.object({
+  "id": zod.string(),
+  "kind": zod.enum(['finish', 'combine', 'repurpose']),
+  "title": zod.string(),
+  "repos": zod.array(zod.string()),
+  "pitch": zod.string(),
+  "effort": zod.number(),
+  "market_potential": zod.number(),
+  "next_steps": zod.array(zod.string()),
+  "tech_stack": zod.array(zod.string()).optional(),
+  "marketing_tweet": zod.string().nullish(),
+  "marketing_linkedin": zod.string().nullish(),
+  "estimated_hours": zod.number().nullish(),
+  "rank": zod.number()
+}))
+})
+
+
+/**
+ * @summary Have AI generate and commit improvements to a repo, opening a PR
+ */
+export const FinishRepoBody = zod.object({
+  "repo": zod.string(),
+  "nextSteps": zod.array(zod.string()).optional(),
+  "analysisId": zod.string().optional(),
+  "itemRank": zod.number().optional()
+})
+
+export const FinishRepoResponse = zod.object({
+  "repo": zod.string(),
+  "branch": zod.string(),
+  "pr_url": zod.string(),
+  "pr_number": zod.number(),
+  "files_changed": zod.number(),
+  "additions": zod.number(),
+  "deletions": zod.number(),
+  "summary": zod.string(),
+  "changes": zod.array(zod.object({
+  "file": zod.string(),
+  "status": zod.enum(['created', 'modified', 'deleted']),
+  "description": zod.string()
+}))
+})
+
+
+/**
+ * @summary Check whether a repo has previously been finished
+ */
+export const GetRepoFinisherStatusQueryParams = zod.object({
+  "repo": zod.coerce.string()
+})
+
+export const GetRepoFinisherStatusResponse = zod.object({
+  "repo": zod.string(),
+  "hasBeenFinished": zod.boolean(),
+  "finishes": zod.array(zod.object({
+  "repo": zod.string(),
+  "branch": zod.string(),
+  "pr_url": zod.string(),
+  "pr_number": zod.number(),
+  "files_changed": zod.number(),
+  "additions": zod.number(),
+  "deletions": zod.number(),
+  "summary": zod.string(),
+  "changes": zod.array(zod.object({
+  "file": zod.string(),
+  "status": zod.enum(['created', 'modified', 'deleted']),
+  "description": zod.string()
+}))
+}))
+})
+
+
+/**
+ * @summary Run an AI valuation of an analysis's finish/repurpose repos
+ */
+export const RunValuationParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const RunValuationResponse = zod.object({
+  "total_estimated_value_low": zod.number(),
+  "total_estimated_value_high": zod.number(),
+  "currency": zod.string(),
+  "repo_valuations": zod.array(zod.object({
+  "estimated_value_low": zod.number(),
+  "estimated_value_high": zod.number(),
+  "currency": zod.string(),
+  "valuation_method": zod.string(),
+  "confidence": zod.enum(['low', 'medium', 'high']),
+  "factors": zod.array(zod.object({
+  "label": zod.string(),
+  "score": zod.number(),
+  "weight": zod.number(),
+  "detail": zod.string()
+})),
+  "revenue_potential": zod.object({
+  "model": zod.string(),
+  "monthly_revenue_low": zod.number(),
+  "monthly_revenue_high": zod.number(),
+  "timeline": zod.string()
+}),
+  "comparables": zod.array(zod.object({
+  "name": zod.string(),
+  "outcome": zod.string(),
+  "multiple": zod.string(),
+  "relevance": zod.string()
+})),
+  "risks": zod.array(zod.string()),
+  "upsides": zod.array(zod.string()),
+  "summary": zod.string()
+})),
+  "portfolio_summary": zod.string(),
+  "top_picks": zod.array(zod.object({
+  "repo": zod.string(),
+  "reason": zod.string()
+})),
+  "diversification_score": zod.number(),
+  "recommendation": zod.string()
+})
+
+
+/**
+ * @summary Get a previously computed portfolio valuation
+ */
+export const GetValuationParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const GetValuationResponse = zod.union([zod.object({
+  "total_estimated_value_low": zod.number(),
+  "total_estimated_value_high": zod.number(),
+  "currency": zod.string(),
+  "repo_valuations": zod.array(zod.object({
+  "estimated_value_low": zod.number(),
+  "estimated_value_high": zod.number(),
+  "currency": zod.string(),
+  "valuation_method": zod.string(),
+  "confidence": zod.enum(['low', 'medium', 'high']),
+  "factors": zod.array(zod.object({
+  "label": zod.string(),
+  "score": zod.number(),
+  "weight": zod.number(),
+  "detail": zod.string()
+})),
+  "revenue_potential": zod.object({
+  "model": zod.string(),
+  "monthly_revenue_low": zod.number(),
+  "monthly_revenue_high": zod.number(),
+  "timeline": zod.string()
+}),
+  "comparables": zod.array(zod.object({
+  "name": zod.string(),
+  "outcome": zod.string(),
+  "multiple": zod.string(),
+  "relevance": zod.string()
+})),
+  "risks": zod.array(zod.string()),
+  "upsides": zod.array(zod.string()),
+  "summary": zod.string()
+})),
+  "portfolio_summary": zod.string(),
+  "top_picks": zod.array(zod.object({
+  "repo": zod.string(),
+  "reason": zod.string()
+})),
+  "diversification_score": zod.number(),
+  "recommendation": zod.string()
+}),zod.null()])
+
+
+/**
+ * @summary Assess market fit and valuation for a single recommendation
+ */
+export const AssessMarketAndValueBody = zod.object({
+  "analysisId": zod.string(),
+  "itemRank": zod.number()
+})
+
+export const AssessMarketAndValueResponse = zod.object({
+  "market": zod.object({
+  "tam_summary": zod.string(),
+  "target_users": zod.array(zod.string()),
+  "competitors": zod.array(zod.object({
+  "name": zod.string(),
+  "url": zod.string(),
+  "differentiator": zod.string()
+})),
+  "monetization": zod.array(zod.string()),
+  "demand_score": zod.number(),
+  "ship_readiness_score": zod.number(),
+  "risks": zod.array(zod.string()),
+  "verdict": zod.enum(['ship_now', 'finish_first', 'combine_first', 'shelve'])
+}),
+  "valuation": zod.object({
+  "low_usd": zod.number(),
+  "mid_usd": zod.number(),
+  "high_usd": zod.number(),
+  "reasoning": zod.string()
+})
+})
+
+
+/**
+ * @summary Generate a ready-to-ship product spec for a recommendation
+ */
+export const GenerateVibeSpecBody = zod.object({
+  "analysisId": zod.string(),
+  "itemRank": zod.number()
+})
+
+export const GenerateVibeSpecResponse = zod.object({
+  "product_name": zod.string(),
+  "tagline": zod.string(),
+  "prd_md": zod.string(),
+  "lovable_prompt": zod.string(),
+  "landing_hero": zod.string(),
+  "landing_subhead": zod.string(),
+  "landing_bullets": zod.array(zod.string()),
+  "cta": zod.string(),
+  "launch_checklist": zod.array(zod.string())
+})
+
+
+/**
+ * @summary Create a new combined repo from a "combine" recommendation's source repos
+ */
+export const CombineReposBody = zod.object({
+  "analysisId": zod.string(),
+  "itemRank": zod.number()
+})
+
+export const CombineReposResponse = zod.object({
+  "combined_repo": zod.string(),
+  "combined_url": zod.string(),
+  "source_issues": zod.array(zod.object({
+  "repo": zod.string(),
+  "url": zod.string()
+})),
+  "structure": zod.array(zod.object({
+  "path": zod.string(),
+  "purpose": zod.string()
+})),
+  "integration_plan_md": zod.string()
+})
+
+
+/**
+ * @summary Run multiple sequential AI-finish passes on a repo
+ */
+export const iterativeFinishBodyPassesMax = 4;
+
+
+
+export const IterativeFinishBody = zod.object({
+  "analysisId": zod.string(),
+  "itemRank": zod.number(),
+  "repo": zod.string(),
+  "passes": zod.number().min(1).max(iterativeFinishBodyPassesMax).optional()
+})
+
+export const IterativeFinishResponse = zod.object({
+  "history": zod.array(zod.object({
+  "pass": zod.number(),
+  "pr_url": zod.string().optional(),
+  "pr_number": zod.number().optional(),
+  "files_changed": zod.number().optional(),
+  "summary": zod.string().optional(),
+  "error": zod.string().optional()
+})),
+  "passes_completed": zod.number()
 })
 
 

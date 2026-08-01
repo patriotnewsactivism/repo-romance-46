@@ -35,7 +35,7 @@ export interface PortfolioSummary {
 }
 
 export interface GithubConnectInput {
-  code: string;
+  providerToken: string;
 }
 
 export interface GithubConnection {
@@ -272,4 +272,207 @@ export interface PreferencesUpdate {
   filter_max_repos?: number;
   analysis_tier?: PreferencesUpdateAnalysisTier;
 }
+
+export interface FinishInput {
+  repo: string;
+  nextSteps?: string[];
+  analysisId?: string;
+  itemRank?: number;
+}
+
+export type FinishChangeStatus = typeof FinishChangeStatus[keyof typeof FinishChangeStatus];
+
+
+export const FinishChangeStatus = {
+  created: 'created',
+  modified: 'modified',
+  deleted: 'deleted',
+} as const;
+
+export interface FinishChange {
+  file: string;
+  status: FinishChangeStatus;
+  description: string;
+}
+
+export interface FinishResult {
+  repo: string;
+  branch: string;
+  pr_url: string;
+  pr_number: number;
+  files_changed: number;
+  additions: number;
+  deletions: number;
+  summary: string;
+  changes: FinishChange[];
+}
+
+export interface RepoFinisherStatus {
+  repo: string;
+  hasBeenFinished: boolean;
+  finishes: FinishResult[];
+}
+
+export interface ValuationFactor {
+  label: string;
+  score: number;
+  weight: number;
+  detail: string;
+}
+
+export interface ValuationRevenuePotential {
+  model: string;
+  monthly_revenue_low: number;
+  monthly_revenue_high: number;
+  timeline: string;
+}
+
+export interface ValuationComparable {
+  name: string;
+  outcome: string;
+  multiple: string;
+  relevance: string;
+}
+
+export type ValuationConfidence = typeof ValuationConfidence[keyof typeof ValuationConfidence];
+
+
+export const ValuationConfidence = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
+
+export interface Valuation {
+  estimated_value_low: number;
+  estimated_value_high: number;
+  currency: string;
+  valuation_method: string;
+  confidence: ValuationConfidence;
+  factors: ValuationFactor[];
+  revenue_potential: ValuationRevenuePotential;
+  comparables: ValuationComparable[];
+  risks: string[];
+  upsides: string[];
+  summary: string;
+}
+
+export interface PortfolioValuationTopPick {
+  repo: string;
+  reason: string;
+}
+
+export interface PortfolioValuation {
+  total_estimated_value_low: number;
+  total_estimated_value_high: number;
+  currency: string;
+  repo_valuations: Valuation[];
+  portfolio_summary: string;
+  top_picks: PortfolioValuationTopPick[];
+  diversification_score: number;
+  recommendation: string;
+}
+
+export interface VibeToolsItemInput {
+  analysisId: string;
+  itemRank: number;
+}
+
+export interface MarketCompetitor {
+  name: string;
+  url: string;
+  differentiator: string;
+}
+
+export type MarketAnalysisVerdict = typeof MarketAnalysisVerdict[keyof typeof MarketAnalysisVerdict];
+
+
+export const MarketAnalysisVerdict = {
+  ship_now: 'ship_now',
+  finish_first: 'finish_first',
+  combine_first: 'combine_first',
+  shelve: 'shelve',
+} as const;
+
+export interface MarketAnalysis {
+  tam_summary: string;
+  target_users: string[];
+  competitors: MarketCompetitor[];
+  monetization: string[];
+  demand_score: number;
+  ship_readiness_score: number;
+  risks: string[];
+  verdict: MarketAnalysisVerdict;
+}
+
+export interface MarketValuation {
+  low_usd: number;
+  mid_usd: number;
+  high_usd: number;
+  reasoning: string;
+}
+
+export interface MarketAndValueResult {
+  market: MarketAnalysis;
+  valuation: MarketValuation;
+}
+
+export interface VibeSpec {
+  product_name: string;
+  tagline: string;
+  prd_md: string;
+  lovable_prompt: string;
+  landing_hero: string;
+  landing_subhead: string;
+  landing_bullets: string[];
+  cta: string;
+  launch_checklist: string[];
+}
+
+export interface CombineStructureNode {
+  path: string;
+  purpose: string;
+}
+
+export interface CombineSourceIssue {
+  repo: string;
+  url: string;
+}
+
+export interface CombineResult {
+  combined_repo: string;
+  combined_url: string;
+  source_issues: CombineSourceIssue[];
+  structure: CombineStructureNode[];
+  integration_plan_md: string;
+}
+
+export interface IterativeFinishInput {
+  analysisId: string;
+  itemRank: number;
+  repo: string;
+  /**
+     * @minimum 1
+     * @maximum 4
+     */
+  passes?: number;
+}
+
+export interface IterativeFinishPass {
+  pass: number;
+  pr_url?: string;
+  pr_number?: number;
+  files_changed?: number;
+  summary?: string;
+  error?: string;
+}
+
+export interface IterativeFinishResult {
+  history: IterativeFinishPass[];
+  passes_completed: number;
+}
+
+export type GetRepoFinisherStatusParams = {
+repo: string;
+};
 

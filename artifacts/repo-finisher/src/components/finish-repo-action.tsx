@@ -1,69 +1,43 @@
-import { useMutation } from "@tanstack/react-query";
-import { finishRepo } from "@/lib/api-client";
+import { useState } from "react";
+import { useFinishRepo, type FinishResult } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Rocket, Loader2, GitBranch, ExternalLink, FileCode, CheckCircle2 } from "lucide-react";
-import { useState } from "react";
 import { toast } from "sonner";
 
-interface RepoFinisherProps {
+interface FinishRepoActionProps {
   repo: string;
   nextSteps?: string[];
   analysisId?: string;
   itemRank?: number;
-  kind?: string;
 }
 
-interface FinishResult {
-  repo: string;
-  branch: string;
-  pr_url: string;
-  pr_number: number;
-  files_changed: number;
-  summary: string;
-  changes: {
-    file: string;
-    status: "created" | "modified" | "deleted";
-    description: string;
-  }[];
-}
-
-export function RepoFinisher({ repo, nextSteps, analysisId, itemRank, kind }: RepoFinisherProps) {
+export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank }: FinishRepoActionProps) {
   const [result, setResult] = useState<FinishResult | null>(null);
   const [showDetails, setShowDetails] = useState(false);
+  const finishRepo = useFinishRepo();
 
-  const finishMut = useMutation({
-    mutationFn: () =>
-      finishRepo({
-        repo,
-        nextSteps,
-        analysisId,
-        itemRank,
-      }),
-    onSuccess: (data) => {
-      const r = data as unknown as FinishResult;
-      setResult(r);
-      toast.success(`PR #${r.pr_number} opened on ${repo}`);
-    },
-    onError: (e: Error) => {
-      toast.error(e.message.slice(0, 200));
-    },
-  });
-
-  // Only show for "finish" kind recommendations
-  if (kind && kind !== "finish") return null;
+  const handleFinish = () => {
+    finishRepo.mutate(
+      { data: { repo, nextSteps, analysisId, itemRank } },
+      {
+        onSuccess: (data) => {
+          setResult(data);
+          toast.success(`PR #${data.pr_number} opened on ${repo}`);
+        },
+        onError: (error) => {
+          toast.error(error.message.slice(0, 200));
+        },
+      },
+    );
+  };
 
   return (
     <div className="space-y-3">
       {!result && (
-        <Button
-          onClick={() => finishMut.mutate()}
-          disabled={finishMut.isPending}
-          className="gap-2"
-          size="sm"
-        >
-          {finishMut.isPending ? (
+        <Button onClick={handleFinish} disabled={finishRepo.isPending} className="gap-2" size="sm" data-testid={`button-finish-${repo}`}>
+          {finishRepo.isPending ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
               Finishing {repo.split("/")[1]}...
@@ -71,13 +45,13 @@ export function RepoFinisher({ repo, nextSteps, analysisId, itemRank, kind }: Re
           ) : (
             <>
               <Rocket className="h-4 w-4" />
-              Auto-Finish This Repo
+              Auto-Finish {repo.split("/")[1]}
             </>
           )}
         </Button>
       )}
 
-      {finishMut.isPending && (
+      {finishRepo.isPending && (
         <Card className="p-4 space-y-2">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-3 w-3 animate-spin" />
@@ -149,19 +123,10 @@ export function RepoFinisher({ repo, nextSteps, analysisId, itemRank, kind }: Re
             )}
           </div>
 
-          {!result && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setResult(null);
-              }}
-              className="gap-2"
-            >
-              <Rocket className="h-3.5 w-3.5" />
-              Run Again
-            </Button>
-          )}
+          <Button variant="outline" size="sm" onClick={() => setResult(null)} className="gap-2">
+            <Rocket className="h-3.5 w-3.5" />
+            Run Again
+          </Button>
         </Card>
       )}
     </div>

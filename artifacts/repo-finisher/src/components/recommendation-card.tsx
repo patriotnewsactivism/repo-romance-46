@@ -7,6 +7,8 @@ import { useGetMergeInstructions } from '@workspace/api-client-react';
 import { Recommendation } from '@workspace/api-client-react';
 import { ChevronDown, ChevronUp, Target, Zap, GitMerge, Loader2, Twitter, Linkedin } from 'lucide-react';
 import { toast } from 'sonner';
+import { FinishRepoAction } from '@/components/finish-repo-action';
+import { VibeToolsPanel } from '@/components/vibe-tools-panel';
 
 interface RecommendationCardProps {
   recommendation: Recommendation;
@@ -177,6 +179,22 @@ export function RecommendationCard({ recommendation, analysisId }: Recommendatio
               </div>
             )}
 
+            {/* One-click finish */}
+            {(recommendation.kind === 'finish' || recommendation.kind === 'repurpose') && (
+              <div className="space-y-3">
+                <h4 className="font-semibold text-sm">Auto-Finish</h4>
+                {recommendation.repos.map((repo) => (
+                  <FinishRepoAction
+                    key={repo}
+                    repo={repo}
+                    nextSteps={recommendation.next_steps}
+                    analysisId={analysisId}
+                    itemRank={recommendation.rank}
+                  />
+                ))}
+              </div>
+            )}
+
             {/* Merge Instructions */}
             {recommendation.kind === 'combine' && (
               <div className="space-y-3">
@@ -217,6 +235,13 @@ export function RecommendationCard({ recommendation, analysisId }: Recommendatio
                 ) : null}
               </div>
             )}
+
+            <VibeToolsPanel
+              analysisId={analysisId}
+              itemRank={recommendation.rank}
+              kind={recommendation.kind}
+              repos={recommendation.repos}
+            />
           </CollapsibleContent>
         </Collapsible>
       </CardContent>

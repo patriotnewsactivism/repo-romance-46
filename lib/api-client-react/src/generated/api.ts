@@ -24,18 +24,29 @@ import type {
   AnalysisDetail,
   AnalysisRunResult,
   AnalysisSummary,
+  CombineResult,
+  FinishInput,
+  FinishResult,
+  GetRepoFinisherStatusParams,
   GithubConnectInput,
   GithubConnection,
   GithubStatus,
   HealthStatus,
+  IterativeFinishInput,
+  IterativeFinishResult,
+  MarketAndValueResult,
   MergeInput,
   MergeInstructions,
   PortfolioSummary,
+  PortfolioValuation,
   PreferencesUpdate,
+  RepoFinisherStatus,
   ShareInput,
   ShareResult,
   SuccessResult,
-  UserPreferences
+  UserPreferences,
+  VibeSpec,
+  VibeToolsItemInput
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -1158,5 +1169,663 @@ export const useUpdatePreferences = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getUpdatePreferencesMutationOptions(options));
+    }
+
+export const getGetPublicAnalysisUrl = (slug: string,) => {
+
+
+
+
+  return `/api/public/analysis/${slug}`
+}
+
+/**
+ * @summary Get a publicly shared analysis by its share slug
+ */
+export const getPublicAnalysis = async (slug: string, options?: RequestInit): Promise<AnalysisDetail> => {
+
+  return customFetch<AnalysisDetail>(getGetPublicAnalysisUrl(slug),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPublicAnalysisQueryKey = (slug: string,) => {
+    return [
+    `/api/public/analysis/${slug}`
+    ] as const;
+    }
+
+
+export const getGetPublicAnalysisQueryOptions = <TData = Awaited<ReturnType<typeof getPublicAnalysis>>, TError = ErrorType<unknown>>(slug: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPublicAnalysis>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPublicAnalysisQueryKey(slug);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPublicAnalysis>>> = ({ signal }) => getPublicAnalysis(slug, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: slug !== null && slug !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPublicAnalysis>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPublicAnalysisQueryResult = NonNullable<Awaited<ReturnType<typeof getPublicAnalysis>>>
+export type GetPublicAnalysisQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get a publicly shared analysis by its share slug
+ */
+
+export function useGetPublicAnalysis<TData = Awaited<ReturnType<typeof getPublicAnalysis>>, TError = ErrorType<unknown>>(
+ slug: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPublicAnalysis>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPublicAnalysisQueryOptions(slug,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getFinishRepoUrl = () => {
+
+
+
+
+  return `/api/repo-finisher/finish`
+}
+
+/**
+ * @summary Have AI generate and commit improvements to a repo, opening a PR
+ */
+export const finishRepo = async (finishInput: FinishInput, options?: RequestInit): Promise<FinishResult> => {
+
+  return customFetch<FinishResult>(getFinishRepoUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(finishInput)
+  }
+);}
+
+
+
+
+export const getFinishRepoMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finishRepo>>, TError,{data: BodyType<FinishInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof finishRepo>>, TError,{data: BodyType<FinishInput>}, TContext> => {
+
+const mutationKey = ['finishRepo'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof finishRepo>>, {data: BodyType<FinishInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  finishRepo(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type FinishRepoMutationResult = NonNullable<Awaited<ReturnType<typeof finishRepo>>>
+    export type FinishRepoMutationBody = BodyType<FinishInput>
+    export type FinishRepoMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Have AI generate and commit improvements to a repo, opening a PR
+ */
+export const useFinishRepo = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finishRepo>>, TError,{data: BodyType<FinishInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof finishRepo>>,
+        TError,
+        {data: BodyType<FinishInput>},
+        TContext
+      > => {
+      return useMutation(getFinishRepoMutationOptions(options));
+    }
+
+export const getGetRepoFinisherStatusUrl = (params: GetRepoFinisherStatusParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/repo-finisher/status?${stringifiedParams}` : `/api/repo-finisher/status`
+}
+
+/**
+ * @summary Check whether a repo has previously been finished
+ */
+export const getRepoFinisherStatus = async (params: GetRepoFinisherStatusParams, options?: RequestInit): Promise<RepoFinisherStatus> => {
+
+  return customFetch<RepoFinisherStatus>(getGetRepoFinisherStatusUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetRepoFinisherStatusQueryKey = (params?: GetRepoFinisherStatusParams,) => {
+    return [
+    `/api/repo-finisher/status`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetRepoFinisherStatusQueryOptions = <TData = Awaited<ReturnType<typeof getRepoFinisherStatus>>, TError = ErrorType<unknown>>(params: GetRepoFinisherStatusParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getRepoFinisherStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetRepoFinisherStatusQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getRepoFinisherStatus>>> = ({ signal }) => getRepoFinisherStatus(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getRepoFinisherStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetRepoFinisherStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getRepoFinisherStatus>>>
+export type GetRepoFinisherStatusQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Check whether a repo has previously been finished
+ */
+
+export function useGetRepoFinisherStatus<TData = Awaited<ReturnType<typeof getRepoFinisherStatus>>, TError = ErrorType<unknown>>(
+ params: GetRepoFinisherStatusParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getRepoFinisherStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetRepoFinisherStatusQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRunValuationUrl = (id: string,) => {
+
+
+
+
+  return `/api/valuation/${id}`
+}
+
+/**
+ * @summary Run an AI valuation of an analysis's finish/repurpose repos
+ */
+export const runValuation = async (id: string, options?: RequestInit): Promise<PortfolioValuation> => {
+
+  return customFetch<PortfolioValuation>(getRunValuationUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getRunValuationMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runValuation>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof runValuation>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['runValuation'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof runValuation>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  runValuation(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RunValuationMutationResult = NonNullable<Awaited<ReturnType<typeof runValuation>>>
+
+    export type RunValuationMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Run an AI valuation of an analysis's finish/repurpose repos
+ */
+export const useRunValuation = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runValuation>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof runValuation>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getRunValuationMutationOptions(options));
+    }
+
+export const getGetValuationUrl = (id: string,) => {
+
+
+
+
+  return `/api/valuation/${id}`
+}
+
+/**
+ * @summary Get a previously computed portfolio valuation
+ */
+export const getValuation = async (id: string, options?: RequestInit): Promise<PortfolioValuation | null> => {
+
+  return customFetch<PortfolioValuation | null>(getGetValuationUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetValuationQueryKey = (id: string,) => {
+    return [
+    `/api/valuation/${id}`
+    ] as const;
+    }
+
+
+export const getGetValuationQueryOptions = <TData = Awaited<ReturnType<typeof getValuation>>, TError = ErrorType<unknown>>(id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getValuation>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetValuationQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getValuation>>> = ({ signal }) => getValuation(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getValuation>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetValuationQueryResult = NonNullable<Awaited<ReturnType<typeof getValuation>>>
+export type GetValuationQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get a previously computed portfolio valuation
+ */
+
+export function useGetValuation<TData = Awaited<ReturnType<typeof getValuation>>, TError = ErrorType<unknown>>(
+ id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getValuation>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetValuationQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getAssessMarketAndValueUrl = () => {
+
+
+
+
+  return `/api/vibe-tools/market-value`
+}
+
+/**
+ * @summary Assess market fit and valuation for a single recommendation
+ */
+export const assessMarketAndValue = async (vibeToolsItemInput: VibeToolsItemInput, options?: RequestInit): Promise<MarketAndValueResult> => {
+
+  return customFetch<MarketAndValueResult>(getAssessMarketAndValueUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(vibeToolsItemInput)
+  }
+);}
+
+
+
+
+export const getAssessMarketAndValueMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof assessMarketAndValue>>, TError,{data: BodyType<VibeToolsItemInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof assessMarketAndValue>>, TError,{data: BodyType<VibeToolsItemInput>}, TContext> => {
+
+const mutationKey = ['assessMarketAndValue'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof assessMarketAndValue>>, {data: BodyType<VibeToolsItemInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  assessMarketAndValue(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AssessMarketAndValueMutationResult = NonNullable<Awaited<ReturnType<typeof assessMarketAndValue>>>
+    export type AssessMarketAndValueMutationBody = BodyType<VibeToolsItemInput>
+    export type AssessMarketAndValueMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Assess market fit and valuation for a single recommendation
+ */
+export const useAssessMarketAndValue = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof assessMarketAndValue>>, TError,{data: BodyType<VibeToolsItemInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof assessMarketAndValue>>,
+        TError,
+        {data: BodyType<VibeToolsItemInput>},
+        TContext
+      > => {
+      return useMutation(getAssessMarketAndValueMutationOptions(options));
+    }
+
+export const getGenerateVibeSpecUrl = () => {
+
+
+
+
+  return `/api/vibe-tools/vibe-spec`
+}
+
+/**
+ * @summary Generate a ready-to-ship product spec for a recommendation
+ */
+export const generateVibeSpec = async (vibeToolsItemInput: VibeToolsItemInput, options?: RequestInit): Promise<VibeSpec> => {
+
+  return customFetch<VibeSpec>(getGenerateVibeSpecUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(vibeToolsItemInput)
+  }
+);}
+
+
+
+
+export const getGenerateVibeSpecMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateVibeSpec>>, TError,{data: BodyType<VibeToolsItemInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof generateVibeSpec>>, TError,{data: BodyType<VibeToolsItemInput>}, TContext> => {
+
+const mutationKey = ['generateVibeSpec'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof generateVibeSpec>>, {data: BodyType<VibeToolsItemInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  generateVibeSpec(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GenerateVibeSpecMutationResult = NonNullable<Awaited<ReturnType<typeof generateVibeSpec>>>
+    export type GenerateVibeSpecMutationBody = BodyType<VibeToolsItemInput>
+    export type GenerateVibeSpecMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Generate a ready-to-ship product spec for a recommendation
+ */
+export const useGenerateVibeSpec = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateVibeSpec>>, TError,{data: BodyType<VibeToolsItemInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof generateVibeSpec>>,
+        TError,
+        {data: BodyType<VibeToolsItemInput>},
+        TContext
+      > => {
+      return useMutation(getGenerateVibeSpecMutationOptions(options));
+    }
+
+export const getCombineReposUrl = () => {
+
+
+
+
+  return `/api/vibe-tools/combine`
+}
+
+/**
+ * @summary Create a new combined repo from a "combine" recommendation's source repos
+ */
+export const combineRepos = async (vibeToolsItemInput: VibeToolsItemInput, options?: RequestInit): Promise<CombineResult> => {
+
+  return customFetch<CombineResult>(getCombineReposUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(vibeToolsItemInput)
+  }
+);}
+
+
+
+
+export const getCombineReposMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof combineRepos>>, TError,{data: BodyType<VibeToolsItemInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof combineRepos>>, TError,{data: BodyType<VibeToolsItemInput>}, TContext> => {
+
+const mutationKey = ['combineRepos'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof combineRepos>>, {data: BodyType<VibeToolsItemInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  combineRepos(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CombineReposMutationResult = NonNullable<Awaited<ReturnType<typeof combineRepos>>>
+    export type CombineReposMutationBody = BodyType<VibeToolsItemInput>
+    export type CombineReposMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Create a new combined repo from a "combine" recommendation's source repos
+ */
+export const useCombineRepos = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof combineRepos>>, TError,{data: BodyType<VibeToolsItemInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof combineRepos>>,
+        TError,
+        {data: BodyType<VibeToolsItemInput>},
+        TContext
+      > => {
+      return useMutation(getCombineReposMutationOptions(options));
+    }
+
+export const getIterativeFinishUrl = () => {
+
+
+
+
+  return `/api/vibe-tools/iterative-finish`
+}
+
+/**
+ * @summary Run multiple sequential AI-finish passes on a repo
+ */
+export const iterativeFinish = async (iterativeFinishInput: IterativeFinishInput, options?: RequestInit): Promise<IterativeFinishResult> => {
+
+  return customFetch<IterativeFinishResult>(getIterativeFinishUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(iterativeFinishInput)
+  }
+);}
+
+
+
+
+export const getIterativeFinishMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof iterativeFinish>>, TError,{data: BodyType<IterativeFinishInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof iterativeFinish>>, TError,{data: BodyType<IterativeFinishInput>}, TContext> => {
+
+const mutationKey = ['iterativeFinish'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof iterativeFinish>>, {data: BodyType<IterativeFinishInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  iterativeFinish(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type IterativeFinishMutationResult = NonNullable<Awaited<ReturnType<typeof iterativeFinish>>>
+    export type IterativeFinishMutationBody = BodyType<IterativeFinishInput>
+    export type IterativeFinishMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Run multiple sequential AI-finish passes on a repo
+ */
+export const useIterativeFinish = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof iterativeFinish>>, TError,{data: BodyType<IterativeFinishInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof iterativeFinish>>,
+        TError,
+        {data: BodyType<IterativeFinishInput>},
+        TContext
+      > => {
+      return useMutation(getIterativeFinishMutationOptions(options));
     }
 

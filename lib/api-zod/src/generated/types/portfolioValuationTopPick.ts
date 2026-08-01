@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface GithubConnectInput {
-  providerToken: string;
+export interface PortfolioValuationTopPick {
+  repo: string;
+  reason: string;
 }

@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react';
 import { useParams, Link } from 'wouter';
-import { AnalysisDetail } from '@workspace/api-client-react';
+import { useGetPublicAnalysis, ApiError } from '@workspace/api-client-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -11,35 +10,16 @@ import { GitBranch, Lock } from 'lucide-react';
 export default function SharedAnalysis() {
   const params = useParams();
   const slug = params.slug as string;
-  const [detail, setDetail] = useState<AnalysisDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: detail, isLoading, error } = useGetPublicAnalysis(slug);
 
-  useEffect(() => {
-    const fetchSharedAnalysis = async () => {
-      try {
-        const response = await fetch(`/api/analysis/shared/${slug}`);
-        if (!response.ok) {
-          if (response.status === 404) {
-            setError('Analysis not found or not public');
-          } else {
-            setError('Failed to load analysis');
-          }
-          return;
-        }
-        const data = await response.json();
-        setDetail(data);
-      } catch (err) {
-        setError('Failed to load analysis');
-      } finally {
-        setLoading(false);
-      }
-    };
+  const errorMessage =
+    error instanceof ApiError && error.status === 404
+      ? 'Analysis not found or not public'
+      : error
+        ? 'Failed to load analysis'
+        : null;
 
-    fetchSharedAnalysis();
-  }, [slug]);
-
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-background dark">
         <div className="border-b border-border bg-card/50 backdrop-blur-sm">
@@ -57,7 +37,7 @@ export default function SharedAnalysis() {
     );
   }
 
-  if (error || !detail) {
+  if (errorMessage || !detail) {
     return (
       <div className="min-h-screen bg-background dark flex items-center justify-center p-4">
         <Card className="max-w-md">
@@ -68,7 +48,7 @@ export default function SharedAnalysis() {
               </div>
             </div>
             <CardTitle>Analysis Not Available</CardTitle>
-            <CardDescription>{error || 'This analysis is private or does not exist'}</CardDescription>
+            <CardDescription>{errorMessage || 'This analysis is private or does not exist'}</CardDescription>
           </CardHeader>
           <CardContent>
             <Link href="/">

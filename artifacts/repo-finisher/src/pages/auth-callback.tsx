@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'wouter';
 import { supabase } from '@/integrations/supabase/client';
+import { useConnectGithub } from '@workspace/api-client-react';
 import { Loader2 } from 'lucide-react';
 
 export default function AuthCallback() {
   const [, setLocation] = useLocation();
   const [error, setError] = useState<string | null>(null);
+<<<<<<< Updated upstream
   // Guards against a double-fire of this effect (React re-render / remount)
   // trying to exchange the same one-time-use auth code twice. The first
   // call succeeds and creates the session; a second call then fails with
@@ -13,6 +15,9 @@ export default function AuthCallback() {
   // already worked — which used to show the user a scary error page while
   // actually being signed in.
   const attempted = useRef(false);
+=======
+  const connectGithub = useConnectGithub();
+>>>>>>> Stashed changes
 
   useEffect(() => {
     const handleCallback = async () => {
@@ -20,7 +25,7 @@ export default function AuthCallback() {
       attempted.current = true;
 
       try {
-        const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(
+        const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(
           window.location.href
         );
 
@@ -37,6 +42,18 @@ export default function AuthCallback() {
           return;
         }
 
+        // Supabase's GitHub OAuth (scope: 'repo') hands back a GitHub access
+        // token on the session — only available right after this exchange.
+        // Persist it server-side so GitHub-dependent routes can use it.
+        const providerToken = data.session?.provider_token;
+        if (providerToken) {
+          try {
+            await connectGithub.mutateAsync({ data: { providerToken } });
+          } catch {
+            // Non-fatal — dashboard falls back to a "Connect GitHub" prompt.
+          }
+        }
+
         setLocation('/dashboard');
       } catch (err) {
         const { data: sessionData } = await supabase.auth.getSession();
@@ -49,6 +66,7 @@ export default function AuthCallback() {
     };
 
     handleCallback();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setLocation]);
 
   if (error) {

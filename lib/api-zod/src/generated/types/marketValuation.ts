@@ -6,6 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface GithubConnectInput {
-  providerToken: string;
+export interface MarketValuation {
+  low_usd: number;
+  mid_usd: number;
+  high_usd: number;
+  reasoning: string;
 }

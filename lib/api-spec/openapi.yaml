@@ -15,6 +15,14 @@ tags:
     description: Portfolio analysis
   - name: preferences
     description: User preferences
+  - name: public
+    description: Unauthenticated public endpoints
+  - name: repo-finisher
+    description: One-click repo finishing
+  - name: valuation
+    description: Portfolio and repo valuation
+  - name: vibe-tools
+    description: Market analysis, vibe specs, combining, and iterative finishing
 paths:
   /healthz:
     get:
@@ -64,7 +72,7 @@ paths:
     post:
       operationId: connectGithub
       tags: [github]
-      summary: Exchange OAuth code for GitHub access token
+      summary: Store a GitHub access token obtained via Supabase OAuth
       security:
         - bearerAuth: []
       requestBody:
@@ -298,6 +306,193 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserPreferences"
 
+  /public/analysis/{slug}:
+    get:
+      operationId: getPublicAnalysis
+      tags: [public]
+      summary: Get a publicly shared analysis by its share slug
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Analysis detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisDetail"
+
+  /repo-finisher/finish:
+    post:
+      operationId: finishRepo
+      tags: [repo-finisher]
+      summary: Have AI generate and commit improvements to a repo, opening a PR
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinishInput"
+      responses:
+        "200":
+          description: Finish result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinishResult"
+
+  /repo-finisher/status:
+    get:
+      operationId: getRepoFinisherStatus
+      tags: [repo-finisher]
+      summary: Check whether a repo has previously been finished
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: repo
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Finish status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepoFinisherStatus"
+
+  /valuation/{id}:
+    post:
+      operationId: runValuation
+      tags: [valuation]
+      summary: Run an AI valuation of an analysis's finish/repurpose repos
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Portfolio valuation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortfolioValuation"
+    get:
+      operationId: getValuation
+      tags: [valuation]
+      summary: Get a previously computed portfolio valuation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Portfolio valuation, or null if not yet computed
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/PortfolioValuation"
+                  - type: "null"
+
+  /vibe-tools/market-value:
+    post:
+      operationId: assessMarketAndValue
+      tags: [vibe-tools]
+      summary: Assess market fit and valuation for a single recommendation
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VibeToolsItemInput"
+      responses:
+        "200":
+          description: Market analysis and valuation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketAndValueResult"
+
+  /vibe-tools/vibe-spec:
+    post:
+      operationId: generateVibeSpec
+      tags: [vibe-tools]
+      summary: Generate a ready-to-ship product spec for a recommendation
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VibeToolsItemInput"
+      responses:
+        "200":
+          description: Vibe spec
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VibeSpec"
+
+  /vibe-tools/combine:
+    post:
+      operationId: combineRepos
+      tags: [vibe-tools]
+      summary: Create a new combined repo from a "combine" recommendation's source repos
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VibeToolsItemInput"
+      responses:
+        "200":
+          description: Combine result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CombineResult"
+
+  /vibe-tools/iterative-finish:
+    post:
+      operationId: iterativeFinish
+      tags: [vibe-tools]
+      summary: Run multiple sequential AI-finish passes on a repo
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IterativeFinishInput"
+      responses:
+        "200":
+          description: Iterative finish result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IterativeFinishResult"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -349,9 +544,9 @@ components:
 
     GithubConnectInput:
       type: object
-      required: [code]
+      required: [providerToken]
       properties:
-        code:
+        providerToken:
           type: string
 
     GithubConnection:
@@ -623,3 +818,370 @@ components:
         analysis_tier:
           type: string
           enum: [fast, balanced, deep]
+
+    FinishInput:
+      type: object
+      required: [repo]
+      properties:
+        repo:
+          type: string
+        nextSteps:
+          type: array
+          items:
+            type: string
+        analysisId:
+          type: string
+        itemRank:
+          type: integer
+
+    FinishChange:
+      type: object
+      required: [file, status, description]
+      properties:
+        file:
+          type: string
+        status:
+          type: string
+          enum: [created, modified, deleted]
+        description:
+          type: string
+
+    FinishResult:
+      type: object
+      required:
+        [repo, branch, pr_url, pr_number, files_changed, additions, deletions, summary, changes]
+      properties:
+        repo:
+          type: string
+        branch:
+          type: string
+        pr_url:
+          type: string
+        pr_number:
+          type: integer
+        files_changed:
+          type: integer
+        additions:
+          type: integer
+        deletions:
+          type: integer
+        summary:
+          type: string
+        changes:
+          type: array
+          items:
+            $ref: "#/components/schemas/FinishChange"
+
+    RepoFinisherStatus:
+      type: object
+      required: [repo, hasBeenFinished, finishes]
+      properties:
+        repo:
+          type: string
+        hasBeenFinished:
+          type: boolean
+        finishes:
+          type: array
+          items:
+            $ref: "#/components/schemas/FinishResult"
+
+    ValuationFactor:
+      type: object
+      required: [label, score, weight, detail]
+      properties:
+        label:
+          type: string
+        score:
+          type: number
+        weight:
+          type: number
+        detail:
+          type: string
+
+    ValuationRevenuePotential:
+      type: object
+      required: [model, monthly_revenue_low, monthly_revenue_high, timeline]
+      properties:
+        model:
+          type: string
+        monthly_revenue_low:
+          type: integer
+        monthly_revenue_high:
+          type: integer
+        timeline:
+          type: string
+
+    ValuationComparable:
+      type: object
+      required: [name, outcome, multiple, relevance]
+      properties:
+        name:
+          type: string
+        outcome:
+          type: string
+        multiple:
+          type: string
+        relevance:
+          type: string
+
+    Valuation:
+      type: object
+      required:
+        [
+          estimated_value_low, estimated_value_high, currency, valuation_method,
+          confidence, factors, revenue_potential, comparables, risks, upsides, summary,
+        ]
+      properties:
+        estimated_value_low:
+          type: integer
+        estimated_value_high:
+          type: integer
+        currency:
+          type: string
+        valuation_method:
+          type: string
+        confidence:
+          type: string
+          enum: [low, medium, high]
+        factors:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValuationFactor"
+        revenue_potential:
+          $ref: "#/components/schemas/ValuationRevenuePotential"
+        comparables:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValuationComparable"
+        risks:
+          type: array
+          items:
+            type: string
+        upsides:
+          type: array
+          items:
+            type: string
+        summary:
+          type: string
+
+    PortfolioValuationTopPick:
+      type: object
+      required: [repo, reason]
+      properties:
+        repo:
+          type: string
+        reason:
+          type: string
+
+    PortfolioValuation:
+      type: object
+      required:
+        [
+          total_estimated_value_low, total_estimated_value_high, currency, repo_valuations,
+          portfolio_summary, top_picks, diversification_score, recommendation,
+        ]
+      properties:
+        total_estimated_value_low:
+          type: integer
+        total_estimated_value_high:
+          type: integer
+        currency:
+          type: string
+        repo_valuations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Valuation"
+        portfolio_summary:
+          type: string
+        top_picks:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortfolioValuationTopPick"
+        diversification_score:
+          type: number
+        recommendation:
+          type: string
+
+    VibeToolsItemInput:
+      type: object
+      required: [analysisId, itemRank]
+      properties:
+        analysisId:
+          type: string
+        itemRank:
+          type: integer
+
+    MarketCompetitor:
+      type: object
+      required: [name, url, differentiator]
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+        differentiator:
+          type: string
+
+    MarketAnalysis:
+      type: object
+      required:
+        [tam_summary, target_users, competitors, monetization, demand_score, ship_readiness_score, risks, verdict]
+      properties:
+        tam_summary:
+          type: string
+        target_users:
+          type: array
+          items:
+            type: string
+        competitors:
+          type: array
+          items:
+            $ref: "#/components/schemas/MarketCompetitor"
+        monetization:
+          type: array
+          items:
+            type: string
+        demand_score:
+          type: integer
+        ship_readiness_score:
+          type: integer
+        risks:
+          type: array
+          items:
+            type: string
+        verdict:
+          type: string
+          enum: [ship_now, finish_first, combine_first, shelve]
+
+    MarketValuation:
+      type: object
+      required: [low_usd, mid_usd, high_usd, reasoning]
+      properties:
+        low_usd:
+          type: integer
+        mid_usd:
+          type: integer
+        high_usd:
+          type: integer
+        reasoning:
+          type: string
+
+    MarketAndValueResult:
+      type: object
+      required: [market, valuation]
+      properties:
+        market:
+          $ref: "#/components/schemas/MarketAnalysis"
+        valuation:
+          $ref: "#/components/schemas/MarketValuation"
+
+    VibeSpec:
+      type: object
+      required:
+        [
+          product_name, tagline, prd_md, lovable_prompt, landing_hero,
+          landing_subhead, landing_bullets, cta, launch_checklist,
+        ]
+      properties:
+        product_name:
+          type: string
+        tagline:
+          type: string
+        prd_md:
+          type: string
+        lovable_prompt:
+          type: string
+        landing_hero:
+          type: string
+        landing_subhead:
+          type: string
+        landing_bullets:
+          type: array
+          items:
+            type: string
+        cta:
+          type: string
+        launch_checklist:
+          type: array
+          items:
+            type: string
+
+    CombineStructureNode:
+      type: object
+      required: [path, purpose]
+      properties:
+        path:
+          type: string
+        purpose:
+          type: string
+
+    CombineSourceIssue:
+      type: object
+      required: [repo, url]
+      properties:
+        repo:
+          type: string
+        url:
+          type: string
+
+    CombineResult:
+      type: object
+      required: [combined_repo, combined_url, source_issues, structure, integration_plan_md]
+      properties:
+        combined_repo:
+          type: string
+        combined_url:
+          type: string
+        source_issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/CombineSourceIssue"
+        structure:
+          type: array
+          items:
+            $ref: "#/components/schemas/CombineStructureNode"
+        integration_plan_md:
+          type: string
+
+    IterativeFinishInput:
+      type: object
+      required: [analysisId, itemRank, repo]
+      properties:
+        analysisId:
+          type: string
+        itemRank:
+          type: integer
+        repo:
+          type: string
+        passes:
+          type: integer
+          minimum: 1
+          maximum: 4
+
+    IterativeFinishPass:
+      type: object
+      required: [pass]
+      properties:
+        pass:
+          type: integer
+        pr_url:
+          type: string
+        pr_number:
+          type: integer
+        files_changed:
+          type: integer
+        summary:
+          type: string
+        error:
+          type: string
+
+    IterativeFinishResult:
+      type: object
+      required: [history, passes_completed]
+      properties:
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/IterativeFinishPass"
+        passes_completed:
+          type: integer

@@ -5,43 +5,29 @@ import { asyncHandler } from "../lib/async-handler";
 
 const router: IRouter = Router();
 
-/** Exchange GitHub OAuth code for an access token and store it. */
+/**
+ * Store a GitHub access token obtained by the frontend's Supabase GitHub OAuth
+ * sign-in (session.provider_token) into github_connections. Supabase already
+ * performs the OAuth handshake (with `scope: 'repo'`) — this just persists the
+ * resulting token server-side so other routes can call the GitHub API.
+ */
 router.post(
   "/github/connect",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { code } = z.object({ code: z.string().min(1) }).parse(req.body);
-
-    const clientId = process.env["GITHUB_CLIENT_ID"];
-    const clientSecret = process.env["GITHUB_CLIENT_SECRET"];
-    if (!clientId || !clientSecret) {
-      throw Object.assign(new Error("GitHub OAuth not configured"), { status: 500 });
-    }
-
-    const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code }),
-    });
-    const tokenData = (await tokenRes.json()) as { access_token?: string; error?: string };
-    if (!tokenData.access_token) {
-      throw Object.assign(
-        new Error(tokenData.error || "GitHub OAuth failed — invalid or expired code"),
-        { status: 400 },
-      );
-    }
+    const { providerToken } = z.object({ providerToken: z.string().min(1) }).parse(req.body);
 
     // Fetch GitHub user info
     const userRes = await fetch("https://api.github.com/user", {
       headers: {
-        Authorization: `Bearer ${tokenData.access_token}`,
+        Authorization: `Bearer ${providerToken}`,
         Accept: "application/vnd.github+json",
         "User-Agent": "repo-finisher",
       },
     });
+    if (!userRes.ok) {
+      throw Object.assign(new Error("Invalid or expired GitHub token"), { status: 400 });
+    }
     const ghUser = (await userRes.json()) as { id: number; login: string; avatar_url: string; name: string | null };
 
     // Upsert github connection
@@ -52,7 +38,7 @@ router.post(
         github_login: ghUser.login,
         avatar_url: ghUser.avatar_url,
         display_name: ghUser.name,
-        access_token: tokenData.access_token,
+        access_token: providerToken,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" },

@@ -1,12 +1,15 @@
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { toast } from "sonner";
 import {
-  assessMarketAndValue,
-  generateVibeSpec,
-  combineRepos,
-  iterativeFinish,
-} from "@/lib/api-client";
+  useAssessMarketAndValue,
+  useGenerateVibeSpec,
+  useCombineRepos,
+  useIterativeFinish,
+  type MarketAnalysis,
+  type MarketValuation,
+  type VibeSpec,
+  type CombineResult,
+  type IterativeFinishPass,
+} from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -20,58 +23,14 @@ import {
   Copy,
   DollarSign,
 } from "lucide-react";
+import { toast } from "sonner";
 
-interface Props {
+interface VibeToolsPanelProps {
   analysisId: string;
   itemRank: number;
   kind: string;
   repos: string[];
-  existing: {
-    market_analysis?: unknown;
-    valuation?: unknown;
-    vibe_spec?: unknown;
-    combine_result?: unknown;
-    finish_history?: unknown;
-    iteration_count?: number;
-  };
 }
-
-type MarketData = {
-  tam_summary: string;
-  target_users: string[];
-  competitors: { name: string; url: string; differentiator: string }[];
-  monetization: string[];
-  demand_score: number;
-  ship_readiness_score: number;
-  risks: string[];
-  verdict: string;
-};
-type ValuationData = { low_usd: number; mid_usd: number; high_usd: number; reasoning: string };
-type VibeSpec = {
-  product_name: string;
-  tagline: string;
-  prd_md: string;
-  lovable_prompt: string;
-  landing_hero: string;
-  landing_subhead: string;
-  landing_bullets: string[];
-  cta: string;
-  launch_checklist: string[];
-};
-type CombineResult = {
-  combined_repo: string;
-  combined_url: string;
-  source_issues: { repo: string; url: string }[];
-  structure: { path: string; purpose: string }[];
-};
-type FinishHistoryEntry = {
-  pass: number;
-  pr_url?: string;
-  pr_number?: number;
-  files_changed?: number;
-  summary?: string;
-  error?: string;
-};
 
 function fmtUsd(n: number) {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
@@ -83,59 +42,70 @@ function copy(t: string, label: string) {
   navigator.clipboard.writeText(t).then(() => toast.success(`${label} copied`));
 }
 
-export function VibeTools({ analysisId, itemRank, kind, repos, existing }: Props) {
-  const [market, setMarket] = useState<MarketData | null>(
-    (existing.market_analysis as MarketData) || null,
-  );
-  const [valuation, setValuation] = useState<ValuationData | null>(
-    (existing.valuation as ValuationData) || null,
-  );
-  const [spec, setSpec] = useState<VibeSpec | null>((existing.vibe_spec as VibeSpec) || null);
-  const [combine, setCombine] = useState<CombineResult | null>(
-    (existing.combine_result as CombineResult) || null,
-  );
-  const [history, setHistory] = useState<FinishHistoryEntry[]>(
-    (existing.finish_history as FinishHistoryEntry[]) || [],
-  );
+export function VibeToolsPanel({ analysisId, itemRank, kind, repos }: VibeToolsPanelProps) {
+  const [market, setMarket] = useState<MarketAnalysis | null>(null);
+  const [valuation, setValuation] = useState<MarketValuation | null>(null);
+  const [spec, setSpec] = useState<VibeSpec | null>(null);
+  const [combine, setCombine] = useState<CombineResult | null>(null);
+  const [history, setHistory] = useState<IterativeFinishPass[]>([]);
 
-  const marketMut = useMutation({
-    mutationFn: () => assessMarketAndValue(analysisId, itemRank),
-    onSuccess: (d) => {
-      const r = d as { market: MarketData; valuation: ValuationData };
-      setMarket(r.market);
-      setValuation(r.valuation);
-      toast.success("Market & valuation ready");
-    },
-    onError: (e: Error) => toast.error(e.message.slice(0, 200)),
-  });
+  const marketMut = useAssessMarketAndValue();
+  const specMut = useGenerateVibeSpec();
+  const combineMut = useCombineRepos();
+  const iterMut = useIterativeFinish();
 
-  const specMut = useMutation({
-    mutationFn: () => generateVibeSpec(analysisId, itemRank),
-    onSuccess: (d) => {
-      setSpec(d as VibeSpec);
-      toast.success("Vibe spec generated");
-    },
-    onError: (e: Error) => toast.error(e.message.slice(0, 200)),
-  });
+  const handleMarket = () => {
+    marketMut.mutate(
+      { data: { analysisId, itemRank } },
+      {
+        onSuccess: (r) => {
+          setMarket(r.market);
+          setValuation(r.valuation);
+          toast.success("Market & valuation ready");
+        },
+        onError: (e) => toast.error(e.message.slice(0, 200)),
+      },
+    );
+  };
 
-  const combineMut = useMutation({
-    mutationFn: () => combineRepos(analysisId, itemRank),
-    onSuccess: (d) => {
-      setCombine(d as CombineResult);
-      toast.success("Combined repo created");
-    },
-    onError: (e: Error) => toast.error(e.message.slice(0, 200)),
-  });
+  const handleSpec = () => {
+    specMut.mutate(
+      { data: { analysisId, itemRank } },
+      {
+        onSuccess: (r) => {
+          setSpec(r);
+          toast.success("Vibe spec generated");
+        },
+        onError: (e) => toast.error(e.message.slice(0, 200)),
+      },
+    );
+  };
 
-  const iterMut = useMutation({
-    mutationFn: () => iterativeFinish(analysisId, itemRank, repos[0], 3),
-    onSuccess: (d) => {
-      const r = d as unknown as { history: FinishHistoryEntry[] };
-      setHistory(r.history);
-      toast.success(`Ran ${r.history.filter((h) => h.pr_url).length} finish passes`);
-    },
-    onError: (e: Error) => toast.error(e.message.slice(0, 200)),
-  });
+  const handleCombine = () => {
+    combineMut.mutate(
+      { data: { analysisId, itemRank } },
+      {
+        onSuccess: (r) => {
+          setCombine(r);
+          toast.success("Combined repo created");
+        },
+        onError: (e) => toast.error(e.message.slice(0, 200)),
+      },
+    );
+  };
+
+  const handleIterate = () => {
+    iterMut.mutate(
+      { data: { analysisId, itemRank, repo: repos[0], passes: 3 } },
+      {
+        onSuccess: (r) => {
+          setHistory(r.history);
+          toast.success(`Ran ${r.history.filter((h) => h.pr_url).length} finish passes`);
+        },
+        onError: (e) => toast.error(e.message.slice(0, 200)),
+      },
+    );
+  };
 
   return (
     <div className="pt-3 border-t border-border space-y-3">
@@ -147,9 +117,10 @@ export function VibeTools({ analysisId, itemRank, kind, repos, existing }: Props
         <Button
           size="sm"
           variant="outline"
-          onClick={() => marketMut.mutate()}
+          onClick={handleMarket}
           disabled={marketMut.isPending}
           className="gap-1.5 justify-start"
+          data-testid="button-vibe-market-value"
         >
           {marketMut.isPending ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -162,9 +133,10 @@ export function VibeTools({ analysisId, itemRank, kind, repos, existing }: Props
         <Button
           size="sm"
           variant="outline"
-          onClick={() => specMut.mutate()}
+          onClick={handleSpec}
           disabled={specMut.isPending}
           className="gap-1.5 justify-start"
+          data-testid="button-vibe-spec"
         >
           {specMut.isPending ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -178,9 +150,10 @@ export function VibeTools({ analysisId, itemRank, kind, repos, existing }: Props
           <Button
             size="sm"
             variant="outline"
-            onClick={() => iterMut.mutate()}
+            onClick={handleIterate}
             disabled={iterMut.isPending}
             className="gap-1.5 justify-start"
+            data-testid="button-vibe-iterate"
           >
             {iterMut.isPending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -195,9 +168,10 @@ export function VibeTools({ analysisId, itemRank, kind, repos, existing }: Props
           <Button
             size="sm"
             variant="outline"
-            onClick={() => combineMut.mutate()}
+            onClick={handleCombine}
             disabled={combineMut.isPending}
             className="gap-1.5 justify-start"
+            data-testid="button-vibe-combine"
           >
             {combineMut.isPending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />

@@ -1,5 +1,6 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { valuePortfolio, getValuation } from "@/lib/api-client";
+import { useState } from "react";
+import { useRunValuation, useGetValuation, getGetValuationQueryKey } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -16,45 +17,7 @@ import {
   Lightbulb,
   ShieldCheck,
 } from "lucide-react";
-import { useState } from "react";
 import { toast } from "sonner";
-
-interface RepoValuation {
-  repo: string;
-  estimated_value_low: number;
-  estimated_value_high: number;
-  currency: string;
-  valuation_method: string;
-  confidence: "low" | "medium" | "high";
-  factors: { label: string; score: number; weight: number; detail: string }[];
-  revenue_potential: {
-    model: string;
-    monthly_revenue_low: number;
-    monthly_revenue_high: number;
-    timeline: string;
-  };
-  comparables: { name: string; outcome: string; multiple: string; relevance: string }[];
-  risks: string[];
-  upsides: string[];
-  summary: string;
-}
-
-interface PortfolioValuationData {
-  total_estimated_value_low: number;
-  total_estimated_value_high: number;
-  currency: string;
-  repo_valuations: RepoValuation[];
-  portfolio_summary: string;
-  top_picks: { repo: string; reason: string }[];
-  diversification_score: number;
-  recommendation: string;
-}
-
-function formatMoney(n: number) {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}k`;
-  return `$${n}`;
-}
 
 const CONFIDENCE_STYLES = {
   high: "text-emerald-500 border-emerald-500/30 bg-emerald-500/10",
@@ -62,27 +25,35 @@ const CONFIDENCE_STYLES = {
   low: "text-muted-foreground border-muted-foreground/30 bg-muted/10",
 };
 
-export function PortfolioValuation({ analysisId }: { analysisId: string }) {
+function formatMoney(n: number) {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}k`;
+  return `$${n}`;
+}
+
+export function ValuationView({ analysisId }: { analysisId: string }) {
   const [expandedRepo, setExpandedRepo] = useState<number | null>(null);
+  const queryClient = useQueryClient();
 
-  const existing = useQuery({
-    queryKey: ["valuation", analysisId],
-    queryFn: () => getValuation(analysisId),
-    enabled: !!analysisId,
-  });
+  const existing = useGetValuation(analysisId);
+  const runValuation = useRunValuation();
 
-  const valueMut = useMutation({
-    mutationFn: () => valuePortfolio(analysisId),
-    onSuccess: () => {
-      toast.success("Portfolio valued!");
-      existing.refetch();
-    },
-    onError: (e: Error) => toast.error(e.message.slice(0, 200)),
-  });
+  const handleRun = () => {
+    runValuation.mutate(
+      { id: analysisId },
+      {
+        onSuccess: () => {
+          toast.success("Portfolio valued!");
+          queryClient.invalidateQueries({ queryKey: getGetValuationQueryKey(analysisId) });
+        },
+        onError: (error) => toast.error(error.message.slice(0, 200)),
+      },
+    );
+  };
 
-  const data = existing.data as unknown as PortfolioValuationData | null;
+  const data = existing.data;
 
-  if (!data && !valueMut.isPending) {
+  if (!data && !runValuation.isPending) {
     return (
       <Card className="p-6 space-y-4">
         <div className="flex items-center gap-2">
@@ -93,7 +64,7 @@ export function PortfolioValuation({ analysisId }: { analysisId: string }) {
           Get an AI-powered valuation of your repos — estimated market value, revenue potential,
           comparable acquisitions, risk factors, and upside catalysts.
         </p>
-        <Button onClick={() => valueMut.mutate()} disabled={valueMut.isPending} className="gap-2">
+        <Button onClick={handleRun} disabled={runValuation.isPending} className="gap-2" data-testid="button-run-valuation">
           <TrendingUp className="h-4 w-4" />
           Value My Portfolio
         </Button>
@@ -101,7 +72,7 @@ export function PortfolioValuation({ analysisId }: { analysisId: string }) {
     );
   }
 
-  if (valueMut.isPending) {
+  if (runValuation.isPending) {
     return (
       <Card className="p-6 space-y-3">
         <div className="flex items-center gap-2">
@@ -144,9 +115,10 @@ export function PortfolioValuation({ analysisId }: { analysisId: string }) {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => valueMut.mutate()}
-              disabled={valueMut.isPending}
+              onClick={handleRun}
+              disabled={runValuation.isPending}
               className="text-xs"
+              data-testid="button-refresh-valuation"
             >
               Refresh Valuation
             </Button>

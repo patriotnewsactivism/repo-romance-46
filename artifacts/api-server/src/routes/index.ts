@@ -4,6 +4,10 @@ import healthRouter from "./health";
 import analysisRouter from "./analysis";
 import preferencesRouter from "./preferences";
 import githubRouter from "./github";
+import publicRouter from "./public";
+import repoFinisherRouter from "./repo-finisher";
+import valuationRouter from "./valuation";
+import vibeToolsRouter from "./vibe-tools";
 
 const router: IRouter = Router();
 
@@ -11,6 +15,10 @@ router.use(healthRouter);
 router.use(analysisRouter);
 router.use(preferencesRouter);
 router.use(githubRouter);
+router.use(publicRouter);
+router.use(repoFinisherRouter);
+router.use(valuationRouter);
+router.use(vibeToolsRouter);
 
 // Global error handler
 router.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
