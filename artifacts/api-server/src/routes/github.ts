@@ -28,6 +28,23 @@ router.post(
     if (!userRes.ok) {
       throw Object.assign(new Error("Invalid or expired GitHub token"), { status: 400 });
     }
+
+    // GitHub returns the token's granted OAuth scopes in this header for
+    // classic OAuth App tokens (which is what Supabase's GitHub provider
+    // issues). Without 'repo' scope, every downstream feature (analysis,
+    // repo-finisher, valuation, vibe-tools) would fail later with opaque
+    // errors instead of telling the user to reconnect now.
+    const grantedScopes = (userRes.headers.get("x-oauth-scopes") ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (grantedScopes.length > 0 && !grantedScopes.includes("repo")) {
+      throw Object.assign(
+        new Error("GitHub token is missing 'repo' scope — reconnect and grant repository access."),
+        { status: 400 },
+      );
+    }
+
     const ghUser = (await userRes.json()) as { id: number; login: string; avatar_url: string; name: string | null };
 
     // Upsert github connection

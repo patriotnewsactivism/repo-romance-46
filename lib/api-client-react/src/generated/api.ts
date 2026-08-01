@@ -317,7 +317,7 @@ export const getConnectGithubUrl = () => {
 }
 
 /**
- * @summary Exchange OAuth code for GitHub access token
+ * @summary Store a GitHub access token obtained via Supabase OAuth
  */
 export const connectGithub = async (githubConnectInput: GithubConnectInput, options?: RequestInit): Promise<GithubConnection> => {
 
@@ -365,7 +365,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ConnectGithubMutationError = ErrorType<unknown>
 
     /**
- * @summary Exchange OAuth code for GitHub access token
+ * @summary Store a GitHub access token obtained via Supabase OAuth
  */
 export const useConnectGithub = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectGithub>>, TError,{data: BodyType<GithubConnectInput>}, TContext>, request?: SecondParameter<typeof customFetch>}

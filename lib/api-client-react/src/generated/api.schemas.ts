@@ -86,6 +86,106 @@ export const RecommendationKind = {
   repurpose: 'repurpose',
 } as const;
 
+export type FinishChangeStatus = typeof FinishChangeStatus[keyof typeof FinishChangeStatus];
+
+
+export const FinishChangeStatus = {
+  created: 'created',
+  modified: 'modified',
+  deleted: 'deleted',
+} as const;
+
+export interface FinishChange {
+  file: string;
+  status: FinishChangeStatus;
+  description: string;
+}
+
+export interface FinishResult {
+  repo: string;
+  branch: string;
+  pr_url: string;
+  pr_number: number;
+  files_changed: number;
+  additions: number;
+  deletions: number;
+  summary: string;
+  changes: FinishChange[];
+}
+
+export interface MarketCompetitor {
+  name: string;
+  url: string;
+  differentiator: string;
+}
+
+export type MarketAnalysisVerdict = typeof MarketAnalysisVerdict[keyof typeof MarketAnalysisVerdict];
+
+
+export const MarketAnalysisVerdict = {
+  ship_now: 'ship_now',
+  finish_first: 'finish_first',
+  combine_first: 'combine_first',
+  shelve: 'shelve',
+} as const;
+
+export interface MarketAnalysis {
+  tam_summary: string;
+  target_users: string[];
+  competitors: MarketCompetitor[];
+  monetization: string[];
+  demand_score: number;
+  ship_readiness_score: number;
+  risks: string[];
+  verdict: MarketAnalysisVerdict;
+}
+
+export interface MarketValuation {
+  low_usd: number;
+  mid_usd: number;
+  high_usd: number;
+  reasoning: string;
+}
+
+export interface VibeSpec {
+  product_name: string;
+  tagline: string;
+  prd_md: string;
+  lovable_prompt: string;
+  landing_hero: string;
+  landing_subhead: string;
+  landing_bullets: string[];
+  cta: string;
+  launch_checklist: string[];
+}
+
+export interface CombineSourceIssue {
+  repo: string;
+  url: string;
+}
+
+export interface CombineStructureNode {
+  path: string;
+  purpose: string;
+}
+
+export interface CombineResult {
+  combined_repo: string;
+  combined_url: string;
+  source_issues: CombineSourceIssue[];
+  structure: CombineStructureNode[];
+  integration_plan_md: string;
+}
+
+export interface IterativeFinishPass {
+  pass: number;
+  pr_url?: string;
+  pr_number?: number;
+  files_changed?: number;
+  summary?: string;
+  error?: string;
+}
+
 export interface Recommendation {
   id: string;
   kind: RecommendationKind;
@@ -103,6 +203,15 @@ export interface Recommendation {
   /** @nullable */
   estimated_hours?: number | null;
   rank: number;
+  finish_result?: FinishResult | null;
+  market_analysis?: MarketAnalysis | null;
+  valuation?: MarketValuation | null;
+  vibe_spec?: VibeSpec | null;
+  combine_result?: CombineResult | null;
+  /** @nullable */
+  finish_history?: IterativeFinishPass[] | null;
+  /** @nullable */
+  iteration_count?: number | null;
 }
 
 export type AnalysisDetailAnalysisStatus = typeof AnalysisDetailAnalysisStatus[keyof typeof AnalysisDetailAnalysisStatus];
@@ -280,33 +389,6 @@ export interface FinishInput {
   itemRank?: number;
 }
 
-export type FinishChangeStatus = typeof FinishChangeStatus[keyof typeof FinishChangeStatus];
-
-
-export const FinishChangeStatus = {
-  created: 'created',
-  modified: 'modified',
-  deleted: 'deleted',
-} as const;
-
-export interface FinishChange {
-  file: string;
-  status: FinishChangeStatus;
-  description: string;
-}
-
-export interface FinishResult {
-  repo: string;
-  branch: string;
-  pr_url: string;
-  pr_number: number;
-  files_changed: number;
-  additions: number;
-  deletions: number;
-  summary: string;
-  changes: FinishChange[];
-}
-
 export interface RepoFinisherStatus {
   repo: string;
   hasBeenFinished: boolean;
@@ -344,6 +426,7 @@ export const ValuationConfidence = {
 } as const;
 
 export interface Valuation {
+  repo: string;
   estimated_value_low: number;
   estimated_value_high: number;
   currency: string;
@@ -378,73 +461,9 @@ export interface VibeToolsItemInput {
   itemRank: number;
 }
 
-export interface MarketCompetitor {
-  name: string;
-  url: string;
-  differentiator: string;
-}
-
-export type MarketAnalysisVerdict = typeof MarketAnalysisVerdict[keyof typeof MarketAnalysisVerdict];
-
-
-export const MarketAnalysisVerdict = {
-  ship_now: 'ship_now',
-  finish_first: 'finish_first',
-  combine_first: 'combine_first',
-  shelve: 'shelve',
-} as const;
-
-export interface MarketAnalysis {
-  tam_summary: string;
-  target_users: string[];
-  competitors: MarketCompetitor[];
-  monetization: string[];
-  demand_score: number;
-  ship_readiness_score: number;
-  risks: string[];
-  verdict: MarketAnalysisVerdict;
-}
-
-export interface MarketValuation {
-  low_usd: number;
-  mid_usd: number;
-  high_usd: number;
-  reasoning: string;
-}
-
 export interface MarketAndValueResult {
   market: MarketAnalysis;
   valuation: MarketValuation;
-}
-
-export interface VibeSpec {
-  product_name: string;
-  tagline: string;
-  prd_md: string;
-  lovable_prompt: string;
-  landing_hero: string;
-  landing_subhead: string;
-  landing_bullets: string[];
-  cta: string;
-  launch_checklist: string[];
-}
-
-export interface CombineStructureNode {
-  path: string;
-  purpose: string;
-}
-
-export interface CombineSourceIssue {
-  repo: string;
-  url: string;
-}
-
-export interface CombineResult {
-  combined_repo: string;
-  combined_url: string;
-  source_issues: CombineSourceIssue[];
-  structure: CombineStructureNode[];
-  integration_plan_md: string;
 }
 
 export interface IterativeFinishInput {
@@ -456,15 +475,6 @@ export interface IterativeFinishInput {
      * @maximum 4
      */
   passes?: number;
-}
-
-export interface IterativeFinishPass {
-  pass: number;
-  pr_url?: string;
-  pr_number?: number;
-  files_changed?: number;
-  summary?: string;
-  error?: string;
 }
 
 export interface IterativeFinishResult {

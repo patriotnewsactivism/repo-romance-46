@@ -631,6 +631,32 @@ components:
           type: ["integer", "null"]
         rank:
           type: integer
+        finish_result:
+          oneOf:
+            - $ref: "#/components/schemas/FinishResult"
+            - type: "null"
+        market_analysis:
+          oneOf:
+            - $ref: "#/components/schemas/MarketAnalysis"
+            - type: "null"
+        valuation:
+          oneOf:
+            - $ref: "#/components/schemas/MarketValuation"
+            - type: "null"
+        vibe_spec:
+          oneOf:
+            - $ref: "#/components/schemas/VibeSpec"
+            - type: "null"
+        combine_result:
+          oneOf:
+            - $ref: "#/components/schemas/CombineResult"
+            - type: "null"
+        finish_history:
+          type: ["array", "null"]
+          items:
+            $ref: "#/components/schemas/IterativeFinishPass"
+        iteration_count:
+          type: ["integer", "null"]
 
     AnalysisDetail:
       type: object
