@@ -9,6 +9,7 @@ import { supabase } from '@/integrations/supabase/client';
 import Landing from '@/pages/landing';
 import Auth from '@/pages/auth';
 import AuthCallback from '@/pages/auth-callback';
+import GithubCallback from '@/pages/github-callback';
 import Dashboard from '@/pages/dashboard';
 import AnalysisDetail from '@/pages/analysis-detail';
 import Settings from '@/pages/settings';
@@ -30,6 +31,7 @@ function Router() {
       <Route path="/" component={Landing} />
       <Route path="/auth" component={Auth} />
       <Route path="/auth/callback" component={AuthCallback} />
+      <Route path="/github/callback" component={GithubCallback} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/analysis/:id" component={AnalysisDetail} />
       <Route path="/settings" component={Settings} />

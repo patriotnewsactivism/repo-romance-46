@@ -3,6 +3,7 @@ import { useLocation, Link } from 'wouter';
 import { useGetPreferences, useUpdatePreferences, getGetPreferencesQueryKey, useDisconnectGithub, useGetGithubStatus } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { getSession, signOut } from '@/lib/auth';
+import { initiateGithubConnect } from '@/lib/github-connect';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -163,6 +164,12 @@ export default function Settings() {
             <CardDescription>Manage your GitHub account connection</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {!githubStatus?.connected && (
+              <Button onClick={initiateGithubConnect} data-testid="button-connect-github">
+                <GitBranch className="w-4 h-4 mr-2" />
+                Connect GitHub
+              </Button>
+            )}
             {githubStatus?.connected && (
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">

@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useLocation, Link } from 'wouter';
 import { useGetGithubStatus, useGetPortfolioSummary, useListAnalyses, useRunAnalysis } from '@workspace/api-client-react';
 import { getSession } from '@/lib/auth';
+import { initiateGithubConnect } from '@/lib/github-connect';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -63,9 +64,7 @@ export default function Dashboard() {
             <CardDescription>Please connect your GitHub account to continue</CardDescription>
           </CardHeader>
           <CardContent>
-            <Link href="/auth">
-              <Button className="w-full">Connect GitHub</Button>
-            </Link>
+            <Button className="w-full" onClick={initiateGithubConnect}>Connect GitHub</Button>
           </CardContent>
         </Card>
       </div>
