@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'wouter';
 import { supabase } from '@/integrations/supabase/client';
 import { Loader2 } from 'lucide-react';
@@ -6,21 +6,44 @@ import { Loader2 } from 'lucide-react';
 export default function AuthCallback() {
   const [, setLocation] = useLocation();
   const [error, setError] = useState<string | null>(null);
+  // Guards against a double-fire of this effect (React re-render / remount)
+  // trying to exchange the same one-time-use auth code twice. The first
+  // call succeeds and creates the session; a second call then fails with
+  // "auth code and code verifier should be non-empty" even though sign-in
+  // already worked — which used to show the user a scary error page while
+  // actually being signed in.
+  const attempted = useRef(false);
 
   useEffect(() => {
     const handleCallback = async () => {
+      if (attempted.current) return;
+      attempted.current = true;
+
       try {
         const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(
           window.location.href
         );
-        
+
         if (exchangeError) {
+          // Before showing an error, double-check whether a session already
+          // exists (e.g. an earlier/parallel exchange for this same code
+          // already succeeded). If so, this "error" is stale — proceed.
+          const { data: sessionData } = await supabase.auth.getSession();
+          if (sessionData.session) {
+            setLocation('/dashboard');
+            return;
+          }
           setError(exchangeError.message);
           return;
         }
 
         setLocation('/dashboard');
       } catch (err) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData.session) {
+          setLocation('/dashboard');
+          return;
+        }
         setError(err instanceof Error ? err.message : 'Authentication failed');
       }
     };
