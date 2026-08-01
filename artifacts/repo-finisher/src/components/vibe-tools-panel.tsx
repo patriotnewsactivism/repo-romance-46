@@ -30,6 +30,14 @@ interface VibeToolsPanelProps {
   itemRank: number;
   kind: string;
   repos: string[];
+  /** Previously persisted results for this recommendation, if any tool already ran. */
+  existing?: {
+    market_analysis?: MarketAnalysis | null;
+    valuation?: MarketValuation | null;
+    vibe_spec?: VibeSpec | null;
+    combine_result?: CombineResult | null;
+    finish_history?: IterativeFinishPass[] | null;
+  };
 }
 
 function fmtUsd(n: number) {
@@ -42,12 +50,12 @@ function copy(t: string, label: string) {
   navigator.clipboard.writeText(t).then(() => toast.success(`${label} copied`));
 }
 
-export function VibeToolsPanel({ analysisId, itemRank, kind, repos }: VibeToolsPanelProps) {
-  const [market, setMarket] = useState<MarketAnalysis | null>(null);
-  const [valuation, setValuation] = useState<MarketValuation | null>(null);
-  const [spec, setSpec] = useState<VibeSpec | null>(null);
-  const [combine, setCombine] = useState<CombineResult | null>(null);
-  const [history, setHistory] = useState<IterativeFinishPass[]>([]);
+export function VibeToolsPanel({ analysisId, itemRank, kind, repos, existing }: VibeToolsPanelProps) {
+  const [market, setMarket] = useState<MarketAnalysis | null>(existing?.market_analysis ?? null);
+  const [valuation, setValuation] = useState<MarketValuation | null>(existing?.valuation ?? null);
+  const [spec, setSpec] = useState<VibeSpec | null>(existing?.vibe_spec ?? null);
+  const [combine, setCombine] = useState<CombineResult | null>(existing?.combine_result ?? null);
+  const [history, setHistory] = useState<IterativeFinishPass[]>(existing?.finish_history ?? []);
 
   const marketMut = useAssessMarketAndValue();
   const specMut = useGenerateVibeSpec();

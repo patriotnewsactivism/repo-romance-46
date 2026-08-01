@@ -11,10 +11,12 @@ interface FinishRepoActionProps {
   nextSteps?: string[];
   analysisId?: string;
   itemRank?: number;
+  /** Previously persisted result, if this repo/recommendation was already finished. */
+  initialResult?: FinishResult | null;
 }
 
-export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank }: FinishRepoActionProps) {
-  const [result, setResult] = useState<FinishResult | null>(null);
+export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initialResult }: FinishRepoActionProps) {
+  const [result, setResult] = useState<FinishResult | null>(initialResult ?? null);
   const [showDetails, setShowDetails] = useState(false);
   const finishRepo = useFinishRepo();
 
