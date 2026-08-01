@@ -7,7 +7,6 @@ import { Loader2 } from 'lucide-react';
 export default function AuthCallback() {
   const [, setLocation] = useLocation();
   const [error, setError] = useState<string | null>(null);
-<<<<<<< Updated upstream
   // Guards against a double-fire of this effect (React re-render / remount)
   // trying to exchange the same one-time-use auth code twice. The first
   // call succeeds and creates the session; a second call then fails with
@@ -15,9 +14,7 @@ export default function AuthCallback() {
   // already worked — which used to show the user a scary error page while
   // actually being signed in.
   const attempted = useRef(false);
-=======
   const connectGithub = useConnectGithub();
->>>>>>> Stashed changes
 
   useEffect(() => {
     const handleCallback = async () => {
