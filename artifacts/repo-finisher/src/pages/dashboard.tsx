@@ -1,21 +1,50 @@
-import { useEffect } from 'react';
+import { useEffect, type MouseEvent } from 'react';
 import { useLocation, Link } from 'wouter';
-import { useGetGithubStatus, useGetPortfolioSummary, useListAnalyses, useRunAnalysis } from '@workspace/api-client-react';
+import {
+  useGetGithubStatus,
+  useGetPortfolioSummary,
+  useListAnalyses,
+  useRunAnalysis,
+  useDeleteAnalysis,
+  getListAnalysesQueryKey,
+} from '@workspace/api-client-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { getSession, signInWithGitHub } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
-import { GitBranch, Plus, Star, Code, Clock, AlertCircle, CheckCircle, Loader2, Settings } from 'lucide-react';
+import { GitBranch, Plus, Star, Code, Clock, AlertCircle, CheckCircle, Loader2, Settings, Trash2 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 
 export default function Dashboard() {
   const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
   const { data: githubStatus, isLoading: githubLoading } = useGetGithubStatus();
   const { data: portfolio, isLoading: portfolioLoading } = useGetPortfolioSummary();
   const { data: analyses, isLoading: analysesLoading } = useListAnalyses();
   const runAnalysis = useRunAnalysis();
+  const deleteAnalysis = useDeleteAnalysis();
+
+  const handleDelete = (e: MouseEvent, id: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm('Delete this analysis? This cannot be undone.')) return;
+
+    deleteAnalysis.mutate(
+      { id },
+      {
+        onSuccess: () => {
+          toast.success('Analysis deleted');
+          queryClient.invalidateQueries({ queryKey: getListAnalysesQueryKey() });
+        },
+        onError: (error) => {
+          toast.error('Failed to delete analysis', { description: error.message });
+        },
+      },
+    );
+  };
 
   useEffect(() => {
     getSession().then(session => {
@@ -259,6 +288,15 @@ export default function Dashboard() {
                             </p>
                           )}
                         </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => handleDelete(e, analysis.id)}
+                          disabled={deleteAnalysis.isPending}
+                          data-testid={`button-delete-analysis-${analysis.id}`}
+                        >
+                          <Trash2 className="w-4 h-4 text-muted-foreground hover:text-destructive" />
+                        </Button>
                       </div>
                     </CardContent>
                   </Card>
