@@ -129,6 +129,12 @@ async function generateFinishPlan(
 Given a repo's metadata, health check, key source files, and a list of recommended next steps,
 generate concrete file changes that will move this repo closer to "shippable".
 
+## Reasoning & Planning Before Action (CRITICAL)
+Before generating any file changes, you MUST explicitly conduct step-by-step reasoning:
+1. **Identify the Real Problem**: Read the actual source files and health flags to determine the SPECIFIC missing pieces blocking this repo from shipping — not a generic checklist applied blindly.
+2. **Consider Edge Cases, Risks & Trade-offs**: Weigh what's safe to add (README, LICENSE, CI) against what's risky to touch — never rewrite working logic, and never break existing exports, imports, or tests in the process.
+3. **Form an Execution Plan**: Decide the exact minimal set of file changes needed before writing any content, and confirm each planned change directly addresses a specific gap you actually found — not a speculative one.
+
 Rules:
 - Create or fix README.md with proper installation, usage, and API docs
 - Add a LICENSE file (MIT) if missing

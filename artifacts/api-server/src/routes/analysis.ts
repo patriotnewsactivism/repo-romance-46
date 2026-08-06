@@ -489,6 +489,12 @@ const RecommendationSchema = z.object({
 const FALLBACK_SYSTEM_PROMPT = `You are an expert product strategist and technical marketer reviewing a developer's GitHub portfolio.
 You analyze repos to find opportunities to FINISH, COMBINE, or REPURPOSE them into shippable products.
 
+## Reasoning & Planning Before Action (CRITICAL)
+Before writing any recommendation, you MUST explicitly conduct step-by-step reasoning:
+1. **Identify the Real Problem**: For each repo digest, determine what specifically is blocking it from being shippable or marketable — a missing feature, missing packaging, or the wrong target audience — not a generic gap.
+2. **Consider Edge Cases, Risks & Trade-offs**: Weigh effort vs. market_potential honestly. Watch for COMBINE pairings that look synergistic on paper but share no real technical overlap in the actual code.
+3. **Form an Execution Plan**: Decide the FINISH/COMBINE/REPURPOSE call and rank order before writing next_steps, so every recommendation traces back to specific files or features you actually saw in the digest.
+
 For each repo digest, identify:
 - FINISH: repos that are close to shippable — describe exactly what's missing and how to get it to v1.
 - COMBINE: 2+ repos that together form a stronger product than any alone. List their full names. Explain the synergy.
@@ -638,6 +644,12 @@ async function profilePortfolio(
     .join("\n");
 
   const systemPrompt = `You are an expert developer portfolio analyst. Analyze a developer's GitHub portfolio metadata and produce a strategic analysis profile that will be used to generate hyper-specific product recommendations.
+
+## Reasoning & Planning Before Action (CRITICAL)
+Before producing the JSON output, you MUST explicitly conduct step-by-step reasoning:
+1. **Identify the Real Problem**: Determine what this developer's actual body of work reveals about their skills, coding patterns, and unrealized product opportunities — not just a restatement of surface metadata (stars, languages, topics).
+2. **Consider Edge Cases, Risks & Trade-offs**: Watch for misleading signals — a dormant high-star repo vs. an active niche one, forks vs. original work, a mixed-language portfolio that looks scattered but actually reveals a consistent domain focus.
+3. **Form an Execution Plan**: Decide the cluster boundaries and the direction of custom_system_prompt before writing any JSON, so the downstream analysis stage receives precise, domain-specific guidance instead of generic advice.
 
 Output a JSON object with exactly these keys:
 
@@ -818,6 +830,12 @@ async function critiqueResults(
 
   const systemPrompt = `You are a ruthless quality reviewer of software product recommendations. Your job: find every weakness in these draft recommendations so the final synthesis can fix them.
 
+## Reasoning & Planning Before Action (CRITICAL)
+Before producing your critique, you MUST explicitly conduct step-by-step reasoning:
+1. **Identify the Real Problem**: Determine which specific draft recommendations are weak, generic, or miss real signal already present in the repo digests — not surface-level nitpicks.
+2. **Consider Edge Cases, Risks & Trade-offs**: Flag synergies that look plausible but aren't technically real. Don't let a recommendation slide just because it isn't obviously bad — "not wrong" is not the bar.
+3. **Form an Execution Plan**: Structure refinement_notes as a prioritized, actionable punch list the synthesis step can execute directly — not a vague summary of impressions.
+
 Produce JSON with:
 - gaps (string[]): Important repos, patterns, or opportunity types that were missed or underweighted. Be specific — name the repos.
 - too_generic (array of {title, reason}): Recommendations that are too generic — next_steps like "add tests" or "write documentation" without specifics, or pitches that don't reference actual code.
@@ -893,6 +911,12 @@ async function synthesizeWithReasoning(
     .join("\n");
 
   const systemPrompt = `You are a world-class product strategist performing the final synthesis of a developer portfolio analysis.
+
+## Reasoning & Planning Before Action (CRITICAL)
+Before producing the final JSON, you MUST explicitly conduct step-by-step reasoning:
+1. **Identify the Real Problem**: Determine exactly which critique points require a rewrite, an addition, or a removal before touching any single recommendation.
+2. **Consider Edge Cases, Risks & Trade-offs**: Don't over-correct into padding recommendations with unnecessary length — sharper and shorter beats generic and long.
+3. **Form an Execution Plan**: Sequence the fixes — remove generic items first, then add missed synergies, then sharpen every pitch — before producing final JSON, so nothing gets missed or duplicated.
 
 Apply the critique feedback strictly:
 1. Remove or rewrite any recommendation flagged as too generic — every next_step must reference specific files, APIs, or features visible in the repo digests.
