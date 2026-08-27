@@ -11,8 +11,13 @@ import {
   type PreparedFinishPlan,
   type VerificationResult,
 } from "../lib/repo-finisher-engine";
+import {
+  finalizeRunEvolution,
+  loadBaselineInvestmentMetrics,
+} from "../lib/post-run-evolution";
 
 const router: IRouter = Router();
+const DIRECT_PROMPT_VERSION = "direct-finisher-v2-measured";
 
 type RunStatus =
   | "awaiting_approval"
@@ -41,6 +46,13 @@ interface CompletionRunRow {
   pr_url: string | null;
   ci_status: string | null;
   error: string | null;
+  analysis_id: string | null;
+  item_rank: number | null;
+  prompt_version: string | null;
+  baseline_metrics: unknown;
+  outcome_metrics: unknown;
+  outcome_score: number | null;
+  evaluated_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -96,12 +108,13 @@ async function setVerificationState(
 
   const nextStatus: RunStatus = verification.state === "passed" ? "succeeded" : verification.state === "failed" ? "failed" : "verifying";
   const now = new Date().toISOString();
+  const nextError = verification.state === "failed" ? verification.message : null;
   const { error } = await supabase
     .from("completion_runs")
     .update({
       status: nextStatus,
       ci_status: verification.state,
-      error: verification.state === "failed" ? verification.message : null,
+      error: nextError,
       updated_at: now,
     })
     .eq("id", run.id)
@@ -137,6 +150,16 @@ async function setVerificationState(
     );
   }
 
+  if (nextStatus === "succeeded" || nextStatus === "failed") {
+    await finalizeRunEvolution(supabase, userId, {
+      ...run,
+      status: nextStatus,
+      ci_status: verification.state,
+      error: nextError,
+      updated_at: now,
+    }).catch(() => null);
+  }
+
   return nextStatus;
 }
 
@@ -153,7 +176,10 @@ router.post(
       })
       .parse(req.body);
 
-    const { plan, planHash } = await prepareFinishPlan(req.supabase!, req.userId!, input);
+    const [{ plan, planHash }, baselineMetrics] = await Promise.all([
+      prepareFinishPlan(req.supabase!, req.userId!, input),
+      loadBaselineInvestmentMetrics(req.supabase!, req.userId!, input.analysisId, input.repo),
+    ]);
     const now = new Date().toISOString();
     const { data: runData, error } = await req.supabase!
       .from("completion_runs")
@@ -165,6 +191,10 @@ router.post(
         plan_hash: planHash,
         plan,
         status: "awaiting_approval",
+        analysis_id: input.analysisId ?? null,
+        item_rank: input.itemRank ?? null,
+        prompt_version: DIRECT_PROMPT_VERSION,
+        baseline_metrics: baselineMetrics,
         created_at: now,
         updated_at: now,
       })
@@ -197,7 +227,7 @@ router.post(
       "plan_created",
       "info",
       `Prepared ${plan.changes.length} exact file change${plan.changes.length === 1 ? "" : "s"} for approval.`,
-      { baseSha: plan.baseSha, planHash },
+      { baseSha: plan.baseSha, planHash, promptVersion: DIRECT_PROMPT_VERSION, baselineMetrics },
     );
 
     res.status(201).json({
@@ -210,6 +240,8 @@ router.post(
       summary: plan.summary,
       nextSteps: plan.nextSteps,
       changes: plan.changes.map(({ mode: _mode, ...change }) => change),
+      promptVersion: DIRECT_PROMPT_VERSION,
+      baselineMetrics,
       createdAt: run.created_at,
     });
   }),
@@ -299,6 +331,7 @@ router.post(
     await recordEvent(req.supabase!, req.userId!, run.id, "execution_started", "info", "Executing the approved atomic plan.", {
       baseSha: run.base_sha,
       planHash: run.plan_hash,
+      promptVersion: run.prompt_version,
     });
 
     try {
@@ -341,7 +374,16 @@ router.post(
       );
 
       const verification = await verifyCommitChecks(req.supabase!, req.userId!, run.repo, result.head_sha);
-      const currentRun = { ...run, status: "verifying" as const, head_sha: result.head_sha };
+      const currentRun: CompletionRunRow = {
+        ...run,
+        status: "verifying",
+        head_sha: result.head_sha,
+        branch_name: result.branch,
+        pr_number: result.pr_number,
+        pr_url: result.pr_url,
+        ci_status: "pending",
+        updated_at: verifyingAt,
+      };
       const status = await setVerificationState(req.supabase!, req.userId!, currentRun, verification);
 
       res.json({ runId: run.id, status, result, verification });
@@ -368,6 +410,12 @@ router.post(
         stale ? "warning" : "error",
         executionError.message,
       );
+      await finalizeRunEvolution(req.supabase!, req.userId!, {
+        ...run,
+        status,
+        error: executionError.message,
+        updated_at: failedAt,
+      }).catch(() => null);
       throw error;
     }
   }),
@@ -384,6 +432,11 @@ router.get(
     if (run.status === "verifying" && run.head_sha) {
       verification = await verifyCommitChecks(req.supabase!, req.userId!, run.repo, run.head_sha);
       await setVerificationState(req.supabase!, req.userId!, run, verification);
+      run = await loadRun(req.supabase!, runId);
+    }
+
+    if ((run.status === "succeeded" || run.status === "failed" || run.status === "stale") && !run.evaluated_at) {
+      await finalizeRunEvolution(req.supabase!, req.userId!, run).catch(() => null);
       run = await loadRun(req.supabase!, runId);
     }
 
@@ -410,6 +463,13 @@ router.get(
         ciStatus: run.ci_status,
         error: run.error,
         summary: run.plan.summary,
+        analysisId: run.analysis_id,
+        itemRank: run.item_rank,
+        promptVersion: run.prompt_version,
+        baselineMetrics: run.baseline_metrics,
+        outcomeMetrics: run.outcome_metrics,
+        outcomeScore: run.outcome_score,
+        evaluatedAt: run.evaluated_at,
         createdAt: run.created_at,
         updatedAt: run.updated_at,
       },
