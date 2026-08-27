@@ -1,0 +1,1 @@
+Gemini is the configured default AI provider for Repo Romance. The default model is gemini-3.7-flash. User-supplied provider keys continue to override the platform default.
