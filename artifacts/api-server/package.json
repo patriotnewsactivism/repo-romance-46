@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@sentry/node": "10.71.0",
     "@supabase/supabase-js": "^2.49.4",
     "@vercel/functions": "^3.9.5",
     "@workspace/api-zod": "workspace:*",

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
 import { callAI } from "../lib/ai-provider";
-import { loadAiCredential } from "../lib/credentials";
+import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "../lib/credentials";
 
 const router: IRouter = Router();
 
@@ -464,14 +464,8 @@ export async function finishRepoCore(
 ): Promise<FinishResult> {
   validateRepoName(data.repo);
 
-  const { data: conn } = await supabase
-    .from("github_connections")
-    .select("github_login, access_token")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (!conn) throw Object.assign(new Error("Connect GitHub first."), { status: 400 });
-
-  const token = conn.access_token;
+  const github = requireGithubCredential(await loadGithubCredential(supabase, userId));
+  const token = github.token;
 
   const repoRes = await ghFetch(token, `/repos/${data.repo}`);
   if (!repoRes.ok) throw new Error(`Repo not found: ${data.repo}`);
