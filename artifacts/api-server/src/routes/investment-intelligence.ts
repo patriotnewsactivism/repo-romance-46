@@ -53,6 +53,20 @@ interface GhTreeEntry {
   sha?: string;
 }
 
+interface CompetitionRepo {
+  repo: string;
+  stars: number;
+  forks: number;
+  pushed_at: string;
+  description: string | null;
+}
+
+interface CompetitionResult {
+  query: string;
+  totalCount: number;
+  competitors: CompetitionRepo[];
+}
+
 interface MarketModel {
   market_need_score: number;
   demand_score: number;
@@ -167,7 +181,12 @@ async function fetchAcceptanceEvidence(token: string, repo: string, headSha: str
     );
     const checks = data.check_runs ?? [];
     const passed = (pattern: RegExp) =>
-      checks.some((check) => pattern.test(check.name) && check.status === "completed" && ["success", "neutral", "skipped"].includes(check.conclusion || ""));
+      checks.some(
+        (check) =>
+          pattern.test(check.name) &&
+          check.status === "completed" &&
+          ["success", "neutral", "skipped"].includes(check.conclusion || ""),
+      );
     return {
       buildPassed: passed(/build|ci|verify/i),
       typecheckPassed: passed(/type|tsc|ci|verify/i),
@@ -204,54 +223,105 @@ function searchTerms(repo: GhRepo): string[] {
     .toLowerCase()
     .replace(/[^a-z0-9 -]/g, " ")
     .split(/\s+/)
-    .filter((word) => word.length >= 4 && !["with", "from", "that", "this", "your", "repo", "application"].includes(word));
+    .filter(
+      (word) =>
+        word.length >= 4 &&
+        !["with", "from", "that", "this", "your", "repo", "application"].includes(word),
+    );
   return [...new Set(words)].slice(0, 3);
 }
 
-async function fetchCompetition(token: string, repo: GhRepo) {
+async function fetchCompetition(token: string, repo: GhRepo): Promise<CompetitionResult> {
   const terms = searchTerms(repo);
-  if (terms.length === 0) return { query: "", totalCount: 0, competitors: [] as Array<Record<string, unknown>> };
+  if (terms.length === 0) return { query: "", totalCount: 0, competitors: [] };
+
   const query = `${terms.join(" ")}${repo.language ? ` language:${repo.language}` : ""}`;
   try {
     const { data } = await ghJson<{
       total_count: number;
-      items: Array<{ full_name: string; description: string | null; stargazers_count: number; forks_count: number; pushed_at: string }>;
+      items: Array<{
+        full_name: string;
+        description: string | null;
+        stargazers_count: number;
+        forks_count: number;
+        pushed_at: string;
+      }>;
     }>(token, `/search/repositories?q=${encodeURIComponent(query)}&sort=stars&order=desc&per_page=10`);
-    return {
-      query,
-      totalCount: data.total_count,
-      competitors: data.items
-        .filter((item) => item.full_name !== repo.full_name)
-        .slice(0, 8)
-        .map((item) => ({
-          repo: item.full_name,
-          stars: item.stargazers_count,
-          forks: item.forks_count,
-          pushed_at: item.pushed_at,
-          description: item.description,
-        })),
-    };
+
+    const competitors: CompetitionRepo[] = data.items
+      .filter((item) => item.full_name !== repo.full_name)
+      .slice(0, 8)
+      .map((item) => ({
+        repo: item.full_name,
+        stars: item.stargazers_count,
+        forks: item.forks_count,
+        pushed_at: item.pushed_at,
+        description: item.description,
+      }));
+
+    return { query, totalCount: data.total_count, competitors };
   } catch {
-    return { query, totalCount: 0, competitors: [] as Array<Record<string, unknown>> };
+    return { query, totalCount: 0, competitors: [] };
   }
 }
 
-function fallbackMarketModel(repo: GhRepo, context: AnalysisItemContext | null, competition: Awaited<ReturnType<typeof fetchCompetition>>): MarketModel {
+function fallbackMarketModel(
+  repo: GhRepo,
+  context: AnalysisItemContext | null,
+  competition: CompetitionResult,
+): MarketModel {
   const marketNeed = context?.marketPotential ? context.marketPotential * 20 : 50;
-  const demand = Math.max(25, Math.min(85, 35 + Math.log10(repo.stargazers_count + repo.forks_count + 2) * 12));
-  const topStars = competition.competitors.reduce((max, item) => Math.max(max, Number(item.stars || 0)), 0);
-  const pressure = Math.max(20, Math.min(90, 25 + Math.log10(competition.totalCount + 1) * 10 + Math.log10(topStars + 1) * 8));
+  const demand = Math.max(
+    25,
+    Math.min(85, 35 + Math.log10(repo.stargazers_count + repo.forks_count + 2) * 12),
+  );
+  const topStars = competition.competitors.reduce(
+    (max, item) => Math.max(max, item.stars),
+    0,
+  );
+  const pressure = Math.max(
+    20,
+    Math.min(
+      90,
+      25 +
+        Math.log10(competition.totalCount + 1) * 10 +
+        Math.log10(topStars + 1) * 8,
+    ),
+  );
+
   return {
     market_need_score: Math.round(marketNeed),
     demand_score: Math.round(demand),
     competitive_pressure_score: Math.round(pressure),
     confidence: competition.competitors.length > 0 ? 45 : 30,
-    market_summary: "Heuristic market proxy based on repository context and GitHub competition; broader customer demand is not independently verified.",
+    market_summary:
+      "Heuristic market proxy based on repository context and GitHub competition; broader customer demand is not independently verified.",
     recommended_next_steps: context?.nextSteps?.slice(0, 8) ?? [],
     scenarios: [
-      { name: "conservative", customers: 25, arpuMonthlyUsd: 15, grossMarginPct: 75, probability: 0.55, assumptions: ["Planning assumption; no customer evidence supplied"] },
-      { name: "base", customers: 150, arpuMonthlyUsd: 25, grossMarginPct: 80, probability: 0.3, assumptions: ["Planning assumption; requires launch and distribution"] },
-      { name: "strong-execution", customers: 600, arpuMonthlyUsd: 35, grossMarginPct: 82, probability: 0.15, assumptions: ["Upside scenario, not a forecast"] },
+      {
+        name: "conservative",
+        customers: 25,
+        arpuMonthlyUsd: 15,
+        grossMarginPct: 75,
+        probability: 0.55,
+        assumptions: ["Planning assumption; no customer evidence supplied"],
+      },
+      {
+        name: "base",
+        customers: 150,
+        arpuMonthlyUsd: 25,
+        grossMarginPct: 80,
+        probability: 0.3,
+        assumptions: ["Planning assumption; requires launch and distribution"],
+      },
+      {
+        name: "strong-execution",
+        customers: 600,
+        arpuMonthlyUsd: 35,
+        grossMarginPct: 82,
+        probability: 0.15,
+        assumptions: ["Upside scenario, not a forecast"],
+      },
     ],
   };
 }
@@ -259,7 +329,7 @@ function fallbackMarketModel(repo: GhRepo, context: AnalysisItemContext | null, 
 async function generateMarketModel(
   repo: GhRepo,
   context: AnalysisItemContext | null,
-  competition: Awaited<ReturnType<typeof fetchCompetition>>,
+  competition: CompetitionResult,
   ai: { provider: string; apiKey: string | null },
 ): Promise<MarketModel> {
   const fallback = fallbackMarketModel(repo, context, competition);
@@ -309,7 +379,11 @@ Return strict JSON only.`;
                 competitive_pressure_score: { type: "integer", minimum: 0, maximum: 100 },
                 confidence: { type: "integer", minimum: 0, maximum: 100 },
                 market_summary: { type: "string" },
-                recommended_next_steps: { type: "array", maxItems: 10, items: { type: "string" } },
+                recommended_next_steps: {
+                  type: "array",
+                  maxItems: 10,
+                  items: { type: "string" },
+                },
                 scenarios: {
                   type: "array",
                   minItems: 3,
@@ -318,18 +392,36 @@ Return strict JSON only.`;
                     type: "object",
                     additionalProperties: false,
                     properties: {
-                      name: { type: "string", enum: ["conservative", "base", "strong-execution"] },
+                      name: {
+                        type: "string",
+                        enum: ["conservative", "base", "strong-execution"],
+                      },
                       customers: { type: "integer", minimum: 0 },
                       arpuMonthlyUsd: { type: "number", minimum: 0 },
                       grossMarginPct: { type: "number", minimum: 0, maximum: 100 },
                       probability: { type: "number", minimum: 0, maximum: 1 },
                       assumptions: { type: "array", items: { type: "string" } },
                     },
-                    required: ["name", "customers", "arpuMonthlyUsd", "grossMarginPct", "probability", "assumptions"],
+                    required: [
+                      "name",
+                      "customers",
+                      "arpuMonthlyUsd",
+                      "grossMarginPct",
+                      "probability",
+                      "assumptions",
+                    ],
                   },
                 },
               },
-              required: ["market_need_score", "demand_score", "competitive_pressure_score", "confidence", "market_summary", "recommended_next_steps", "scenarios"],
+              required: [
+                "market_need_score",
+                "demand_score",
+                "competitive_pressure_score",
+                "confidence",
+                "market_summary",
+                "recommended_next_steps",
+                "scenarios",
+              ],
             },
           },
         },
@@ -369,20 +461,19 @@ async function inspectOneRepo(
   context: AnalysisItemContext | null,
   ai: { provider: string; apiKey: string | null },
 ) {
-  const [{ data: repo }, { data: branch }] = await Promise.all([
-    ghJson<GhRepo>(token, `/repos/${repoName}`),
-    ghJson<{ commit: { sha: string } }>(token, `/repos/${repoName}/branches/${encodeURIComponent("main")}`).catch(() => ({ data: { commit: { sha: "" } }, headers: new Headers() })),
-  ]);
-
+  const { data: repo } = await ghJson<GhRepo>(token, `/repos/${repoName}`);
   const defaultBranch = repo.default_branch || "main";
-  let headSha = branch.commit.sha;
-  if (!headSha || defaultBranch !== "main") {
-    const resolved = await ghJson<{ commit: { sha: string } }>(token, `/repos/${repoName}/branches/${encodeURIComponent(defaultBranch)}`);
-    headSha = resolved.data.commit.sha;
-  }
+  const { data: branch } = await ghJson<{ commit: { sha: string } }>(
+    token,
+    `/repos/${repoName}/branches/${encodeURIComponent(defaultBranch)}`,
+  );
+  const headSha = branch.commit.sha;
 
   const [{ data: treeResult }, commitCount, acceptance, competition] = await Promise.all([
-    ghJson<{ tree: GhTreeEntry[]; truncated?: boolean }>(token, `/repos/${repoName}/git/trees/${headSha}?recursive=1`),
+    ghJson<{ tree: GhTreeEntry[]; truncated?: boolean }>(
+      token,
+      `/repos/${repoName}/git/trees/${headSha}?recursive=1`,
+    ),
     fetchCommitCount(token, repoName),
     fetchAcceptanceEvidence(token, repoName, headSha),
     fetchCompetition(token, repo),
@@ -416,17 +507,29 @@ async function inspectOneRepo(
     replacement: {
       estimatedHours: estimatedTotalBuildHours,
       completionPct: completion.overall,
-      marketPotential: Math.max(1, Math.min(5, (market.market_need_score + market.demand_score) / 40)),
+      marketPotential: Math.max(
+        1,
+        Math.min(5, (market.market_need_score + market.demand_score) / 40),
+      ),
       stars: repo.stargazers_count,
       hasRevenueSignals: false,
     },
     traction: {
       githubStars: repo.stargazers_count,
-      sources: [{ claim: "GitHub stars", url: `https://github.com/${repoName}`, retrievedAt: new Date().toISOString() }],
+      sources: [
+        {
+          claim: "GitHub stars",
+          url: `https://github.com/${repoName}`,
+          retrievedAt: new Date().toISOString(),
+        },
+      ],
     },
   });
 
-  const potential = projectPotential(market.scenarios, market.confidence >= 70 ? "medium" : "low");
+  const potential = projectPotential(
+    market.scenarios,
+    market.confidence >= 70 ? "medium" : "low",
+  );
   const potentialLows = potential.scenarios.map((scenario) => scenario.valuationRange.low);
   const potentialHighs = potential.scenarios.map((scenario) => scenario.valuationRange.high);
   const potentialRange = {
@@ -446,11 +549,18 @@ async function inspectOneRepo(
     activityScore: activity,
   });
 
-  const analyzedCoverage = index.totalFileCount === 0 ? 0 : Math.min(1, index.analyzedFileCount / Math.min(60, index.totalFileCount));
+  const analyzedCoverage =
+    index.totalFileCount === 0
+      ? 0
+      : Math.min(1, index.analyzedFileCount / Math.min(60, index.totalFileCount));
   const evidenceConfidence = Math.round(
     Math.min(
       100,
-      25 + analyzedCoverage * 25 + (acceptance.verifiedAt ? 15 : 0) + (competition.competitors.length > 0 ? 15 : 0) + market.confidence * 0.2,
+      25 +
+        analyzedCoverage * 25 +
+        (acceptance.verifiedAt ? 15 : 0) +
+        (competition.competitors.length > 0 ? 15 : 0) +
+        market.confidence * 0.2,
     ),
   );
 
@@ -479,14 +589,16 @@ async function inspectOneRepo(
     {
       class: competition.competitors.length > 0 ? "verified" : "insufficient",
       label: "Competitive pressure proxy",
-      detail: competition.competitors.length > 0
-        ? `${competition.totalCount.toLocaleString()} GitHub search matches; ${competition.competitors.length} leading open-source alternatives sampled.`
-        : "No reliable GitHub competition sample was available; broader commercial competition is unknown.",
+      detail:
+        competition.competitors.length > 0
+          ? `${competition.totalCount.toLocaleString()} GitHub search matches; ${competition.competitors.length} leading open-source alternatives sampled.`
+          : "No reliable GitHub competition sample was available; broader commercial competition is unknown.",
     },
     {
       class: "insufficient",
       label: "Revenue and customer evidence",
-      detail: "No verified MRR, paying-customer, retention, or active-user evidence was provided, so present value confidence remains conservative.",
+      detail:
+        "No verified MRR, paying-customer, retention, or active-user evidence was provided, so present value confidence remains conservative.",
     },
   ];
 
@@ -494,7 +606,9 @@ async function inspectOneRepo(
     ...completion.missingBreakdown.flatMap((gap) => gap.reasons.slice(0, 1)),
     ...market.recommended_next_steps,
     ...(context?.nextSteps ?? []),
-  ].filter((step, index, all) => step && all.indexOf(step) === index).slice(0, 10);
+  ]
+    .filter((step, index, all) => step && all.indexOf(step) === index)
+    .slice(0, 10);
 
   return {
     opportunity: {
@@ -531,17 +645,33 @@ async function inspectOneRepo(
         sourceFiles: sourceFiles.length,
         sourceBytes,
       },
-      market: {
-        ...market,
-        githubCompetition: competition,
-      },
+      market: { ...market, githubCompetition: competition },
       recommendedNextSteps,
       autonomousAgentPlan: [
-        { role: "architect", objective: "Turn the highest-value verified gaps into the smallest safe implementation plan." },
-        { role: "implementation", objective: "Write complete production code for the approved plan while preserving working behavior." },
-        { role: "test", objective: "Add or strengthen tests around changed behavior and edge cases." },
-        { role: "security-review", objective: "Challenge auth, secret handling, injection, permissions, and dependency risks before execution." },
-        { role: "release", objective: "Verify CI, deployment health, smoke tests, and measurable completion-score improvement." },
+        {
+          role: "architect",
+          objective:
+            "Turn the highest-value verified gaps into the smallest safe implementation plan.",
+        },
+        {
+          role: "implementation",
+          objective:
+            "Write complete production code for the approved plan while preserving working behavior.",
+        },
+        {
+          role: "test",
+          objective: "Add or strengthen tests around changed behavior and edge cases.",
+        },
+        {
+          role: "security-review",
+          objective:
+            "Challenge auth, secret handling, injection, permissions, and dependency risks before execution.",
+        },
+        {
+          role: "release",
+          objective:
+            "Verify CI, deployment health, smoke tests, and measurable completion-score improvement.",
+        },
       ],
     },
   };
@@ -553,6 +683,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     const userId = req.userId!;
+
     const { data: analysis, error: analysisError } = await req.supabase!
       .from("analyses")
       .select("id")
@@ -572,8 +703,15 @@ router.post(
     const itemRows = (items ?? []) as Array<Record<string, unknown>>;
     const contexts = contextByRepo(itemRows);
     const repos = [...contexts.keys()];
-    if (repos.length === 0) throw Object.assign(new Error("No repositories were found in this analysis."), { status: 400 });
-    if (repos.length > 30) throw Object.assign(new Error("Investment intelligence is limited to 30 repositories per run."), { status: 400 });
+    if (repos.length === 0) {
+      throw Object.assign(new Error("No repositories were found in this analysis."), { status: 400 });
+    }
+    if (repos.length > 30) {
+      throw Object.assign(
+        new Error("Investment intelligence is limited to 30 repositories per run."),
+        { status: 400 },
+      );
+    }
 
     const github = requireGithubCredential(await loadGithubCredential(req.supabase!, userId));
     const aiCredential = await loadAiCredential(req.supabase!, userId, github.token);
@@ -588,7 +726,9 @@ router.post(
         while (cursor < repos.length) {
           const repo = repos[cursor++];
           try {
-            inspected.push(await inspectOneRepo(github.token, repo, contexts.get(repo) ?? null, ai));
+            inspected.push(
+              await inspectOneRepo(github.token, repo, contexts.get(repo) ?? null, ai),
+            );
           } catch (error) {
             errors.push(`${repo}: ${error instanceof Error ? error.message : String(error)}`);
           }
@@ -596,11 +736,22 @@ router.post(
       }),
     );
 
-    if (inspected.length === 0) throw new Error(`Investment intelligence failed for every repository: ${errors.join("; ")}`);
+    if (inspected.length === 0) {
+      throw new Error(
+        `Investment intelligence failed for every repository: ${errors.join("; ")}`,
+      );
+    }
 
-    const ranked = rankInvestmentOpportunities(inspected.map((entry) => entry.opportunity));
-    const detailByRepo = new Map(inspected.map((entry) => [entry.details.repo, entry.details]));
-    const ranking = ranked.map((entry) => ({ ...entry, details: detailByRepo.get(entry.repo) }));
+    const ranked = rankInvestmentOpportunities(
+      inspected.map((entry) => entry.opportunity),
+    );
+    const detailByRepo = new Map(
+      inspected.map((entry) => [entry.details.repo, entry.details]),
+    );
+    const ranking = ranked.map((entry) => ({
+      ...entry,
+      details: detailByRepo.get(entry.repo),
+    }));
     const generatedAt = new Date().toISOString();
     const result = {
       methodologyVersion: METHODOLOGY_VERSION,
@@ -610,28 +761,50 @@ router.post(
       errors,
       portfolio: {
         reposScored: ranking.length,
-        presentValueLow: ranking.reduce((sum, item) => sum + item.presentValueUsd.low, 0),
-        presentValueHigh: ranking.reduce((sum, item) => sum + item.presentValueUsd.high, 0),
-        potentialValueLow: ranking.reduce((sum, item) => sum + item.potentialValueUsd.low, 0),
-        potentialValueHigh: ranking.reduce((sum, item) => sum + item.potentialValueUsd.high, 0),
+        presentValueLow: ranking.reduce(
+          (sum, item) => sum + item.presentValueUsd.low,
+          0,
+        ),
+        presentValueHigh: ranking.reduce(
+          (sum, item) => sum + item.presentValueUsd.high,
+          0,
+        ),
+        potentialValueLow: ranking.reduce(
+          (sum, item) => sum + item.potentialValueUsd.low,
+          0,
+        ),
+        potentialValueHigh: ranking.reduce(
+          (sum, item) => sum + item.potentialValueUsd.high,
+          0,
+        ),
         weightedCommercializationProbability: Math.round(
-          ranking.reduce((sum, item) => sum + item.commercializationProbability, 0) / ranking.length,
+          ranking.reduce((sum, item) => sum + item.commercializationProbability, 0) /
+            ranking.length,
         ),
       },
       recommendation: ranking[0]
         ? `Finish ${ranking[0].repo} first. Its ${ranking[0].finishFirstScore}/100 finish-first score is the strongest risk-adjusted value-unlock opportunity in this analysis.`
         : "No ranked recommendation is available.",
-      evidencePolicy: "Every claim is classified as verified evidence, derived metric, model estimate, or insufficient evidence. Model estimates are never presented as observed facts.",
+      evidencePolicy:
+        "Every claim is classified as verified evidence, derived metric, model estimate, or insufficient evidence. Model estimates are never presented as observed facts.",
     };
 
     const { error: saveError } = await req.supabase!
       .from("analyses")
-      .update({ investment_intelligence: result, investment_intelligence_updated_at: generatedAt })
+      .update({
+        investment_intelligence: result,
+        investment_intelligence_updated_at: generatedAt,
+      })
       .eq("id", id)
       .eq("user_id", userId);
     if (saveError) {
       if (saveError.code === "42703" || /investment_intelligence/i.test(saveError.message)) {
-        throw Object.assign(new Error("Investment intelligence schema is not applied yet. Run the repository migration first."), { status: 503 });
+        throw Object.assign(
+          new Error(
+            "Investment intelligence schema is not applied yet. Run the repository migration first.",
+          ),
+          { status: 503 },
+        );
       }
       throw new Error(`Failed to save investment intelligence: ${saveError.message}`);
     }
@@ -646,7 +819,11 @@ router.post(
           files_affected: [],
           fix_pattern: "investment-intelligence",
           prompt_version: METHODOLOGY_VERSION,
-          metadata: { rank: item.rank, finishFirstScore: item.finishFirstScore, evidenceConfidence: item.evidenceConfidence },
+          metadata: {
+            rank: item.rank,
+            finishFirstScore: item.finishFirstScore,
+            evidenceConfidence: item.evidenceConfidence,
+          },
           timestamp: generatedAt,
         }),
       ),
@@ -669,7 +846,10 @@ router.get(
       .maybeSingle();
     if (error) {
       if (error.code === "42703" || /investment_intelligence/i.test(error.message)) {
-        throw Object.assign(new Error("Investment intelligence schema is not applied yet."), { status: 503 });
+        throw Object.assign(
+          new Error("Investment intelligence schema is not applied yet."),
+          { status: 503 },
+        );
       }
       throw new Error(`Failed to load investment intelligence: ${error.message}`);
     }
