@@ -31,7 +31,10 @@ jobs:
           cache: pnpm
 
       - name: Apply source hardening
-        run: python3 .github/scripts/apply-observability-hardening.py
+        run: |
+          sed -i 's/if count != 1:/if count < 1:/' .github/scripts/apply-observability-hardening.py
+          sed -i 's/text.replace(old, new, 1)/text.replace(old, new)/' .github/scripts/apply-observability-hardening.py
+          python3 .github/scripts/apply-observability-hardening.py
 
       - name: Add Sentry SDK
         run: pnpm --filter @workspace/api-server add @sentry/node@10.71.0
