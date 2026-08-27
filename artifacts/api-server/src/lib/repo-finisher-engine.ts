@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { callAI } from "./ai-provider";
+import { loadAiCredential } from "./credentials";
 
 const MAX_CHANGES = 25;
 const MAX_FILE_BYTES = 750_000;
@@ -487,23 +488,15 @@ export async function prepareFinishPlan(
   const nextSteps = await resolveNextSteps(supabase, data);
   const files = await fetchKeyFiles(context.token, data.repo, context.baseSha, context.tree);
 
-  const { data: prefs, error: prefsError } = await supabase
-    .from("user_preferences")
-    .select("custom_ai_provider, custom_ai_key")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (prefsError) throw new Error(`Failed to load AI preferences: ${prefsError.message}`);
-
-  let aiKey = prefs?.custom_ai_key || null;
-  if (prefs?.custom_ai_provider === "github_models" && !aiKey) aiKey = context.token;
+  const aiCredential = await loadAiCredential(supabase, userId, context.token);
 
   const generated = await generateFinishPlan(
     data.repo,
     context.repoData,
     files,
     nextSteps,
-    prefs?.custom_ai_provider || "openai",
-    aiKey,
+    aiCredential.provider,
+    aiCredential.apiKey,
   );
   const changes = validatePlanChanges(generated.changes, context.tree);
 
