@@ -1070,6 +1070,26 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
     await supabase.from("analyses").update({ error: msg, updated_at: new Date().toISOString() }).eq("id", analysisId);
   };
 
+  // The Vercel function this job runs inside has a hard maxDuration ceiling
+  // (see api/[...path].mjs). Large portfolios can genuinely exceed it: when
+  // that happens Vercel silently kills the invocation mid-await with no
+  // exception, leaving the row frozen at whatever progress message was last
+  // written until the 10-minute staleness watchdog (GET /analysis/:id) marks
+  // it failed. That produced a confusing "hung, then failed for no reason"
+  // experience. This budget guard fails fast and clearly instead, well before
+  // the platform ceiling, so the user gets an actionable message immediately.
+  const jobStartedAt = Date.now();
+  const SAFE_BUDGET_MS = 660_000; // 11 min — leaves ~90s margin under the 750s function ceiling
+  const assertWithinBudget = (stage: string) => {
+    const elapsed = Date.now() - jobStartedAt;
+    if (elapsed > SAFE_BUDGET_MS) {
+      throw new Error(
+        `Analysis exceeded its safe execution budget before "${stage}" (${Math.round(elapsed / 1000)}s elapsed). ` +
+          `This portfolio is too large for a single run — try the "Fast" analysis tier or lower "Max repos to analyze" in Settings.`,
+      );
+    }
+  };
+
   try {
     const maxRepos = prefs?.filter_max_repos || 200;
 
@@ -1269,12 +1289,24 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
 
     // Cross-batch completion-coverage pass for portfolios spanning multiple batches
     if (hasMultipleBatches && draftRecommendations.length > 0) {
+      assertWithinBudget("cross-batch completion coverage");
       await reportProgress("Checking cross-batch completion coverage…");
-      const crossBatchRecs = await synthesizeCrossBatch(draftRecommendations, digests, aiConfig);
+      const crossBatchRecs = await withTimeout(
+        synthesizeCrossBatch(draftRecommendations, digests, aiConfig),
+        90000,
+        "Cross-batch synthesis",
+      ).catch((e) => {
+        // synthesizeCrossBatch already swallows its own AI-call errors and
+        // returns []; this catch only guards the timeout race itself so a
+        // stalled provider can't hang the job indefinitely.
+        console.warn("[analysis] Cross-batch synthesis timed out, continuing with batch results:", e);
+        return [];
+      });
       if (crossBatchRecs.length > 0) draftRecommendations.push(...crossBatchRecs);
     }
 
     // ── Step 5: Self-critique pass ───────────────────────────────────────────
+    assertWithinBudget("self-critique");
     await reportProgress("Self-critiquing results…");
     const repoIndex = digests
       .map((d) => {
@@ -1307,6 +1339,7 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
     }
 
     // ── Step 6: Final synthesis ──────────────────────────────────────────────
+    assertWithinBudget("final synthesis");
     await reportProgress("Synthesizing final insights…");
     const finalResult = await withTimeout(
       synthesizeWithReasoning(draftRecommendations, critique, repoIndex, aiConfig, stageModels),
