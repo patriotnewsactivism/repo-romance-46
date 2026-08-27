@@ -35,7 +35,7 @@ export async function insertCompletionRunCompat(
   const first = await supabase.from("completion_runs").insert(values).select(select).single();
   if (!first.error) {
     return {
-      data: first.data as Record<string, unknown>,
+      data: first.data as unknown as Record<string, unknown>,
       error: null,
       telemetryPersisted: true,
     };
@@ -51,7 +51,7 @@ export async function insertCompletionRunCompat(
     .select(select)
     .single();
   return {
-    data: fallback.data ? (fallback.data as Record<string, unknown>) : null,
+    data: fallback.data ? (fallback.data as unknown as Record<string, unknown>) : null,
     error: fallback.error,
     telemetryPersisted: false,
   };
