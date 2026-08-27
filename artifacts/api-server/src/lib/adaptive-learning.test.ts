@@ -54,4 +54,30 @@ describe("summarizeStrategyPerformance", () => {
       averageOutcomeScore: 44,
     });
   });
+
+  it("does not turn absent metrics into artificial zero scores", () => {
+    const missing: RepoLearningEntry = {
+      action: "completion_run_evaluated",
+      outcome: "success",
+      duration_ms: 1000,
+      details: "legacy run without metrics",
+      files_affected: [],
+      fix_pattern: "prompt:legacy",
+      prompt_version: "legacy",
+      metadata: {
+        outcome_score: null,
+        completion_delta: null,
+        readiness_delta: null,
+      },
+      timestamp: new Date().toISOString(),
+    };
+
+    expect(summarizeStrategyPerformance([missing])[0]).toMatchObject({
+      pattern: "prompt:legacy",
+      samples: 1,
+      averageOutcomeScore: null,
+      averageCompletionDelta: null,
+      averageReadinessDelta: null,
+    });
+  });
 });
