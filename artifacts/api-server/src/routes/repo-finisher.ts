@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
 import { callAI } from "../lib/ai-provider";
+import { loadAiCredential } from "../lib/credentials";
 
 const router: IRouter = Router();
 
@@ -472,12 +473,6 @@ export async function finishRepoCore(
 
   const token = conn.access_token;
 
-  const { data: prefs } = await supabase
-    .from("user_preferences")
-    .select("custom_ai_provider, custom_ai_key")
-    .eq("user_id", userId)
-    .maybeSingle();
-
   const repoRes = await ghFetch(token, `/repos/${data.repo}`);
   if (!repoRes.ok) throw new Error(`Repo not found: ${data.repo}`);
   const repo = (await repoRes.json()) as Record<string, unknown>;
@@ -520,9 +515,15 @@ export async function finishRepoCore(
 
   const files = await fetchKeyFiles(token, data.repo, defaultBranch, repoTree);
 
-  let rfAiKey = prefs?.custom_ai_key || null;
-  if (prefs?.custom_ai_provider === "github_models" && !rfAiKey) rfAiKey = token;
-  const plan = await generateFinishPlan(data.repo, repoData, files, nextSteps, prefs?.custom_ai_provider || "openai", rfAiKey);
+  const aiCredential = await loadAiCredential(supabase, userId, token);
+  const plan = await generateFinishPlan(
+    data.repo,
+    repoData,
+    files,
+    nextSteps,
+    aiCredential.provider,
+    aiCredential.apiKey,
+  );
 
   const changes = validatePlanChanges(plan.changes, repoTree);
   const branchName = `repo-finisher/fixes-${Date.now().toString(36)}`;
