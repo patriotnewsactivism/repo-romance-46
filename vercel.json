@@ -1,5 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "fluid": true,
+  "functions": {
+    "api/[...path].mjs": {
+      "maxDuration": 750
+    }
+  },
   "buildCommand": "pnpm run typecheck && node artifacts/api-server/build-vercel.mjs && pnpm --filter @workspace/repo-finisher build",
   "rewrites": [
     {
