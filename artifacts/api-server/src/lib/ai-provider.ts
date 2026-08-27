@@ -1,8 +1,8 @@
-// Centralized AI provider routing — handles GitHub Models, OpenAI, Anthropic, Google.
+// Centralized AI provider routing — handles Google Gemini, OpenAI, Anthropic, and legacy/custom providers.
 
 export interface AIProviderConfig {
-  provider: string; // "github_models" | "openai" | "anthropic" | "google" | "custom"
-  apiKey: string | null; // user's custom key
+  provider: string; // "google" | "openai" | "anthropic" | "custom" | legacy "github_models"
+  apiKey: string | null;
 }
 
 export interface AIRequest {
@@ -15,35 +15,37 @@ export interface AIRequest {
       schema: Record<string, unknown>;
     };
   };
-  model?: string; // override model
-  thinkingBudgetTokens?: number; // Anthropic extended thinking budget
+  model?: string;
+  thinkingBudgetTokens?: number;
+  thinkingLevel?: "low" | "medium" | "high";
 }
 
 export interface AIResponse {
   content: string;
-  thinkingContent?: string; // Anthropic thinking block (if extended thinking)
+  thinkingContent?: string;
 }
 
-// Default models per provider
+// Gemini 3.7 Flash is the platform default: production-stable, 1M context,
+// structured outputs, tunable thinking, and strong coding/agent performance.
 const DEFAULT_MODELS: Record<string, string> = {
-  github_models: "gpt-4o-mini", // gpt-4o-mini has 15 RPM vs gpt-4o's 5 RPM on free tier
+  google: "gemini-3.7-flash",
   openai: "gpt-4o",
   anthropic: "claude-sonnet-4-20250514",
-  google: "gemini-2.5-flash",
   custom: "gpt-4o",
+  // Kept only so old saved preferences fail gracefully until migrated.
+  github_models: "gpt-4o-mini",
 };
 
-// Rate-limit retry config — GitHub Models free tier is very aggressive (5 RPM
-// for gpt-4o, 15 RPM for gpt-4o-mini). We retry with exponential backoff.
 const MAX_RETRIES = 4;
-const INITIAL_BACKOFF_MS = 5000; // 5s — must be >= the provider's rate window
+const INITIAL_BACKOFF_MS = 5000;
 
 async function fetchWithRetry(url: string, options: RequestInit, provider: string): Promise<Response> {
   let lastError = "";
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const res = await fetch(url, options);
 
-    if (res.status !== 429) return res;
+    if (res.status !== 429 && res.status < 500) return res;
+    if (res.status >= 500 && attempt === MAX_RETRIES) return res;
 
     const retryAfter = res.headers.get("Retry-After");
     let waitMs: number;
@@ -55,16 +57,14 @@ async function fetchWithRetry(url: string, options: RequestInit, provider: strin
 
     if (attempt < MAX_RETRIES) {
       console.warn(
-        `[ai-provider] ${provider} rate limited (429), retry ${attempt + 1}/${MAX_RETRIES} after ${waitMs}ms`,
+        `[ai-provider] ${provider} transient failure (${res.status}), retry ${attempt + 1}/${MAX_RETRIES} after ${waitMs}ms`,
       );
       await new Promise((r) => setTimeout(r, waitMs));
     } else {
-      lastError = `Rate limit hit after ${MAX_RETRIES + 1} attempts. Last response: ${(await res.text()).slice(0, 200)}`;
+      lastError = `Provider remained unavailable after ${MAX_RETRIES + 1} attempts. Last response: ${(await res.text()).slice(0, 200)}`;
     }
   }
-  throw new Error(
-    `AI rate limit exhausted for ${provider}. ${lastError}. Try again in a minute, or switch to a provider with higher limits (OpenAI, Anthropic, Google).`,
-  );
+  throw new Error(`AI provider retry budget exhausted for ${provider}. ${lastError}`);
 }
 
 const PROVIDER_ENDPOINTS: Record<string, string> = {
@@ -76,8 +76,9 @@ const PROVIDER_ENDPOINTS: Record<string, string> = {
 };
 
 export async function callAI(request: AIRequest, config: AIProviderConfig): Promise<AIResponse> {
-  const provider = config.provider || "openai";
-  const model = request.model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.openai;
+  // Never silently fall back to OpenAI. Gemini is the explicit platform default.
+  const provider = config.provider || "google";
+  const model = request.model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.google;
 
   if (provider === "anthropic" && config.apiKey) {
     const systemMsg = request.messages.find((m) => m.role === "system")?.content || "";
@@ -87,7 +88,6 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
 
     const body: Record<string, unknown> = {
       model,
-      // Extended thinking requires max_tokens > budget_tokens; add 4096 for output
       max_tokens: useThinking ? thinkingBudget + 4096 : 4096,
       system: systemMsg,
       messages: userMessages.map((m) => ({ role: m.role, content: m.content })),
@@ -95,11 +95,6 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
 
     if (useThinking) {
       body.thinking = { type: "enabled", budget_tokens: thinkingBudget };
-      // JSON schema response_format is incompatible with extended thinking
-      // (thinking interleaves with text blocks; structured output forces a single text format)
-    } else if (request.responseFormat) {
-      // Anthropic uses tool_choice for structured output — simpler: just ask in system prompt
-      // and parse the JSON content. Strict JSON schema enforcement is done client-side via Zod.
     }
 
     const headers: Record<string, string> = {
@@ -107,17 +102,11 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       "x-api-key": config.apiKey,
       "anthropic-version": "2023-06-01",
     };
-    if (useThinking) {
-      headers["anthropic-beta"] = "interleaved-thinking-2025-05-14";
-    }
+    if (useThinking) headers["anthropic-beta"] = "interleaved-thinking-2025-05-14";
 
     const res = await fetchWithRetry(
       PROVIDER_ENDPOINTS.anthropic,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-      },
+      { method: "POST", headers, body: JSON.stringify(body) },
       "anthropic",
     );
 
@@ -129,11 +118,8 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     const json = (await res.json()) as {
       content: Array<{ type: string; text?: string; thinking?: string }>;
     };
-
-    // Extended thinking returns multiple content blocks — extract text and thinking separately
     const textBlock = json.content?.find((b) => b.type === "text");
     const thinkingBlock = json.content?.find((b) => b.type === "thinking");
-
     return {
       content: textBlock?.text || json.content?.[0]?.text || "",
       thinkingContent: thinkingBlock?.thinking,
@@ -142,23 +128,36 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
 
   if (provider === "google" && config.apiKey) {
     const systemMsg = request.messages.find((m) => m.role === "system")?.content || "";
-    const userMsg = request.messages.find((m) => m.role === "user")?.content || "";
+    const contents = request.messages
+      .filter((m) => m.role !== "system")
+      .map((m) => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }],
+      }));
+
+    const generationConfig: Record<string, unknown> = {
+      thinkingConfig: { thinkingLevel: request.thinkingLevel || "medium" },
+    };
+    if (request.responseFormat?.json_schema?.schema) {
+      generationConfig.responseMimeType = "application/json";
+      generationConfig.responseJsonSchema = request.responseFormat.json_schema.schema;
+    }
 
     const body: Record<string, unknown> = {
-      system_instruction: { parts: [{ text: systemMsg }] },
-      contents: [{ role: "user", parts: [{ text: userMsg }] }],
-      generationConfig: {
-        responseMimeType: "application/json",
-      },
+      contents,
+      generationConfig,
     };
+    if (systemMsg) body.systemInstruction = { parts: [{ text: systemMsg }] };
 
-    const url = `${PROVIDER_ENDPOINTS.google}/${model}:generateContent?key=${config.apiKey}`;
-
+    const url = `${PROVIDER_ENDPOINTS.google}/${model}:generateContent`;
     const res = await fetchWithRetry(
       url,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": config.apiKey,
+        },
         body: JSON.stringify(body),
       },
       "google",
@@ -166,11 +165,16 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`Google AI error ${res.status}: ${text.slice(0, 300)}`);
+      throw new Error(`Google Gemini API error ${res.status}: ${text.slice(0, 300)}`);
     }
 
-    const json = (await res.json()) as { candidates: { content: { parts: { text: string }[] } }[] };
-    return { content: json.candidates?.[0]?.content?.parts?.[0]?.text || "" };
+    const json = (await res.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+    const content = json.candidates?.[0]?.content?.parts
+      ?.map((part) => part.text || "")
+      .join("") || "";
+    return { content };
   }
 
   if (
@@ -181,11 +185,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       model,
       messages: request.messages,
     };
-
-    // o3/o4-mini/o3-mini support structured outputs via response_format just like gpt-4o
-    if (request.responseFormat) {
-      body.response_format = request.responseFormat;
-    }
+    if (request.responseFormat) body.response_format = request.responseFormat;
 
     const res = await fetchWithRetry(
       PROVIDER_ENDPOINTS[provider],
@@ -205,11 +205,17 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       throw new Error(`AI error ${res.status}: ${text.slice(0, 300)}`);
     }
 
-    const json = (await res.json()) as { choices: { message: { content: string } }[] };
+    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
     return { content: json.choices?.[0]?.message?.content || "" };
   }
 
+  if (provider === "github_models") {
+    throw new Error(
+      "GitHub Models is no longer a supported platform default. Switch the provider to Google Gemini.",
+    );
+  }
+
   throw new Error(
-    `No AI provider available. You selected "${provider}" but no API key is saved. Go to Settings and enter your API key.`,
+    `No usable credential is configured for "${provider}". For Google, configure GEMINI_API_KEY/GOOGLE_API_KEY on the API server or save a Google BYOK key in Settings.`,
   );
 }
