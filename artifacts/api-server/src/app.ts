@@ -59,14 +59,15 @@ const globalLimiter = rateLimit({
 
 /**
  * Routes that spend money or write to someone's repository get a much tighter
- * budget than reads. These were previously unlimited, so a single caller could
- * drain a user's AI credits or open PRs in a loop.
+ * budget than reads. Read-only GET/HEAD/OPTIONS requests are explicitly skipped
+ * so status polling cannot consume the same quota as AI runs and repo writes.
  */
 const expensiveLimiter = rateLimit({
   windowMs: 60_000,
   limit: 10,
   standardHeaders: "draft-7",
   legacyHeaders: false,
+  skip: (req) => req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS",
   message: { error: "Too many analysis or repository-write requests — try again in a minute." },
 });
 

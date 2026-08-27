@@ -199,7 +199,7 @@ export default function Dashboard() {
           <CardHeader>
             <CardTitle>Run New Analysis</CardTitle>
             <CardDescription>
-              AI will analyze your entire portfolio to find product opportunities
+              AI maps each viable repo to a production-ready completion path, then critiques and refines the plan before execution
             </CardDescription>
           </CardHeader>
           <CardContent>
