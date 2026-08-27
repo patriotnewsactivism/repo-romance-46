@@ -6,6 +6,7 @@ import preferencesRouter from "./preferences";
 import githubRouter from "./github";
 import publicRouter from "./public";
 import repoFinisherRouter from "./repo-finisher";
+import repoFinisherRunsRouter from "./repo-finisher-runs";
 import valuationRouter from "./valuation";
 import vibeToolsRouter from "./vibe-tools";
 
@@ -17,6 +18,7 @@ router.use(preferencesRouter);
 router.use(githubRouter);
 router.use(publicRouter);
 router.use(repoFinisherRouter);
+router.use(repoFinisherRunsRouter);
 router.use(valuationRouter);
 router.use(vibeToolsRouter);
 
