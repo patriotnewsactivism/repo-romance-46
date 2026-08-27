@@ -18,6 +18,8 @@ export interface AIRequest {
   model?: string;
   thinkingBudgetTokens?: number;
   thinkingLevel?: "low" | "medium" | "high";
+  /** Optional hard network timeout for a single provider attempt. */
+  timeoutMs?: number;
 }
 
 export interface AIResponse {
@@ -38,30 +40,81 @@ const DEFAULT_MODELS: Record<string, string> = {
 
 const MAX_RETRIES = 4;
 const INITIAL_BACKOFF_MS = 5000;
+const MAX_BACKOFF_MS = 10000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 45000;
+const FINAL_SYNTHESIS_TIMEOUT_MS = 8000;
 
-async function fetchWithRetry(url: string, options: RequestInit, provider: string): Promise<Response> {
+/**
+ * Portfolio analysis already has a high-quality draft before its final polish
+ * pass. That last pass must never be allowed to strand the whole analysis.
+ * If it cannot answer quickly, analysis.ts falls back to the validated draft.
+ */
+export function resolveAIRequestTimeoutMs(request: AIRequest): number {
+  if (request.timeoutMs !== undefined) {
+    const requested = Number(request.timeoutMs);
+    if (Number.isFinite(requested)) return Math.max(1000, Math.min(120000, Math.round(requested)));
+  }
+
+  const systemText = request.messages
+    .filter((message) => message.role === "system")
+    .map((message) => message.content)
+    .join("\n");
+
+  if (/final synthesis of a developer portfolio analysis/i.test(systemText)) {
+    return FINAL_SYNTHESIS_TIMEOUT_MS;
+  }
+
+  return DEFAULT_REQUEST_TIMEOUT_MS;
+}
+
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  provider: string,
+  timeoutMs: number,
+): Promise<Response> {
   let lastError = "";
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const res = await fetch(url, options);
+  const singleAttemptOnly = timeoutMs <= FINAL_SYNTHESIS_TIMEOUT_MS;
+  const maxRetries = singleAttemptOnly ? 0 : MAX_RETRIES;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let res: Response;
+
+    try {
+      res = await fetch(url, { ...options, signal: controller.signal });
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error(
+          `${provider} request exceeded ${Math.round(timeoutMs / 1000)}s and was cancelled to keep the analysis worker responsive.`,
+        );
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (res.status !== 429 && res.status < 500) return res;
-    if (res.status >= 500 && attempt === MAX_RETRIES) return res;
+    if (res.status >= 500 && attempt === maxRetries) return res;
 
     const retryAfter = res.headers.get("Retry-After");
     let waitMs: number;
     if (retryAfter) {
-      waitMs = parseInt(retryAfter, 10) * 1000 + 500;
+      const parsedSeconds = Number.parseInt(retryAfter, 10);
+      waitMs = Number.isFinite(parsedSeconds) ? parsedSeconds * 1000 + 500 : INITIAL_BACKOFF_MS;
     } else {
       waitMs = INITIAL_BACKOFF_MS * Math.pow(2, attempt);
     }
+    waitMs = Math.min(waitMs, MAX_BACKOFF_MS);
 
-    if (attempt < MAX_RETRIES) {
+    if (attempt < maxRetries) {
       console.warn(
-        `[ai-provider] ${provider} transient failure (${res.status}), retry ${attempt + 1}/${MAX_RETRIES} after ${waitMs}ms`,
+        `[ai-provider] ${provider} transient failure (${res.status}), retry ${attempt + 1}/${maxRetries} after ${waitMs}ms`,
       );
       await new Promise((r) => setTimeout(r, waitMs));
     } else {
-      lastError = `Provider remained unavailable after ${MAX_RETRIES + 1} attempts. Last response: ${(await res.text()).slice(0, 200)}`;
+      lastError = `Provider remained unavailable after ${maxRetries + 1} attempts. Last response: ${(await res.text()).slice(0, 200)}`;
     }
   }
   throw new Error(`AI provider retry budget exhausted for ${provider}. ${lastError}`);
@@ -79,6 +132,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
   // Never silently fall back to OpenAI. Gemini is the explicit platform default.
   const provider = config.provider || "google";
   const model = request.model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.google;
+  const requestTimeoutMs = resolveAIRequestTimeoutMs(request);
 
   if (provider === "anthropic" && config.apiKey) {
     const systemMsg = request.messages.find((m) => m.role === "system")?.content || "";
@@ -108,6 +162,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       PROVIDER_ENDPOINTS.anthropic,
       { method: "POST", headers, body: JSON.stringify(body) },
       "anthropic",
+      requestTimeoutMs,
     );
 
     if (!res.ok) {
@@ -136,7 +191,12 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       }));
 
     const generationConfig: Record<string, unknown> = {
-      thinkingConfig: { thinkingLevel: request.thinkingLevel || "medium" },
+      // Structured-output calls can become very slow when Gemini spends a large
+      // thinking budget on JSON that is already constrained by a schema. Keep
+      // those calls on low thinking unless the caller explicitly asks for more.
+      thinkingConfig: {
+        thinkingLevel: request.thinkingLevel || (request.responseFormat ? "low" : "medium"),
+      },
     };
     if (request.responseFormat?.json_schema?.schema) {
       generationConfig.responseMimeType = "application/json";
@@ -161,6 +221,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
         body: JSON.stringify(body),
       },
       "google",
+      requestTimeoutMs,
     );
 
     if (!res.ok) {
@@ -198,6 +259,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
         body: JSON.stringify(body),
       },
       provider,
+      requestTimeoutMs,
     );
 
     if (!res.ok) {
