@@ -39,9 +39,19 @@ export function requireGithubCredential(credential: GithubCredential | null): Gi
   return credential;
 }
 
+export type AiCredentialSource = "byok" | "platform" | "none";
+
 export interface AiCredential {
   provider: string;
   apiKey: string | null;
+  source: AiCredentialSource;
+}
+
+const SUPPORTED_PLATFORM_PROVIDERS = new Set(["google", "openai", "anthropic"]);
+
+export function platformAiProvider(): string {
+  const configured = (process.env.AI_PROVIDER || "google").trim().toLowerCase();
+  return SUPPORTED_PLATFORM_PROVIDERS.has(configured) ? configured : "google";
 }
 
 function platformAiKey(provider: string): string | null {
@@ -57,31 +67,49 @@ function platformAiKey(provider: string): string | null {
   }
 }
 
+/** Safe platform readiness metadata. Never includes credential values. */
+export function platformAiStatus() {
+  return {
+    defaultProvider: platformAiProvider(),
+    providers: {
+      google: { platformConfigured: Boolean(platformAiKey("google")) },
+      openai: { platformConfigured: Boolean(platformAiKey("openai")) },
+      anthropic: { platformConfigured: Boolean(platformAiKey("anthropic")) },
+    },
+  };
+}
+
 /**
  * Resolve which provider and key to use for a user.
  *
- * Gemini is the platform default. A user's encrypted BYOK credential wins when
- * present; otherwise the server-side provider credential is used. Historical
- * `github_models` preferences are transparently routed to Google because the
- * GitHub Models service has been retired.
+ * Google Gemini remains the default when AI_PROVIDER is unset. A user's
+ * encrypted BYOK credential wins when present; otherwise the server-side
+ * credential for the selected provider is used. Historical `github_models`
+ * preferences are transparently routed to the current platform default because
+ * GitHub Models has been retired.
  */
 export async function loadAiCredential(
   supabase: SupabaseClient,
   userId: string,
   _githubToken?: string | null,
 ): Promise<AiCredential> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("user_preferences")
     .select("custom_ai_provider, custom_ai_key")
     .eq("user_id", userId)
     .maybeSingle();
+  if (error) throw new Error(`Failed to load AI preferences: ${error.message}`);
 
   const row = (data ?? null) as { custom_ai_provider: string | null; custom_ai_key: string | null } | null;
-  const requestedProvider = row?.custom_ai_provider || "google";
-  const provider = requestedProvider === "github_models" ? "google" : requestedProvider;
+  const fallbackProvider = platformAiProvider();
+  const requestedProvider = row?.custom_ai_provider || fallbackProvider;
+  const provider = requestedProvider === "github_models" ? fallbackProvider : requestedProvider;
 
   const userKey = decryptSecret(row?.custom_ai_key ?? null);
-  const apiKey = userKey || platformAiKey(provider);
+  if (userKey) return { provider, apiKey: userKey, source: "byok" };
 
-  return { provider, apiKey };
+  const platformKey = platformAiKey(provider);
+  if (platformKey) return { provider, apiKey: platformKey, source: "platform" };
+
+  return { provider, apiKey: null, source: "none" };
 }
