@@ -44,17 +44,31 @@ export interface AiCredential {
   apiKey: string | null;
 }
 
+function platformAiKey(provider: string): string | null {
+  switch (provider) {
+    case "google":
+      return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || null;
+    case "openai":
+      return process.env.OPENAI_API_KEY || null;
+    case "anthropic":
+      return process.env.ANTHROPIC_API_KEY || null;
+    default:
+      return null;
+  }
+}
+
 /**
  * Resolve which provider and key to use for a user.
  *
- * `github_models` intentionally falls back to the user's GitHub token, which is
- * how the free tier is reached — but only when the user has not supplied a key
- * of their own.
+ * Gemini is the platform default. A user's encrypted BYOK credential wins when
+ * present; otherwise the server-side provider credential is used. Historical
+ * `github_models` preferences are transparently routed to Google because the
+ * GitHub Models service has been retired.
  */
 export async function loadAiCredential(
   supabase: SupabaseClient,
   userId: string,
-  githubToken?: string | null,
+  _githubToken?: string | null,
 ): Promise<AiCredential> {
   const { data } = await supabase
     .from("user_preferences")
@@ -63,10 +77,11 @@ export async function loadAiCredential(
     .maybeSingle();
 
   const row = (data ?? null) as { custom_ai_provider: string | null; custom_ai_key: string | null } | null;
-  const provider = row?.custom_ai_provider || "openai";
-  let apiKey = decryptSecret(row?.custom_ai_key ?? null);
+  const requestedProvider = row?.custom_ai_provider || "google";
+  const provider = requestedProvider === "github_models" ? "google" : requestedProvider;
 
-  if (provider === "github_models" && !apiKey && githubToken) apiKey = githubToken;
+  const userKey = decryptSecret(row?.custom_ai_key ?? null);
+  const apiKey = userKey || platformAiKey(provider);
 
   return { provider, apiKey };
 }
