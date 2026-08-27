@@ -4,6 +4,9 @@
   "files": [],
   "references": [
     {
+      "path": "./lib/repo-os"
+    },
+    {
       "path": "./lib/db"
     },
     {
