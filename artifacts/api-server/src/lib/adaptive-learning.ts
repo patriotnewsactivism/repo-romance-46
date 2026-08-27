@@ -57,10 +57,14 @@ function patternKey(entry: RepoLearningEntry): string | null {
   return null;
 }
 
-function metadataNumber(entry: RepoLearningEntry, key: string): number | null {
-  const value = entry.metadata?.[key];
+function numericValue(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
   const number = typeof value === "number" ? value : Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function metadataNumber(entry: RepoLearningEntry, key: string): number | null {
+  return numericValue(entry.metadata?.[key]);
 }
 
 export function summarizeStrategyPerformance(history: RepoLearningEntry[]): StrategyPerformance[] {
@@ -255,11 +259,7 @@ async function updateCrossRepoPattern(
 
   const successful = occurrences.filter((item) => (item as Record<string, unknown>).outcome === "success").length;
   const scored = occurrences
-    .map((item) => {
-      const value = (item as Record<string, unknown>).outcome_score;
-      const number = typeof value === "number" ? value : Number(value);
-      return Number.isFinite(number) ? number : null;
-    })
+    .map((item) => numericValue((item as Record<string, unknown>).outcome_score))
     .filter((value): value is number => value !== null);
   const successRate = successful / Math.max(1, occurrences.length);
   const averageOutcomeScore = scored.length > 0
