@@ -31,6 +31,7 @@ interface EvolvableCompletionRun {
   status: "succeeded" | "failed" | "stale" | string;
   head_sha: string | null;
   error: string | null;
+  ci_status?: string | null;
   created_at: string;
   updated_at: string;
   analysis_id?: string | null;
@@ -192,6 +193,7 @@ function tractionScore(repo: GhRepo): number {
 }
 
 function finiteNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
   const number = typeof value === "number" ? value : Number(value);
   return Number.isFinite(number) ? number : null;
 }
