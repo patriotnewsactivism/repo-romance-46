@@ -7,6 +7,7 @@ import publicRouter from "./public";
 import repoFinisherRunsRouter from "./repo-finisher-runs";
 import valuationRouter from "./valuation";
 import vibeToolsRouter from "./vibe-tools";
+import observabilityRouter from "./observability";
 
 const router: IRouter = Router();
 
@@ -18,5 +19,6 @@ router.use(publicRouter);
 router.use(repoFinisherRunsRouter);
 router.use(valuationRouter);
 router.use(vibeToolsRouter);
+router.use(observabilityRouter);
 
 export default router;

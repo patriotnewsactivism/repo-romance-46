@@ -73,8 +73,19 @@ const expensiveLimiter = rateLimit({
   message: { error: "Too many analysis or repository-write requests — try again in a minute." },
 });
 
+// A crashing browser can emit the same exception repeatedly. Keep telemetry
+// useful without allowing a client-side error loop to flood Sentry or the API.
+const telemetryLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 30,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { error: "Too many client error reports — slow down." },
+});
+
 app.use("/api", globalLimiter);
 app.post("/api/preferences/ai-test", expensiveLimiter);
+app.post("/api/observability/client-error", telemetryLimiter);
 app.use(["/api/analysis", "/api/repo-finisher", "/api/vibe-tools", "/api/valuation"], expensiveLimiter);
 
 app.use("/api", router);
