@@ -250,7 +250,7 @@ export function RecommendationCard({ recommendation, analysisId, isPublic = fals
                   valuation: recommendation.valuation,
                   vibe_spec: recommendation.vibe_spec,
                   combine_result: recommendation.combine_result,
-                  finish_history: recommendation.finish_history,
+                  milestone_plan: recommendation.milestone_plan,
                 }}
               />
             )}

@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
+import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "../lib/credentials";
 import { callAI } from "../lib/ai-provider";
 
 const router: IRouter = Router();
@@ -277,10 +278,8 @@ router.post(
     const { data: items } = await req.supabase!.from("analysis_items").select("*").eq("analysis_id", id).order("rank", { ascending: true });
     if (!items?.length) throw Object.assign(new Error("No recommendations to value"), { status: 400 });
 
-    const { data: conn } = await req.supabase!.from("github_connections").select("github_login, access_token").eq("user_id", userId).maybeSingle();
-    if (!conn) throw Object.assign(new Error("Connect GitHub first."), { status: 400 });
-
-    const { data: prefs } = await req.supabase!.from("user_preferences").select("custom_ai_provider, custom_ai_key").eq("user_id", userId).maybeSingle();
+    const conn = requireGithubCredential(await loadGithubCredential(req.supabase!, userId));
+    const ai = await loadAiCredential(req.supabase!, userId, conn.token);
 
     const valueableRepos = new Set<string>();
     for (const item of items) {
@@ -300,7 +299,7 @@ router.post(
 
     for (const repo of valueableRepos) {
       try {
-        const metrics = await fetchRepoMetrics(conn.access_token, repo);
+        const metrics = await fetchRepoMetrics(conn.token, repo);
 
         const matchingItem = items.find((it) => {
           const r = (it as Record<string, unknown>).repos as string[];
@@ -320,9 +319,7 @@ router.post(
             }
           : null;
 
-        let valAiKey = prefs?.custom_ai_key || null;
-        if (prefs?.custom_ai_provider === "github_models" && !valAiKey) valAiKey = conn.access_token;
-        const valuation = await generateValuation(repo, metrics, analysisContext, prefs?.custom_ai_provider || "openai", valAiKey);
+        const valuation = await generateValuation(repo, metrics, analysisContext, ai.provider, ai.apiKey);
         // Assigned here rather than trusted from the AI response — we already
         // know which repo this is from the loop, and the AI JSON schema
         // doesn't ask for it.

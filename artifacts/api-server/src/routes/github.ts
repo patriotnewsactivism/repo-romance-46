@@ -2,6 +2,8 @@ import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
+import { encryptSecret, secretsConfigured } from "../lib/secrets";
+import { loadGithubCredential } from "../lib/credentials";
 
 const router: IRouter = Router();
 
@@ -47,7 +49,15 @@ router.post(
 
     const ghUser = (await userRes.json()) as { id: number; login: string; avatar_url: string; name: string | null };
 
-    // Upsert github connection
+    // The OAuth token is a repo-scoped credential: seal it before it is
+    // persisted rather than storing it in plaintext as this route used to.
+    if (!secretsConfigured()) {
+      throw Object.assign(
+        new Error("Cannot store a GitHub token: SECRET_ENCRYPTION_KEY is not configured on the server."),
+        { status: 503 },
+      );
+    }
+
     const { error } = await req.supabase!.from("github_connections").upsert(
       {
         user_id: req.userId!,
@@ -55,7 +65,7 @@ router.post(
         github_login: ghUser.login,
         avatar_url: ghUser.avatar_url,
         display_name: ghUser.name,
-        access_token: providerToken,
+        access_token: encryptSecret(providerToken),
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" },
@@ -86,7 +96,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const { data } = await req.supabase!
       .from("github_connections")
-      .select("github_login, avatar_url, display_name, access_token")
+      .select("github_login, avatar_url, display_name")
       .eq("user_id", req.userId!)
       .maybeSingle();
 
@@ -95,14 +105,15 @@ router.get(
       return;
     }
 
-    const conn = data as { github_login: string; avatar_url: string | null; display_name: string | null; access_token: string };
+    const conn = data as { github_login: string; avatar_url: string | null; display_name: string | null };
+    const credential = await loadGithubCredential(req.supabase!, req.userId!);
 
     // Optionally fetch live repo count
     let repoCount: number | null = null;
     try {
       const r = await fetch("https://api.github.com/user", {
         headers: {
-          Authorization: `Bearer ${conn.access_token}`,
+          Authorization: `Bearer ${credential?.token ?? ""}`,
           Accept: "application/vnd.github+json",
           "User-Agent": "repo-finisher",
         },
@@ -129,13 +140,9 @@ router.get(
   "/github/portfolio-summary",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { data: conn } = await req.supabase!
-      .from("github_connections")
-      .select("access_token")
-      .eq("user_id", req.userId!)
-      .maybeSingle();
+    const credential = await loadGithubCredential(req.supabase!, req.userId!);
 
-    if (!conn) {
+    if (!credential) {
       res.json({ repoCount: 0, languages: [], totalStars: 0, lastPushed: null });
       return;
     }
@@ -151,7 +158,7 @@ router.get(
         `https://api.github.com/user/repos?per_page=100&affiliation=owner&sort=pushed`,
         {
           headers: {
-            Authorization: `Bearer ${(conn as { access_token: string }).access_token}`,
+            Authorization: `Bearer ${credential.token}`,
             Accept: "application/vnd.github+json",
             "User-Agent": "repo-finisher",
           },

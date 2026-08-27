@@ -101,16 +101,22 @@ export interface FinishChange {
   description: string;
 }
 
-export interface FinishResult {
+export interface SkippedChange {
+  path: string;
+  reason: string;
+}
+
+export interface ExecuteResult {
   repo: string;
+  planId: string;
   branch: string;
+  commit_sha: string;
   pr_url: string;
   pr_number: number;
   files_changed: number;
-  additions: number;
-  deletions: number;
   summary: string;
   changes: FinishChange[];
+  skipped: SkippedChange[];
 }
 
 export interface MarketCompetitor {
@@ -177,13 +183,10 @@ export interface CombineResult {
   integration_plan_md: string;
 }
 
-export interface IterativeFinishPass {
-  pass: number;
-  pr_url?: string;
-  pr_number?: number;
-  files_changed?: number;
-  summary?: string;
-  error?: string;
+export interface Milestone {
+  order: number;
+  title: string;
+  goals: string[];
 }
 
 export interface Recommendation {
@@ -203,15 +206,13 @@ export interface Recommendation {
   /** @nullable */
   estimated_hours?: number | null;
   rank: number;
-  finish_result?: FinishResult | null;
+  finish_result?: ExecuteResult | null;
   market_analysis?: MarketAnalysis | null;
   valuation?: MarketValuation | null;
   vibe_spec?: VibeSpec | null;
   combine_result?: CombineResult | null;
   /** @nullable */
-  finish_history?: IterativeFinishPass[] | null;
-  /** @nullable */
-  iteration_count?: number | null;
+  milestone_plan?: Milestone[] | null;
 }
 
 export type AnalysisDetailAnalysisStatus = typeof AnalysisDetailAnalysisStatus[keyof typeof AnalysisDetailAnalysisStatus];
@@ -338,8 +339,8 @@ export interface UserPreferences {
   schedule_frequency?: UserPreferencesScheduleFrequency;
   /** @nullable */
   custom_ai_provider?: string | null;
-  /** @nullable */
-  custom_ai_key?: string | null;
+  /** Whether a provider key is stored. The key itself is write-only and never returned. */
+  custom_ai_key_set?: boolean;
   filter_languages?: string[];
   /** @nullable */
   filter_exclude_archived?: boolean | null;
@@ -382,17 +383,79 @@ export interface PreferencesUpdate {
   analysis_tier?: PreferencesUpdateAnalysisTier;
 }
 
-export interface FinishInput {
+export interface PlanInput {
   repo: string;
-  nextSteps?: string[];
+  goals?: string[];
   analysisId?: string;
   itemRank?: number;
+}
+
+export type PlannedChangeStatus = typeof PlannedChangeStatus[keyof typeof PlannedChangeStatus];
+
+
+export const PlannedChangeStatus = {
+  created: 'created',
+  modified: 'modified',
+  deleted: 'deleted',
+} as const;
+
+export type PlannedChangeRisk = typeof PlannedChangeRisk[keyof typeof PlannedChangeRisk];
+
+
+export const PlannedChangeRisk = {
+  normal: 'normal',
+  high: 'high',
+} as const;
+
+export interface PlannedChange {
+  path: string;
+  status: PlannedChangeStatus;
+  /** SHA-256 of the exact content this change will write; empty for deletions. */
+  contentSha256: string;
+  description: string;
+  risk: PlannedChangeRisk;
+}
+
+export interface PlanDocument {
+  planId: string;
+  repo: string;
+  baseBranch: string;
+  baseCommitSha: string;
+  summary: string;
+  milestone?: string;
+  createdAt: string;
+  expiresAt: string;
+  changes: PlannedChange[];
+}
+
+export type PlanResponseProposedContents = {[key: string]: string};
+
+export interface PlanResponse {
+  plan: PlanDocument;
+  signature: string;
+  highRiskPaths: string[];
+  proposedContents: PlanResponseProposedContents;
+}
+
+export interface ApprovalInput {
+  planId: string;
+  approvedPaths: string[];
+  highRiskConsent: boolean;
+}
+
+export type ExecuteInputContents = {[key: string]: string};
+
+export interface ExecuteInput {
+  plan: PlanDocument;
+  signature: string;
+  approval: ApprovalInput;
+  contents: ExecuteInputContents;
 }
 
 export interface RepoFinisherStatus {
   repo: string;
   hasBeenFinished: boolean;
-  finishes: FinishResult[];
+  finishes: ExecuteResult[];
 }
 
 export interface ValuationFactor {
@@ -466,7 +529,7 @@ export interface MarketAndValueResult {
   valuation: MarketValuation;
 }
 
-export interface IterativeFinishInput {
+export interface MilestonePlanInput {
   analysisId: string;
   itemRank: number;
   repo: string;
@@ -474,12 +537,13 @@ export interface IterativeFinishInput {
      * @minimum 1
      * @maximum 4
      */
-  passes?: number;
+  milestones?: number;
 }
 
-export interface IterativeFinishResult {
-  history: IterativeFinishPass[];
-  passes_completed: number;
+export interface MilestonePlanResult {
+  repo: string;
+  milestones: Milestone[];
+  next_step: string;
 }
 
 export type GetRepoFinisherStatusParams = {

@@ -6,15 +6,17 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { FinishChange } from './finishChange';
+import type { SkippedChange } from './skippedChange';
 
-export interface FinishResult {
+export interface ExecuteResult {
   repo: string;
+  planId: string;
   branch: string;
+  commit_sha: string;
   pr_url: string;
   pr_number: number;
   files_changed: number;
-  additions: number;
-  deletions: number;
   summary: string;
   changes: FinishChange[];
+  skipped: SkippedChange[];
 }

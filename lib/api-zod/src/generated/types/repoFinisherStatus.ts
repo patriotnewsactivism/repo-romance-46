@@ -5,10 +5,10 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { FinishResult } from './finishResult';
+import type { ExecuteResult } from './executeResult';
 
 export interface RepoFinisherStatus {
   repo: string;
   hasBeenFinished: boolean;
-  finishes: FinishResult[];
+  finishes: ExecuteResult[];
 }

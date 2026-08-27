@@ -3,8 +3,8 @@ import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
+import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "../lib/credentials";
 import { callAI } from "../lib/ai-provider";
-import { finishRepoCore } from "./repo-finisher";
 
 const router: IRouter = Router();
 
@@ -30,9 +30,11 @@ async function loadItem(supabase: SupabaseClient, analysisId: string, itemRank: 
   };
 }
 
+/** Sealed-aware provider/key resolution; see `lib/credentials`. */
 async function loadPrefs(supabase: SupabaseClient, userId: string) {
-  const { data } = await supabase.from("user_preferences").select("custom_ai_provider, custom_ai_key").eq("user_id", userId).maybeSingle();
-  return (data ?? null) as { custom_ai_provider: string | null; custom_ai_key: string | null } | null;
+  const credential = await loadGithubCredential(supabase, userId);
+  const ai = await loadAiCredential(supabase, userId, credential?.token ?? null);
+  return { custom_ai_provider: ai.provider, custom_ai_key: ai.apiKey };
 }
 
 async function updateItem(supabase: SupabaseClient, itemId: string, patch: Record<string, unknown>) {
@@ -40,9 +42,7 @@ async function updateItem(supabase: SupabaseClient, itemId: string, patch: Recor
 }
 
 async function loadGhToken(supabase: SupabaseClient, userId: string): Promise<string> {
-  const { data } = await supabase.from("github_connections").select("access_token, github_login").eq("user_id", userId).maybeSingle();
-  if (!data) throw Object.assign(new Error("Connect GitHub first."), { status: 400 });
-  return (data as { access_token: string }).access_token;
+  return requireGithubCredential(await loadGithubCredential(supabase, userId)).token;
 }
 
 async function gh(token: string, path: string, init?: RequestInit): Promise<Response> {
@@ -330,8 +330,49 @@ router.post(
   }),
 );
 
+/**
+ * Milestone breakdown for "finish this repository".
+ *
+ * This replaces `/vibe-tools/iterative-finish`, which ran up to four
+ * unreviewed AI passes in a loop, each one committing to the user's repository
+ * and opening a PR. Nothing here writes: it returns the milestone plan so the
+ * user can approve milestones one at a time, then drive each through
+ * `/repo-finisher/plan` → `/repo-finisher/execute`, where every file path is
+ * approved explicitly before anything is committed.
+ */
+const MILESTONE_PLAN: { title: string; goals: string[] }[] = [
+  {
+    title: "Milestone 1 — make the project legible",
+    goals: [
+      "Add or overhaul README.md with install/usage/API",
+      "Add MIT LICENSE if missing",
+      "Add .github/workflows/ci.yml with lint + build",
+    ],
+  },
+  {
+    title: "Milestone 2 — prove it works",
+    goals: ["Add unit tests for core exports", "Add example usage in examples/", "Wire the test job into CI"],
+  },
+  {
+    title: "Milestone 3 — finish the implementation",
+    goals: [
+      "Fix obvious bugs and complete stub functions",
+      "Add error handling around external calls",
+      "Add TypeScript types where missing",
+    ],
+  },
+  {
+    title: "Milestone 4 — prepare for release",
+    goals: [
+      "Add a contributing guide and issue templates",
+      "Polish docs, add badges and screenshots",
+      "Draft v0.1.0 release notes",
+    ],
+  },
+];
+
 router.post(
-  "/vibe-tools/iterative-finish",
+  "/vibe-tools/milestone-plan",
   requireAuth,
   asyncHandler(async (req, res) => {
     const data = z
@@ -339,42 +380,26 @@ router.post(
         analysisId: z.string().uuid(),
         itemRank: z.number().int(),
         repo: z.string(),
-        passes: z.number().int().min(1).max(4).optional(),
+        milestones: z.number().int().min(1).max(4).optional(),
       })
       .parse(req.body);
 
-    const passes = data.passes ?? 3;
-    const passPlans = [
-      ["Add or overhaul README.md with install/usage/API", "Add MIT LICENSE if missing", "Add .github/workflows/ci.yml with lint + build"],
-      ["Add unit tests for core exports", "Add example usage in examples/ folder", "Wire test job into CI"],
-      ["Fix obvious bugs and complete stub functions", "Add error handling around external calls", "Add TypeScript types where missing"],
-      ["Add contributing guide and issue templates", "Polish docs, add badges and screenshots", "Prep a v0.1.0 release notes draft"],
-    ];
-
-    const history: { pass: number; pr_url?: string; pr_number?: number; files_changed?: number; summary?: string; error?: string }[] = [];
-
-    for (let p = 0; p < passes; p++) {
-      try {
-        const r = await finishRepoCore(req.supabase!, req.userId!, {
-          repo: data.repo,
-          nextSteps: passPlans[p],
-          analysisId: data.analysisId,
-          itemRank: data.itemRank,
-        });
-        history.push({ pass: p + 1, pr_url: r.pr_url, pr_number: r.pr_number, files_changed: r.files_changed, summary: r.summary });
-      } catch (e) {
-        history.push({ pass: p + 1, error: e instanceof Error ? e.message : "unknown" });
-        break;
-      }
-    }
+    const count = data.milestones ?? 3;
+    const milestones = MILESTONE_PLAN.slice(0, count).map((milestone, index) => ({
+      order: index + 1,
+      title: milestone.title,
+      goals: milestone.goals,
+    }));
 
     const item = await loadItem(req.supabase!, data.analysisId, data.itemRank);
-    await updateItem(req.supabase!, item.id, {
-      finish_history: history,
-      iteration_count: history.filter((h) => h.pr_url).length,
-    });
+    await updateItem(req.supabase!, item.id, { milestone_plan: milestones });
 
-    res.json({ history, passes_completed: history.filter((h) => h.pr_url).length });
+    res.json({
+      repo: data.repo,
+      milestones,
+      next_step:
+        "Approve a milestone, then POST its goals to /repo-finisher/plan and approve the individual file paths before executing.",
+    });
   }),
 );
 
