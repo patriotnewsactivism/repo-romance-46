@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pnpm run typecheck && node artifacts/api-server/build-vercel.mjs && pnpm --filter @workspace/repo-finisher build",
   "rewrites": [
     { "source": "/auth/:path*", "destination": "/index.html" },
     { "source": "/dashboard", "destination": "/index.html" },
