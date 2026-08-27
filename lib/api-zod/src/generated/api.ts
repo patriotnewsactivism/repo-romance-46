@@ -131,17 +131,21 @@ export const GetAnalysisResponse = zod.object({
   "rank": zod.number(),
   "finish_result": zod.union([zod.object({
   "repo": zod.string(),
+  "planId": zod.string(),
   "branch": zod.string(),
+  "commit_sha": zod.string(),
   "pr_url": zod.string(),
   "pr_number": zod.number(),
   "files_changed": zod.number(),
-  "additions": zod.number(),
-  "deletions": zod.number(),
   "summary": zod.string(),
   "changes": zod.array(zod.object({
   "file": zod.string(),
   "status": zod.enum(['created', 'modified', 'deleted']),
   "description": zod.string()
+})),
+  "skipped": zod.array(zod.object({
+  "path": zod.string(),
+  "reason": zod.string()
 }))
 }),zod.null()]).optional(),
   "market_analysis": zod.union([zod.object({
@@ -188,15 +192,11 @@ export const GetAnalysisResponse = zod.object({
 })),
   "integration_plan_md": zod.string()
 }),zod.null()]).optional(),
-  "finish_history": zod.array(zod.object({
-  "pass": zod.number(),
-  "pr_url": zod.string().optional(),
-  "pr_number": zod.number().optional(),
-  "files_changed": zod.number().optional(),
-  "summary": zod.string().optional(),
-  "error": zod.string().optional()
-})).nullish(),
-  "iteration_count": zod.number().nullish()
+  "milestone_plan": zod.array(zod.object({
+  "order": zod.number(),
+  "title": zod.string(),
+  "goals": zod.array(zod.string())
+})).nullish()
 }))
 })
 
@@ -294,7 +294,7 @@ export const GetPreferencesResponse = zod.object({
   "schedule_enabled": zod.boolean().nullish(),
   "schedule_frequency": zod.union([zod.literal('weekly'),zod.literal('monthly'),zod.literal(null)]).nullish(),
   "custom_ai_provider": zod.string().nullish(),
-  "custom_ai_key": zod.string().nullish(),
+  "custom_ai_key_set": zod.boolean().optional().describe('Whether a provider key is stored. The key itself is write-only and never returned.'),
   "filter_languages": zod.array(zod.string()).optional(),
   "filter_exclude_archived": zod.boolean().nullish(),
   "filter_min_stars": zod.number().nullish(),
@@ -324,7 +324,7 @@ export const UpdatePreferencesResponse = zod.object({
   "schedule_enabled": zod.boolean().nullish(),
   "schedule_frequency": zod.union([zod.literal('weekly'),zod.literal('monthly'),zod.literal(null)]).nullish(),
   "custom_ai_provider": zod.string().nullish(),
-  "custom_ai_key": zod.string().nullish(),
+  "custom_ai_key_set": zod.boolean().optional().describe('Whether a provider key is stored. The key itself is write-only and never returned.'),
   "filter_languages": zod.array(zod.string()).optional(),
   "filter_exclude_archived": zod.boolean().nullish(),
   "filter_min_stars": zod.number().nullish(),
@@ -376,17 +376,21 @@ export const GetPublicAnalysisResponse = zod.object({
   "rank": zod.number(),
   "finish_result": zod.union([zod.object({
   "repo": zod.string(),
+  "planId": zod.string(),
   "branch": zod.string(),
+  "commit_sha": zod.string(),
   "pr_url": zod.string(),
   "pr_number": zod.number(),
   "files_changed": zod.number(),
-  "additions": zod.number(),
-  "deletions": zod.number(),
   "summary": zod.string(),
   "changes": zod.array(zod.object({
   "file": zod.string(),
   "status": zod.enum(['created', 'modified', 'deleted']),
   "description": zod.string()
+})),
+  "skipped": zod.array(zod.object({
+  "path": zod.string(),
+  "reason": zod.string()
 }))
 }),zod.null()]).optional(),
   "market_analysis": zod.union([zod.object({
@@ -433,42 +437,98 @@ export const GetPublicAnalysisResponse = zod.object({
 })),
   "integration_plan_md": zod.string()
 }),zod.null()]).optional(),
-  "finish_history": zod.array(zod.object({
-  "pass": zod.number(),
-  "pr_url": zod.string().optional(),
-  "pr_number": zod.number().optional(),
-  "files_changed": zod.number().optional(),
-  "summary": zod.string().optional(),
-  "error": zod.string().optional()
-})).nullish(),
-  "iteration_count": zod.number().nullish()
+  "milestone_plan": zod.array(zod.object({
+  "order": zod.number(),
+  "title": zod.string(),
+  "goals": zod.array(zod.string())
+})).nullish()
 }))
 })
 
 
 /**
- * @summary Have AI generate and commit improvements to a repo, opening a PR
+ * Returns a plan bound to the repository's current default-branch commit, signed by the server, together with the proposed content for each path so the user can review the exact bytes before approving. Nothing is written to the repository by this call.
+ * @summary Propose a signed, immutable change plan for a repo. Writes nothing.
  */
-export const FinishRepoBody = zod.object({
+export const PlanRepoChangesBody = zod.object({
   "repo": zod.string(),
-  "nextSteps": zod.array(zod.string()).optional(),
+  "goals": zod.array(zod.string()).optional(),
   "analysisId": zod.string().optional(),
   "itemRank": zod.number().optional()
 })
 
-export const FinishRepoResponse = zod.object({
+export const PlanRepoChangesResponse = zod.object({
+  "plan": zod.object({
+  "planId": zod.string(),
   "repo": zod.string(),
+  "baseBranch": zod.string(),
+  "baseCommitSha": zod.string(),
+  "summary": zod.string(),
+  "milestone": zod.string().optional(),
+  "createdAt": zod.string(),
+  "expiresAt": zod.string(),
+  "changes": zod.array(zod.object({
+  "path": zod.string(),
+  "status": zod.enum(['created', 'modified', 'deleted']),
+  "contentSha256": zod.string().describe('SHA-256 of the exact content this change will write; empty for deletions.'),
+  "description": zod.string(),
+  "risk": zod.enum(['normal', 'high'])
+}))
+}),
+  "signature": zod.string(),
+  "highRiskPaths": zod.array(zod.string()),
+  "proposedContents": zod.record(zod.string(), zod.string())
+})
+
+
+/**
+ * Verifies the plan signature, the approved path list, the high-risk consent flag, the base commit and each file's content hash before writing. Refused plans return 403; a base branch that moved since planning returns 409.
+ * @summary Execute the approved subset of a signed plan as one commit and a draft PR
+ */
+export const ExecuteRepoPlanBody = zod.object({
+  "plan": zod.object({
+  "planId": zod.string(),
+  "repo": zod.string(),
+  "baseBranch": zod.string(),
+  "baseCommitSha": zod.string(),
+  "summary": zod.string(),
+  "milestone": zod.string().optional(),
+  "createdAt": zod.string(),
+  "expiresAt": zod.string(),
+  "changes": zod.array(zod.object({
+  "path": zod.string(),
+  "status": zod.enum(['created', 'modified', 'deleted']),
+  "contentSha256": zod.string().describe('SHA-256 of the exact content this change will write; empty for deletions.'),
+  "description": zod.string(),
+  "risk": zod.enum(['normal', 'high'])
+}))
+}),
+  "signature": zod.string(),
+  "approval": zod.object({
+  "planId": zod.string(),
+  "approvedPaths": zod.array(zod.string()),
+  "highRiskConsent": zod.boolean()
+}),
+  "contents": zod.record(zod.string(), zod.string())
+})
+
+export const ExecuteRepoPlanResponse = zod.object({
+  "repo": zod.string(),
+  "planId": zod.string(),
   "branch": zod.string(),
+  "commit_sha": zod.string(),
   "pr_url": zod.string(),
   "pr_number": zod.number(),
   "files_changed": zod.number(),
-  "additions": zod.number(),
-  "deletions": zod.number(),
   "summary": zod.string(),
   "changes": zod.array(zod.object({
   "file": zod.string(),
   "status": zod.enum(['created', 'modified', 'deleted']),
   "description": zod.string()
+})),
+  "skipped": zod.array(zod.object({
+  "path": zod.string(),
+  "reason": zod.string()
 }))
 })
 
@@ -485,17 +545,21 @@ export const GetRepoFinisherStatusResponse = zod.object({
   "hasBeenFinished": zod.boolean(),
   "finishes": zod.array(zod.object({
   "repo": zod.string(),
+  "planId": zod.string(),
   "branch": zod.string(),
+  "commit_sha": zod.string(),
   "pr_url": zod.string(),
   "pr_number": zod.number(),
   "files_changed": zod.number(),
-  "additions": zod.number(),
-  "deletions": zod.number(),
   "summary": zod.string(),
   "changes": zod.array(zod.object({
   "file": zod.string(),
   "status": zod.enum(['created', 'modified', 'deleted']),
   "description": zod.string()
+})),
+  "skipped": zod.array(zod.object({
+  "path": zod.string(),
+  "reason": zod.string()
 }))
 }))
 })
@@ -678,29 +742,27 @@ export const CombineReposResponse = zod.object({
 
 
 /**
- * @summary Run multiple sequential AI-finish passes on a repo
+ * @summary Break "finish this repository" into approvable milestones. Writes nothing.
  */
-export const iterativeFinishBodyPassesMax = 4;
+export const buildMilestonePlanBodyMilestonesMax = 4;
 
 
 
-export const IterativeFinishBody = zod.object({
+export const BuildMilestonePlanBody = zod.object({
   "analysisId": zod.string(),
   "itemRank": zod.number(),
   "repo": zod.string(),
-  "passes": zod.number().min(1).max(iterativeFinishBodyPassesMax).optional()
+  "milestones": zod.number().min(1).max(buildMilestonePlanBodyMilestonesMax).optional()
 })
 
-export const IterativeFinishResponse = zod.object({
-  "history": zod.array(zod.object({
-  "pass": zod.number(),
-  "pr_url": zod.string().optional(),
-  "pr_number": zod.number().optional(),
-  "files_changed": zod.number().optional(),
-  "summary": zod.string().optional(),
-  "error": zod.string().optional()
+export const BuildMilestonePlanResponse = zod.object({
+  "repo": zod.string(),
+  "milestones": zod.array(zod.object({
+  "order": zod.number(),
+  "title": zod.string(),
+  "goals": zod.array(zod.string())
 })),
-  "passes_completed": zod.number()
+  "next_step": zod.string()
 })
 
 

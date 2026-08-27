@@ -3,6 +3,8 @@ import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
+import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "../lib/credentials";
+import { decryptSecret } from "../lib/secrets";
 import { callAI } from "../lib/ai-provider";
 
 const router: IRouter = Router();
@@ -1375,12 +1377,7 @@ function startAnalysisJob(ctx: AnalysisContext, analysisId: string): void {
 }
 
 async function getAnalysisContext(supabase: SupabaseClient, userId: string, triggerType: string): Promise<AnalysisContext> {
-  const { data: conn } = await supabase
-    .from("github_connections")
-    .select("access_token, github_login")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (!conn) throw Object.assign(new Error("Connect GitHub first."), { status: 400 });
+  const credential = requireGithubCredential(await loadGithubCredential(supabase, userId));
 
   const { data: prefs } = await supabase
     .from("user_preferences")
@@ -1393,8 +1390,10 @@ async function getAnalysisContext(supabase: SupabaseClient, userId: string, trig
   return {
     supabase,
     userId,
-    token: conn.access_token,
-    prefs: prefs as AnalysisContext["prefs"],
+    token: credential.token,
+    // `custom_ai_key` is sealed at rest; unseal it once here so every consumer
+    // of this context works with a usable key rather than ciphertext.
+    prefs: prefs ? ({ ...prefs, custom_ai_key: decryptSecret((prefs as { custom_ai_key: string | null }).custom_ai_key) } as AnalysisContext["prefs"]) : null,
     triggerType,
     onProgress: noopProgress,
   };
@@ -1535,19 +1534,8 @@ router.post(
     if (itemsErr) throw new Error(itemsErr.message);
     if (!items || items.length === 0) throw Object.assign(new Error("No recommendations found for this analysis."), { status: 400 });
 
-    const { data: prefs } = await req.supabase!
-      .from("user_preferences")
-      .select("custom_ai_provider, custom_ai_key")
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    const provider = prefs?.custom_ai_provider || "openai";
-    let aiKey = prefs?.custom_ai_key || null;
-    if (provider === "github_models" && !aiKey) {
-      const { data: conn } = await req.supabase!.from("github_connections").select("access_token").eq("user_id", userId).maybeSingle();
-      aiKey = conn?.access_token || null;
-    }
-    const aiConfig = { provider, apiKey: aiKey };
+    const githubCredential = await loadGithubCredential(req.supabase!, userId);
+    const aiConfig = await loadAiCredential(req.supabase!, userId, githubCredential?.token ?? null);
 
     const recsText = items
       .map(
@@ -1612,19 +1600,8 @@ router.post(
     if (itemErr) throw new Error(itemErr.message);
     if (!item) throw Object.assign(new Error("Recommendation not found."), { status: 404 });
 
-    const { data: prefs } = await req.supabase!
-      .from("user_preferences")
-      .select("custom_ai_provider, custom_ai_key")
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    const provider = prefs?.custom_ai_provider || "openai";
-    let aiKey = prefs?.custom_ai_key || null;
-    if (provider === "github_models" && !aiKey) {
-      const { data: conn } = await req.supabase!.from("github_connections").select("access_token").eq("user_id", userId).maybeSingle();
-      aiKey = conn?.access_token || null;
-    }
-    const aiConfig = { provider, apiKey: aiKey };
+    const githubCredential = await loadGithubCredential(req.supabase!, userId);
+    const aiConfig = await loadAiCredential(req.supabase!, userId, githubCredential?.token ?? null);
 
     const repos = (item.repos as string[]) || [];
     const techStack = (item.tech_stack as string[]) || [];

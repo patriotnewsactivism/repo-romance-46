@@ -65,3 +65,6 @@ Thumbs.db
 .vercel
 .env*.local
 .env*
+
+# ...but the documented template is checked in on purpose
+!.env.example

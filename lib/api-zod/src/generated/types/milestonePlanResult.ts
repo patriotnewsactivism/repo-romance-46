@@ -5,10 +5,10 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { Milestone } from './milestone';
 
-export interface FinishInput {
+export interface MilestonePlanResult {
   repo: string;
-  nextSteps?: string[];
-  analysisId?: string;
-  itemRank?: number;
+  milestones: Milestone[];
+  next_step: string;
 }

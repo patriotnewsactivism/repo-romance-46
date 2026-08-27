@@ -325,11 +325,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/AnalysisDetail"
 
-  /repo-finisher/finish:
+  /repo-finisher/plan:
     post:
-      operationId: finishRepo
+      operationId: planRepoChanges
       tags: [repo-finisher]
-      summary: Have AI generate and commit improvements to a repo, opening a PR
+      summary: Propose a signed, immutable change plan for a repo. Writes nothing.
+      description: >
+        Returns a plan bound to the repository's current default-branch commit,
+        signed by the server, together with the proposed content for each path
+        so the user can review the exact bytes before approving. Nothing is
+        written to the repository by this call.
       security:
         - bearerAuth: []
       requestBody:
@@ -337,14 +342,44 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/FinishInput"
+              $ref: "#/components/schemas/PlanInput"
       responses:
         "200":
-          description: Finish result
+          description: Signed change plan
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FinishResult"
+                $ref: "#/components/schemas/PlanResponse"
+
+  /repo-finisher/execute:
+    post:
+      operationId: executeRepoPlan
+      tags: [repo-finisher]
+      summary: Execute the approved subset of a signed plan as one commit and a draft PR
+      description: >
+        Verifies the plan signature, the approved path list, the high-risk
+        consent flag, the base commit and each file's content hash before
+        writing. Refused plans return 403; a base branch that moved since
+        planning returns 409.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExecuteInput"
+      responses:
+        "200":
+          description: Execution result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecuteResult"
+        "403":
+          description: Execution refused — signature, approval or content check failed
+        "409":
+          description: The base branch moved since the plan was built
 
   /repo-finisher/status:
     get:
@@ -472,11 +507,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/CombineResult"
 
-  /vibe-tools/iterative-finish:
+  /vibe-tools/milestone-plan:
     post:
-      operationId: iterativeFinish
+      operationId: buildMilestonePlan
       tags: [vibe-tools]
-      summary: Run multiple sequential AI-finish passes on a repo
+      summary: Break "finish this repository" into approvable milestones. Writes nothing.
       security:
         - bearerAuth: []
       requestBody:
@@ -484,14 +519,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/IterativeFinishInput"
+              $ref: "#/components/schemas/MilestonePlanInput"
       responses:
         "200":
-          description: Iterative finish result
+          description: Milestone plan
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/IterativeFinishResult"
+                $ref: "#/components/schemas/MilestonePlanResult"
 
 components:
   securitySchemes:
@@ -633,7 +668,7 @@ components:
           type: integer
         finish_result:
           oneOf:
-            - $ref: "#/components/schemas/FinishResult"
+            - $ref: "#/components/schemas/ExecuteResult"
             - type: "null"
         market_analysis:
           oneOf:
@@ -651,12 +686,10 @@ components:
           oneOf:
             - $ref: "#/components/schemas/CombineResult"
             - type: "null"
-        finish_history:
+        milestone_plan:
           type: ["array", "null"]
           items:
-            $ref: "#/components/schemas/IterativeFinishPass"
-        iteration_count:
-          type: ["integer", "null"]
+            $ref: "#/components/schemas/Milestone"
 
     AnalysisDetail:
       type: object
@@ -801,8 +834,9 @@ components:
           enum: [weekly, monthly, null]
         custom_ai_provider:
           type: ["string", "null"]
-        custom_ai_key:
-          type: ["string", "null"]
+        custom_ai_key_set:
+          type: boolean
+          description: Whether a provider key is stored. The key itself is write-only and never returned.
         filter_languages:
           type: array
           items:
@@ -845,13 +879,13 @@ components:
           type: string
           enum: [fast, balanced, deep]
 
-    FinishInput:
+    PlanInput:
       type: object
       required: [repo]
       properties:
         repo:
           type: string
-        nextSteps:
+        goals:
           type: array
           items:
             type: string
@@ -859,6 +893,95 @@ components:
           type: string
         itemRank:
           type: integer
+
+    PlannedChange:
+      type: object
+      required: [path, status, contentSha256, description, risk]
+      properties:
+        path:
+          type: string
+        status:
+          type: string
+          enum: [created, modified, deleted]
+        contentSha256:
+          type: string
+          description: SHA-256 of the exact content this change will write; empty for deletions.
+        description:
+          type: string
+        risk:
+          type: string
+          enum: [normal, high]
+
+    PlanDocument:
+      type: object
+      required:
+        [planId, repo, baseBranch, baseCommitSha, summary, createdAt, expiresAt, changes]
+      properties:
+        planId:
+          type: string
+        repo:
+          type: string
+        baseBranch:
+          type: string
+        baseCommitSha:
+          type: string
+        summary:
+          type: string
+        milestone:
+          type: string
+        createdAt:
+          type: string
+        expiresAt:
+          type: string
+        changes:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlannedChange"
+
+    PlanResponse:
+      type: object
+      required: [plan, signature, highRiskPaths, proposedContents]
+      properties:
+        plan:
+          $ref: "#/components/schemas/PlanDocument"
+        signature:
+          type: string
+        highRiskPaths:
+          type: array
+          items:
+            type: string
+        proposedContents:
+          type: object
+          additionalProperties:
+            type: string
+
+    ApprovalInput:
+      type: object
+      required: [planId, approvedPaths, highRiskConsent]
+      properties:
+        planId:
+          type: string
+        approvedPaths:
+          type: array
+          items:
+            type: string
+        highRiskConsent:
+          type: boolean
+
+    ExecuteInput:
+      type: object
+      required: [plan, signature, approval, contents]
+      properties:
+        plan:
+          $ref: "#/components/schemas/PlanDocument"
+        signature:
+          type: string
+        approval:
+          $ref: "#/components/schemas/ApprovalInput"
+        contents:
+          type: object
+          additionalProperties:
+            type: string
 
     FinishChange:
       type: object
@@ -872,14 +995,27 @@ components:
         description:
           type: string
 
-    FinishResult:
+    SkippedChange:
+      type: object
+      required: [path, reason]
+      properties:
+        path:
+          type: string
+        reason:
+          type: string
+
+    ExecuteResult:
       type: object
       required:
-        [repo, branch, pr_url, pr_number, files_changed, additions, deletions, summary, changes]
+        [repo, planId, branch, commit_sha, pr_url, pr_number, files_changed, summary, changes, skipped]
       properties:
         repo:
           type: string
+        planId:
+          type: string
         branch:
+          type: string
+        commit_sha:
           type: string
         pr_url:
           type: string
@@ -887,16 +1023,16 @@ components:
           type: integer
         files_changed:
           type: integer
-        additions:
-          type: integer
-        deletions:
-          type: integer
         summary:
           type: string
         changes:
           type: array
           items:
             $ref: "#/components/schemas/FinishChange"
+        skipped:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkippedChange"
 
     RepoFinisherStatus:
       type: object
@@ -909,7 +1045,7 @@ components:
         finishes:
           type: array
           items:
-            $ref: "#/components/schemas/FinishResult"
+            $ref: "#/components/schemas/ExecuteResult"
 
     ValuationFactor:
       type: object
@@ -1171,7 +1307,7 @@ components:
         integration_plan_md:
           type: string
 
-    IterativeFinishInput:
+    MilestonePlanInput:
       type: object
       required: [analysisId, itemRank, repo]
       properties:
@@ -1181,35 +1317,33 @@ components:
           type: integer
         repo:
           type: string
-        passes:
+        milestones:
           type: integer
           minimum: 1
           maximum: 4
 
-    IterativeFinishPass:
+    Milestone:
       type: object
-      required: [pass]
+      required: [order, title, goals]
       properties:
-        pass:
+        order:
           type: integer
-        pr_url:
+        title:
           type: string
-        pr_number:
-          type: integer
-        files_changed:
-          type: integer
-        summary:
-          type: string
-        error:
-          type: string
-
-    IterativeFinishResult:
-      type: object
-      required: [history, passes_completed]
-      properties:
-        history:
+        goals:
           type: array
           items:
-            $ref: "#/components/schemas/IterativeFinishPass"
-        passes_completed:
-          type: integer
+            type: string
+
+    MilestonePlanResult:
+      type: object
+      required: [repo, milestones, next_step]
+      properties:
+        repo:
+          type: string
+        milestones:
+          type: array
+          items:
+            $ref: "#/components/schemas/Milestone"
+        next_step:
+          type: string

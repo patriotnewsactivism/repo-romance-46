@@ -6,7 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface IterativeFinishInput {
+export interface MilestonePlanInput {
   analysisId: string;
   itemRank: number;
   repo: string;
@@ -14,5 +14,5 @@ export interface IterativeFinishInput {
      * @minimum 1
      * @maximum 4
      */
-  passes?: number;
+  milestones?: number;
 }

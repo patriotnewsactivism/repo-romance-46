@@ -3,12 +3,12 @@ import {
   useAssessMarketAndValue,
   useGenerateVibeSpec,
   useCombineRepos,
-  useIterativeFinish,
+  useBuildMilestonePlan,
   type MarketAnalysis,
   type MarketValuation,
   type VibeSpec,
   type CombineResult,
-  type IterativeFinishPass,
+  type Milestone,
 } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -36,7 +36,7 @@ interface VibeToolsPanelProps {
     valuation?: MarketValuation | null;
     vibe_spec?: VibeSpec | null;
     combine_result?: CombineResult | null;
-    finish_history?: IterativeFinishPass[] | null;
+    milestone_plan?: Milestone[] | null;
   };
 }
 
@@ -55,12 +55,12 @@ export function VibeToolsPanel({ analysisId, itemRank, kind, repos, existing }: 
   const [valuation, setValuation] = useState<MarketValuation | null>(existing?.valuation ?? null);
   const [spec, setSpec] = useState<VibeSpec | null>(existing?.vibe_spec ?? null);
   const [combine, setCombine] = useState<CombineResult | null>(existing?.combine_result ?? null);
-  const [history, setHistory] = useState<IterativeFinishPass[]>(existing?.finish_history ?? []);
+  const [milestones, setMilestones] = useState<Milestone[]>(existing?.milestone_plan ?? []);
 
   const marketMut = useAssessMarketAndValue();
   const specMut = useGenerateVibeSpec();
   const combineMut = useCombineRepos();
-  const iterMut = useIterativeFinish();
+  const milestoneMut = useBuildMilestonePlan();
 
   const handleMarket = () => {
     marketMut.mutate(
@@ -102,13 +102,13 @@ export function VibeToolsPanel({ analysisId, itemRank, kind, repos, existing }: 
     );
   };
 
-  const handleIterate = () => {
-    iterMut.mutate(
-      { data: { analysisId, itemRank, repo: repos[0], passes: 3 } },
+  const handleMilestones = () => {
+    milestoneMut.mutate(
+      { data: { analysisId, itemRank, repo: repos[0], milestones: 3 } },
       {
         onSuccess: (r) => {
-          setHistory(r.history);
-          toast.success(`Ran ${r.history.filter((h) => h.pr_url).length} finish passes`);
+          setMilestones(r.milestones);
+          toast.success(`${r.milestones.length} milestones planned — nothing written`);
         },
         onError: (e) => toast.error(e.message.slice(0, 200)),
       },
@@ -158,17 +158,17 @@ export function VibeToolsPanel({ analysisId, itemRank, kind, repos, existing }: 
           <Button
             size="sm"
             variant="outline"
-            onClick={handleIterate}
-            disabled={iterMut.isPending}
+            onClick={handleMilestones}
+            disabled={milestoneMut.isPending}
             className="gap-1.5 justify-start"
-            data-testid="button-vibe-iterate"
+            data-testid="button-vibe-milestones"
           >
-            {iterMut.isPending ? (
+            {milestoneMut.isPending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
               <Rocket className="h-3.5 w-3.5" />
             )}
-            Iterative auto-finish (3 passes)
+            Plan finish milestones
           </Button>
         )}
 
@@ -341,32 +341,26 @@ export function VibeToolsPanel({ analysisId, itemRank, kind, repos, existing }: 
         </Card>
       )}
 
-      {/* Iterative finish history */}
-      {history.length > 0 && (
+      {/* Milestone plan — approvable work, not executed work */}
+      {milestones.length > 0 && (
         <Card className="p-3 space-y-2 bg-muted/20">
           <div className="text-xs font-mono text-muted-foreground">
-            Auto-finish passes ({history.filter((h) => h.pr_url).length}/{history.length})
+            Finish plan ({milestones.length} milestone{milestones.length === 1 ? "" : "s"})
           </div>
-          {history.map((h, i) => (
-            <div key={i} className="text-sm border-l-2 border-border pl-2">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-mono text-muted-foreground">Pass {h.pass}</span>
-                {h.pr_url ? (
-                  <a
-                    href={h.pr_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-500 hover:underline text-xs"
-                  >
-                    PR #{h.pr_number} ({h.files_changed} files)
-                  </a>
-                ) : (
-                  <span className="text-xs text-red-500">{h.error}</span>
-                )}
-              </div>
-              {h.summary && (
-                <div className="text-xs text-muted-foreground mt-0.5">{h.summary}</div>
-              )}
+          <p className="text-xs text-muted-foreground">
+            Nothing has been written. Approve a milestone, then use “Plan changes” on the repository to review each
+            file before anything is committed.
+          </p>
+          {milestones.map((m) => (
+            <div key={m.order} className="text-sm border-l-2 border-border pl-2">
+              <div className="text-xs font-medium">{m.title}</div>
+              <ul className="mt-0.5 space-y-0.5">
+                {m.goals.map((goal) => (
+                  <li key={goal} className="text-xs text-muted-foreground">
+                    • {goal}
+                  </li>
+                ))}
+              </ul>
             </div>
           ))}
         </Card>

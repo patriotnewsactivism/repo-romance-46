@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { CombineResult } from './combineResult';
-import type { FinishResult } from './finishResult';
-import type { IterativeFinishPass } from './iterativeFinishPass';
+import type { ExecuteResult } from './executeResult';
 import type { MarketAnalysis } from './marketAnalysis';
 import type { MarketValuation } from './marketValuation';
+import type { Milestone } from './milestone';
 import type { RecommendationKind } from './recommendationKind';
 import type { VibeSpec } from './vibeSpec';
 
@@ -30,13 +30,11 @@ export interface Recommendation {
   /** @nullable */
   estimated_hours?: number | null;
   rank: number;
-  finish_result?: FinishResult | null;
+  finish_result?: ExecuteResult | null;
   market_analysis?: MarketAnalysis | null;
   valuation?: MarketValuation | null;
   vibe_spec?: VibeSpec | null;
   combine_result?: CombineResult | null;
   /** @nullable */
-  finish_history?: IterativeFinishPass[] | null;
-  /** @nullable */
-  iteration_count?: number | null;
+  milestone_plan?: Milestone[] | null;
 }

@@ -40,7 +40,8 @@ export default function Settings() {
   useEffect(() => {
     if (preferences) {
       setAiProvider(preferences.custom_ai_provider || '');
-      setAiKey(preferences.custom_ai_key || '');
+      // The key itself is write-only server-side; we only learn whether one is stored.
+      setAiKey('');
       setAnalysisTier(preferences.analysis_tier || 'balanced');
       setFilterLanguages(preferences.filter_languages?.join(', ') || '');
       setExcludeArchived(preferences.filter_exclude_archived ?? true);
@@ -59,7 +60,9 @@ export default function Settings() {
       {
         data: {
           custom_ai_provider: aiProvider || undefined,
-          custom_ai_key: aiKey || null,
+          // Only send the key when the user actually typed one, so saving other
+          // settings never clears a key we were never shown.
+          ...(aiKey ? { custom_ai_key: aiKey } : {}),
           analysis_tier: analysisTier,
           filter_languages: languagesArray.length > 0 ? languagesArray : undefined,
           filter_exclude_archived: excludeArchived,
@@ -252,9 +255,30 @@ export default function Settings() {
                   type="password"
                   value={aiKey}
                   onChange={(e) => setAiKey(e.target.value)}
-                  placeholder="sk-..."
+                  placeholder={preferences?.custom_ai_key_set ? 'A key is stored — type to replace it' : 'sk-...'}
                   data-testid="input-ai-key"
                 />
+                <p className="text-xs text-muted-foreground">
+                  {preferences?.custom_ai_key_set
+                    ? 'Your key is encrypted at rest and never sent back to the browser. Leave this blank to keep it.'
+                    : 'Your key is encrypted before it is stored and is never returned to the browser.'}
+                </p>
+                {preferences?.custom_ai_key_set && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      updatePreferences.mutate(
+                        { data: { custom_ai_key: null } },
+                        { onSuccess: () => toast.success('Stored API key removed') },
+                      )
+                    }
+                    data-testid="button-clear-ai-key"
+                  >
+                    Remove stored key
+                  </Button>
+                )}
               </div>
             )}
           </CardContent>

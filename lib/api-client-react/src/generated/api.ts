@@ -25,18 +25,20 @@ import type {
   AnalysisRunResult,
   AnalysisSummary,
   CombineResult,
-  FinishInput,
-  FinishResult,
+  ExecuteInput,
+  ExecuteResult,
   GetRepoFinisherStatusParams,
   GithubConnectInput,
   GithubConnection,
   GithubStatus,
   HealthStatus,
-  IterativeFinishInput,
-  IterativeFinishResult,
   MarketAndValueResult,
   MergeInput,
   MergeInstructions,
+  MilestonePlanInput,
+  MilestonePlanResult,
+  PlanInput,
+  PlanResponse,
   PortfolioSummary,
   PortfolioValuation,
   PreferencesUpdate,
@@ -1248,36 +1250,37 @@ export function useGetPublicAnalysis<TData = Awaited<ReturnType<typeof getPublic
 
 
 
-export const getFinishRepoUrl = () => {
+export const getPlanRepoChangesUrl = () => {
 
 
 
 
-  return `/api/repo-finisher/finish`
+  return `/api/repo-finisher/plan`
 }
 
 /**
- * @summary Have AI generate and commit improvements to a repo, opening a PR
+ * Returns a plan bound to the repository's current default-branch commit, signed by the server, together with the proposed content for each path so the user can review the exact bytes before approving. Nothing is written to the repository by this call.
+ * @summary Propose a signed, immutable change plan for a repo. Writes nothing.
  */
-export const finishRepo = async (finishInput: FinishInput, options?: RequestInit): Promise<FinishResult> => {
+export const planRepoChanges = async (planInput: PlanInput, options?: RequestInit): Promise<PlanResponse> => {
 
-  return customFetch<FinishResult>(getFinishRepoUrl(),
+  return customFetch<PlanResponse>(getPlanRepoChangesUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(finishInput)
+    body: JSON.stringify(planInput)
   }
 );}
 
 
 
 
-export const getFinishRepoMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finishRepo>>, TError,{data: BodyType<FinishInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof finishRepo>>, TError,{data: BodyType<FinishInput>}, TContext> => {
+export const getPlanRepoChangesMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof planRepoChanges>>, TError,{data: BodyType<PlanInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof planRepoChanges>>, TError,{data: BodyType<PlanInput>}, TContext> => {
 
-const mutationKey = ['finishRepo'];
+const mutationKey = ['planRepoChanges'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1287,10 +1290,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof finishRepo>>, {data: BodyType<FinishInput>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof planRepoChanges>>, {data: BodyType<PlanInput>}> = (props) => {
           const {data} = props ?? {};
 
-          return  finishRepo(data,requestOptions)
+          return  planRepoChanges(data,requestOptions)
         }
 
 
@@ -1300,22 +1303,93 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type FinishRepoMutationResult = NonNullable<Awaited<ReturnType<typeof finishRepo>>>
-    export type FinishRepoMutationBody = BodyType<FinishInput>
-    export type FinishRepoMutationError = ErrorType<unknown>
+    export type PlanRepoChangesMutationResult = NonNullable<Awaited<ReturnType<typeof planRepoChanges>>>
+    export type PlanRepoChangesMutationBody = BodyType<PlanInput>
+    export type PlanRepoChangesMutationError = ErrorType<unknown>
 
     /**
- * @summary Have AI generate and commit improvements to a repo, opening a PR
+ * @summary Propose a signed, immutable change plan for a repo. Writes nothing.
  */
-export const useFinishRepo = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finishRepo>>, TError,{data: BodyType<FinishInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+export const usePlanRepoChanges = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof planRepoChanges>>, TError,{data: BodyType<PlanInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof finishRepo>>,
+        Awaited<ReturnType<typeof planRepoChanges>>,
         TError,
-        {data: BodyType<FinishInput>},
+        {data: BodyType<PlanInput>},
         TContext
       > => {
-      return useMutation(getFinishRepoMutationOptions(options));
+      return useMutation(getPlanRepoChangesMutationOptions(options));
+    }
+
+export const getExecuteRepoPlanUrl = () => {
+
+
+
+
+  return `/api/repo-finisher/execute`
+}
+
+/**
+ * Verifies the plan signature, the approved path list, the high-risk consent flag, the base commit and each file's content hash before writing. Refused plans return 403; a base branch that moved since planning returns 409.
+ * @summary Execute the approved subset of a signed plan as one commit and a draft PR
+ */
+export const executeRepoPlan = async (executeInput: ExecuteInput, options?: RequestInit): Promise<ExecuteResult> => {
+
+  return customFetch<ExecuteResult>(getExecuteRepoPlanUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(executeInput)
+  }
+);}
+
+
+
+
+export const getExecuteRepoPlanMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof executeRepoPlan>>, TError,{data: BodyType<ExecuteInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof executeRepoPlan>>, TError,{data: BodyType<ExecuteInput>}, TContext> => {
+
+const mutationKey = ['executeRepoPlan'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof executeRepoPlan>>, {data: BodyType<ExecuteInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  executeRepoPlan(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ExecuteRepoPlanMutationResult = NonNullable<Awaited<ReturnType<typeof executeRepoPlan>>>
+    export type ExecuteRepoPlanMutationBody = BodyType<ExecuteInput>
+    export type ExecuteRepoPlanMutationError = ErrorType<void>
+
+    /**
+ * @summary Execute the approved subset of a signed plan as one commit and a draft PR
+ */
+export const useExecuteRepoPlan = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof executeRepoPlan>>, TError,{data: BodyType<ExecuteInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof executeRepoPlan>>,
+        TError,
+        {data: BodyType<ExecuteInput>},
+        TContext
+      > => {
+      return useMutation(getExecuteRepoPlanMutationOptions(options));
     }
 
 export const getGetRepoFinisherStatusUrl = (params: GetRepoFinisherStatusParams,) => {
@@ -1759,36 +1833,36 @@ export const useCombineRepos = <TError = ErrorType<unknown>,
       return useMutation(getCombineReposMutationOptions(options));
     }
 
-export const getIterativeFinishUrl = () => {
+export const getBuildMilestonePlanUrl = () => {
 
 
 
 
-  return `/api/vibe-tools/iterative-finish`
+  return `/api/vibe-tools/milestone-plan`
 }
 
 /**
- * @summary Run multiple sequential AI-finish passes on a repo
+ * @summary Break "finish this repository" into approvable milestones. Writes nothing.
  */
-export const iterativeFinish = async (iterativeFinishInput: IterativeFinishInput, options?: RequestInit): Promise<IterativeFinishResult> => {
+export const buildMilestonePlan = async (milestonePlanInput: MilestonePlanInput, options?: RequestInit): Promise<MilestonePlanResult> => {
 
-  return customFetch<IterativeFinishResult>(getIterativeFinishUrl(),
+  return customFetch<MilestonePlanResult>(getBuildMilestonePlanUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(iterativeFinishInput)
+    body: JSON.stringify(milestonePlanInput)
   }
 );}
 
 
 
 
-export const getIterativeFinishMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof iterativeFinish>>, TError,{data: BodyType<IterativeFinishInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof iterativeFinish>>, TError,{data: BodyType<IterativeFinishInput>}, TContext> => {
+export const getBuildMilestonePlanMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof buildMilestonePlan>>, TError,{data: BodyType<MilestonePlanInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof buildMilestonePlan>>, TError,{data: BodyType<MilestonePlanInput>}, TContext> => {
 
-const mutationKey = ['iterativeFinish'];
+const mutationKey = ['buildMilestonePlan'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1798,10 +1872,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof iterativeFinish>>, {data: BodyType<IterativeFinishInput>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof buildMilestonePlan>>, {data: BodyType<MilestonePlanInput>}> = (props) => {
           const {data} = props ?? {};
 
-          return  iterativeFinish(data,requestOptions)
+          return  buildMilestonePlan(data,requestOptions)
         }
 
 
@@ -1811,21 +1885,21 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type IterativeFinishMutationResult = NonNullable<Awaited<ReturnType<typeof iterativeFinish>>>
-    export type IterativeFinishMutationBody = BodyType<IterativeFinishInput>
-    export type IterativeFinishMutationError = ErrorType<unknown>
+    export type BuildMilestonePlanMutationResult = NonNullable<Awaited<ReturnType<typeof buildMilestonePlan>>>
+    export type BuildMilestonePlanMutationBody = BodyType<MilestonePlanInput>
+    export type BuildMilestonePlanMutationError = ErrorType<unknown>
 
     /**
- * @summary Run multiple sequential AI-finish passes on a repo
+ * @summary Break "finish this repository" into approvable milestones. Writes nothing.
  */
-export const useIterativeFinish = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof iterativeFinish>>, TError,{data: BodyType<IterativeFinishInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useBuildMilestonePlan = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof buildMilestonePlan>>, TError,{data: BodyType<MilestonePlanInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof iterativeFinish>>,
+        Awaited<ReturnType<typeof buildMilestonePlan>>,
         TError,
-        {data: BodyType<IterativeFinishInput>},
+        {data: BodyType<MilestonePlanInput>},
         TContext
       > => {
-      return useMutation(getIterativeFinishMutationOptions(options));
+      return useMutation(getBuildMilestonePlanMutationOptions(options));
     }
 
