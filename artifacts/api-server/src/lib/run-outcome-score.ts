@@ -27,6 +27,7 @@ const clamp = (value: number, min: number, max: number): number =>
   Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
 
 function finiteNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
   const number = typeof value === "number" ? value : Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -52,9 +53,11 @@ export function normalizeInvestmentMetrics(entry: unknown): InvestmentMetrics | 
     productionReadinessPct: finiteNumber(record.productionReadinessPct),
     finishFirstScore: finiteNumber(record.finishFirstScore),
     commercializationProbability: finiteNumber(record.commercializationProbability),
-    remainingHours: finiteNumber(remaining?.hours),
-    presentValueMidpointUsd: midpoint(record.presentValueUsd),
-    potentialValueMidpointUsd: midpoint(record.potentialValueUsd),
+    remainingHours: finiteNumber(record.remainingHours) ?? finiteNumber(remaining?.hours),
+    presentValueMidpointUsd:
+      finiteNumber(record.presentValueMidpointUsd) ?? midpoint(record.presentValueUsd),
+    potentialValueMidpointUsd:
+      finiteNumber(record.potentialValueMidpointUsd) ?? midpoint(record.potentialValueUsd),
   };
 
   return Object.values(metrics).some((value) => value !== null) ? metrics : null;
