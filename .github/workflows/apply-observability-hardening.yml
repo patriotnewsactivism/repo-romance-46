@@ -39,6 +39,9 @@ jobs:
       - name: Add Sentry SDK
         run: pnpm --filter @workspace/api-server add @sentry/node@10.71.0
 
+      - name: Install full workspace
+        run: pnpm install --frozen-lockfile
+
       - name: Verify tests and build
         run: |
           pnpm -r --if-present test
