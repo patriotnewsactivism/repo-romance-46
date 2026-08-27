@@ -15,6 +15,16 @@ export interface RepoLearningEntry {
   timestamp: string;
 }
 
+export interface StrategyPerformance {
+  pattern: string;
+  samples: number;
+  successes: number;
+  failures: number;
+  averageOutcomeScore: number | null;
+  averageCompletionDelta: number | null;
+  averageReadinessDelta: number | null;
+}
+
 export interface AdaptiveLearningContext {
   repo: string;
   hasHistory: boolean;
@@ -26,6 +36,7 @@ export interface AdaptiveLearningContext {
     confidence: number;
     recommendation: string;
   }>;
+  strategyPerformance: StrategyPerformance[];
   promptGuidance: string[];
 }
 
@@ -44,6 +55,50 @@ function patternKey(entry: RepoLearningEntry): string | null {
   if (entry.action === "completion_run") return "completion-run";
   if (entry.action === "investment_intelligence") return "investment-intelligence";
   return null;
+}
+
+function numericValue(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function metadataNumber(entry: RepoLearningEntry, key: string): number | null {
+  return numericValue(entry.metadata?.[key]);
+}
+
+export function summarizeStrategyPerformance(history: RepoLearningEntry[]): StrategyPerformance[] {
+  const groups = new Map<string, RepoLearningEntry[]>();
+  for (const entry of history) {
+    const key = patternKey(entry);
+    if (!key) continue;
+    const group = groups.get(key) ?? [];
+    group.push(entry);
+    groups.set(key, group);
+  }
+
+  const average = (values: Array<number | null>): number | null => {
+    const finite = values.filter((value): value is number => value !== null && Number.isFinite(value));
+    if (finite.length === 0) return null;
+    return Math.round((finite.reduce((sum, value) => sum + value, 0) / finite.length) * 10) / 10;
+  };
+
+  return [...groups.entries()]
+    .map(([pattern, entries]) => ({
+      pattern,
+      samples: entries.length,
+      successes: entries.filter((entry) => entry.outcome === "success").length,
+      failures: entries.filter((entry) => entry.outcome === "failure").length,
+      averageOutcomeScore: average(entries.map((entry) => metadataNumber(entry, "outcome_score"))),
+      averageCompletionDelta: average(entries.map((entry) => metadataNumber(entry, "completion_delta"))),
+      averageReadinessDelta: average(entries.map((entry) => metadataNumber(entry, "readiness_delta"))),
+    }))
+    .sort((a, b) => {
+      const aScore = a.averageOutcomeScore ?? -1;
+      const bScore = b.averageOutcomeScore ?? -1;
+      return bScore - aScore || b.samples - a.samples || a.pattern.localeCompare(b.pattern);
+    })
+    .slice(0, 20);
 }
 
 function detectPatterns(history: RepoLearningEntry[]): string[] {
@@ -69,8 +124,25 @@ function detectPatterns(history: RepoLearningEntry[]): string[] {
     .map(([key]) => key);
 }
 
-function buildGuidance(history: RepoLearningEntry[], crossRepo: AdaptiveLearningContext["crossRepoPatterns"]): string[] {
+function buildGuidance(
+  history: RepoLearningEntry[],
+  crossRepo: AdaptiveLearningContext["crossRepoPatterns"],
+  strategyPerformance: StrategyPerformance[],
+): string[] {
   const guidance: string[] = [];
+
+  for (const strategy of strategyPerformance.filter((item) => item.samples >= 2).slice(0, 6)) {
+    if (strategy.averageOutcomeScore !== null && strategy.averageOutcomeScore >= 75) {
+      guidance.push(
+        `Prefer '${strategy.pattern}' when the repository evidence fits: ${strategy.samples} measured run(s) average ${strategy.averageOutcomeScore}/100 outcome score${strategy.averageCompletionDelta === null ? "" : ` and ${strategy.averageCompletionDelta >= 0 ? "+" : ""}${strategy.averageCompletionDelta} completion points`}.`,
+      );
+    } else if (strategy.averageOutcomeScore !== null && strategy.averageOutcomeScore <= 40) {
+      guidance.push(
+        `Do not repeat '${strategy.pattern}' unchanged: ${strategy.samples} measured run(s) average only ${strategy.averageOutcomeScore}/100 outcome score${strategy.averageCompletionDelta === null ? "" : ` with ${strategy.averageCompletionDelta >= 0 ? "+" : ""}${strategy.averageCompletionDelta} completion points`}. Change the plan before using it again.`,
+      );
+    }
+  }
+
   const grouped = new Map<string, RepoLearningEntry[]>();
   for (const entry of history) {
     const key = patternKey(entry);
@@ -97,7 +169,7 @@ function buildGuidance(history: RepoLearningEntry[], crossRepo: AdaptiveLearning
     guidance.push(`Cross-repo lesson (${pattern.confidence}% confidence): ${pattern.recommendation || pattern.pattern}`);
   }
 
-  return guidance.slice(0, 10);
+  return [...new Set(guidance)].slice(0, 12);
 }
 
 export async function loadAdaptiveLearningContext(
@@ -129,6 +201,7 @@ export async function loadAdaptiveLearningContext(
       recentFailures: [],
       patterns: [],
       crossRepoPatterns: [],
+      strategyPerformance: [],
       promptGuidance: [],
     };
   }
@@ -142,6 +215,7 @@ export async function loadAdaptiveLearningContext(
     confidence: Number((row as Record<string, unknown>).confidence || 0),
     recommendation: String((row as Record<string, unknown>).recommendation || ""),
   }));
+  const strategyPerformance = summarizeStrategyPerformance(history);
 
   return {
     repo,
@@ -150,7 +224,8 @@ export async function loadAdaptiveLearningContext(
     recentFailures: history.filter((entry) => entry.outcome === "failure").slice(-6).reverse(),
     patterns,
     crossRepoPatterns,
-    promptGuidance: buildGuidance(history, crossRepoPatterns),
+    strategyPerformance,
+    promptGuidance: buildGuidance(history, crossRepoPatterns, strategyPerformance),
   };
 }
 
@@ -172,15 +247,44 @@ async function updateCrossRepoPattern(
 
   const current = existing as { id: string; occurrences: unknown } | null;
   const occurrences = Array.isArray(current?.occurrences) ? current.occurrences.slice(-49) : [];
-  occurrences.push({ repo, timestamp: entry.timestamp, outcome: entry.outcome });
+  occurrences.push({
+    repo,
+    timestamp: entry.timestamp,
+    outcome: entry.outcome,
+    outcome_score: metadataNumber(entry, "outcome_score"),
+    completion_delta: metadataNumber(entry, "completion_delta"),
+    readiness_delta: metadataNumber(entry, "readiness_delta"),
+    prompt_version: entry.prompt_version ?? null,
+  });
+
   const successful = occurrences.filter((item) => (item as Record<string, unknown>).outcome === "success").length;
-  const confidence = Math.round((successful / Math.max(1, occurrences.length)) * 100);
+  const scored = occurrences
+    .map((item) => numericValue((item as Record<string, unknown>).outcome_score))
+    .filter((value): value is number => value !== null);
+  const successRate = successful / Math.max(1, occurrences.length);
+  const averageOutcomeScore = scored.length > 0
+    ? scored.reduce((sum, value) => sum + value, 0) / scored.length
+    : null;
+  const confidence = Math.round(
+    Math.max(
+      0,
+      Math.min(
+        100,
+        averageOutcomeScore === null
+          ? successRate * 100
+          : successRate * 60 + averageOutcomeScore * 0.4,
+      ),
+    ),
+  );
+  const measuredSuffix = averageOutcomeScore === null
+    ? ""
+    : ` Average measured outcome score ${Math.round(averageOutcomeScore * 10) / 10}/100.`;
   const recommendation =
     confidence >= 70
-      ? `Prefer ${key} when repository evidence matches; ${successful}/${occurrences.length} recorded outcomes succeeded.`
+      ? `Prefer ${key} when repository evidence matches; ${successful}/${occurrences.length} recorded outcomes succeeded.${measuredSuffix}`
       : confidence <= 35
-        ? `Treat ${key} as high-risk; only ${successful}/${occurrences.length} recorded outcomes succeeded.`
-        : `Use ${key} selectively and verify with CI; ${successful}/${occurrences.length} recorded outcomes succeeded.`;
+        ? `Treat ${key} as high-risk; only ${successful}/${occurrences.length} recorded outcomes succeeded.${measuredSuffix}`
+        : `Use ${key} selectively and verify with CI; ${successful}/${occurrences.length} recorded outcomes succeeded.${measuredSuffix}`;
 
   if (current) {
     await supabase

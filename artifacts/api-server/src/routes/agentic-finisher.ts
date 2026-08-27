@@ -6,9 +6,11 @@ import { callAI } from "../lib/ai-provider";
 import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "../lib/credentials";
 import { loadAdaptiveLearningContext } from "../lib/adaptive-learning";
 import { prepareFinishPlan } from "../lib/repo-finisher-engine";
+import { normalizeInvestmentMetrics } from "../lib/run-outcome-score";
+import { insertCompletionRunCompat } from "../lib/completion-run-persistence";
 
 const router: IRouter = Router();
-const AGENT_PROMPT_VERSION = "agentic-finisher-v1";
+const AGENT_PROMPT_VERSION = "agentic-finisher-v2-outcome-optimized";
 
 interface AgentResult {
   role: "architect" | "quality-security" | "product-investment";
@@ -55,6 +57,8 @@ ${objective}
 
 Rules:
 - Base recommendations only on supplied evidence and explicit prior learnings.
+- Treat measured outcome scores and before/after completion deltas as stronger evidence than generic success counts.
+- Prefer strategies with strong measured outcomes when the repository context matches; alter or reject strategies with weak measured outcomes.
 - Prefer fixing blockers over adding speculative features.
 - Never suggest weakening tests, security, permissions, or approval controls.
 - Treat prior failed approaches as warnings; do not repeat them unchanged.
@@ -165,8 +169,21 @@ router.post(
       analysisContext,
       investmentContext,
       adaptiveLearning: {
-        priorSuccesses: learning.recentSuccesses.map((entry) => ({ action: entry.action, details: entry.details, fixPattern: entry.fix_pattern })),
-        priorFailures: learning.recentFailures.map((entry) => ({ action: entry.action, error: entry.error_message, details: entry.details, fixPattern: entry.fix_pattern })),
+        priorSuccesses: learning.recentSuccesses.map((entry) => ({
+          action: entry.action,
+          details: entry.details,
+          fixPattern: entry.fix_pattern,
+          outcomeScore: entry.metadata?.outcome_score ?? null,
+          completionDelta: entry.metadata?.completion_delta ?? null,
+        })),
+        priorFailures: learning.recentFailures.map((entry) => ({
+          action: entry.action,
+          error: entry.error_message,
+          details: entry.details,
+          fixPattern: entry.fix_pattern,
+          outcomeScore: entry.metadata?.outcome_score ?? null,
+        })),
+        strategyPerformance: learning.strategyPerformance,
         guidance: learning.promptGuidance,
       },
     };
@@ -178,7 +195,7 @@ router.post(
 
     const architect = await runCouncilAgent(
       "architect",
-      "Define the smallest architecture-safe completion sequence. Identify interfaces that must remain stable and prerequisites that must land first.",
+      "Define the smallest architecture-safe completion sequence. Identify interfaces that must remain stable and prerequisites that must land first. Use measured strategy history to avoid plans that previously produced weak completion deltas.",
       sharedContext,
       ai,
     );
@@ -190,12 +207,12 @@ router.post(
     );
     const productInvestment = await runCouncilAgent(
       "product-investment",
-      "Protect commercial value. Remove low-value scope, prioritize the shortest path to a usable product, and identify changes most likely to improve completion, readiness, and finish-first economics.",
+      "Protect commercial value. Remove low-value scope, prioritize the shortest path to a usable product, and identify changes most likely to improve completion, readiness, and finish-first economics. Prefer historically high-outcome strategies only when the current evidence matches.",
       { ...sharedContext, architect, qualitySecurity },
       ai,
     );
 
-    const learnedGuidance = learning.promptGuidance.map((lesson) => `Honor prior learning: ${lesson}`);
+    const learnedGuidance = learning.promptGuidance.map((lesson) => `Honor measured prior learning: ${lesson}`);
     const validationSteps = qualitySecurity.validation.map((step) => `Acceptance requirement: ${step}`);
     const combinedNextSteps = uniqueSteps(
       input.nextSteps ?? [],
@@ -214,9 +231,10 @@ router.post(
     });
 
     const now = new Date().toISOString();
-    const { data: runData, error: runError } = await req.supabase!
-      .from("completion_runs")
-      .insert({
+    const baselineMetrics = normalizeInvestmentMetrics(investmentContext);
+    const runInsert = await insertCompletionRunCompat(
+      req.supabase!,
+      {
         user_id: userId,
         repo: plan.repo,
         default_branch: plan.defaultBranch,
@@ -224,14 +242,20 @@ router.post(
         plan_hash: planHash,
         plan,
         status: "awaiting_approval",
+        analysis_id: input.analysisId ?? null,
+        item_rank: input.itemRank ?? null,
+        prompt_version: AGENT_PROMPT_VERSION,
+        baseline_metrics: baselineMetrics,
         created_at: now,
         updated_at: now,
-      })
-      .select("id, status, created_at")
-      .single();
-    if (runError) throw new Error(`Failed to create autonomous completion run: ${runError.message}`);
+      },
+      "id, status, created_at",
+    );
+    if (runInsert.error || !runInsert.data) {
+      throw new Error(`Failed to create autonomous completion run: ${runInsert.error?.message ?? "unknown database error"}`);
+    }
 
-    const run = runData as { id: string; status: string; created_at: string };
+    const run = runInsert.data as { id: string; status: string; created_at: string };
     const stepRows = plan.changes.map((change, index) => ({
       run_id: run.id,
       user_id: userId,
@@ -255,11 +279,14 @@ router.post(
       user_id: userId,
       kind: "agent_council",
       status: "info",
-      message: `Three reasoning agents produced an adaptive completion brief before the coding agent generated ${plan.changes.length} exact file changes.`,
+      message: `Three reasoning agents produced an outcome-optimized completion brief before the coding agent generated ${plan.changes.length} exact file changes.`,
       metadata: {
         promptVersion: AGENT_PROMPT_VERSION,
         agents,
         learningGuidance: learning.promptGuidance,
+        strategyPerformance: learning.strategyPerformance,
+        baselineMetrics,
+        outcomeTelemetryPersisted: runInsert.telemetryPersisted,
         combinedNextSteps,
       },
     });
@@ -279,8 +306,11 @@ router.post(
       learning: {
         hasHistory: learning.hasHistory,
         guidance: learning.promptGuidance,
+        strategyPerformance: learning.strategyPerformance,
         promptVersion: AGENT_PROMPT_VERSION,
       },
+      baselineMetrics,
+      outcomeTelemetryPersisted: runInsert.telemetryPersisted,
       createdAt: run.created_at,
     });
   }),
