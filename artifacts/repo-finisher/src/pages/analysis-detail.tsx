@@ -14,6 +14,7 @@ import { RecommendationCard } from '@/components/recommendation-card';
 import { StrategyView } from '@/components/strategy-view';
 import { ActionPlanView } from '@/components/action-plan-view';
 import { ValuationView } from '@/components/valuation-view';
+import { InvestmentIntelligenceView } from '@/components/investment-intelligence-view';
 import { GitBranch, ArrowLeft, Loader2, Brain, Layers, Sparkles, Search, Zap, Share2, RefreshCw, Settings } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -217,7 +218,7 @@ export default function AnalysisDetail() {
         {/* Main Content */}
         {analysis.status === 'complete' && (
           <Tabs defaultValue="recommendations" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid">
+            <TabsList className="grid w-full grid-cols-3 sm:grid-cols-6 lg:w-auto lg:inline-grid">
               <TabsTrigger value="recommendations" data-testid="tab-recommendations">
                 Recommendations
                 {items.length > 0 && (
@@ -228,6 +229,7 @@ export default function AnalysisDetail() {
               </TabsTrigger>
               <TabsTrigger value="strategy" data-testid="tab-strategy">Strategy</TabsTrigger>
               <TabsTrigger value="action-plan" data-testid="tab-action-plan">Action Plan</TabsTrigger>
+              <TabsTrigger value="investment" data-testid="tab-investment">Investment</TabsTrigger>
               <TabsTrigger value="valuation" data-testid="tab-valuation">Valuation</TabsTrigger>
               <TabsTrigger value="share" data-testid="tab-share">
                 <Share2 className="w-4 h-4 mr-1" />
@@ -259,6 +261,10 @@ export default function AnalysisDetail() {
 
             <TabsContent value="action-plan">
               <ActionPlanView analysisId={analysisId} />
+            </TabsContent>
+
+            <TabsContent value="investment">
+              <InvestmentIntelligenceView analysisId={analysisId} />
             </TabsContent>
 
             <TabsContent value="valuation">
