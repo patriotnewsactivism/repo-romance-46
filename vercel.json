@@ -2,10 +2,29 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "pnpm run typecheck && node artifacts/api-server/build-vercel.mjs && pnpm --filter @workspace/repo-finisher build",
   "rewrites": [
-    { "source": "/auth/:path*", "destination": "/index.html" },
-    { "source": "/dashboard", "destination": "/index.html" },
-    { "source": "/analysis/:path*", "destination": "/index.html" },
-    { "source": "/settings", "destination": "/index.html" },
-    { "source": "/s/:path*", "destination": "/index.html" }
+    {
+      "source": "/api/:path*",
+      "destination": "/api/[...path]"
+    },
+    {
+      "source": "/auth/:path*",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/dashboard",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/analysis/:path*",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/settings",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/s/:path*",
+      "destination": "/index.html"
+    }
   ]
 }
