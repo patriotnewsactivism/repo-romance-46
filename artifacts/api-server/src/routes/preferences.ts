@@ -3,15 +3,17 @@ import { z } from "zod";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
 import { encryptSecret, secretsConfigured } from "../lib/secrets";
+import { loadAiCredential, platformAiStatus } from "../lib/credentials";
+import { callAI } from "../lib/ai-provider";
+import { captureException } from "../instrument";
 
 const router: IRouter = Router();
 
 /**
  * Columns that may be read back by a client.
  *
- * `custom_ai_key` is deliberately absent: the previous handler selected `*`,
- * so a user's provider key was returned to the browser on every settings load.
- * The key is write-only now — clients learn only whether one is set.
+ * `custom_ai_key` is deliberately absent: a user's provider key is write-only.
+ * The client receives only whether one is stored and safe readiness metadata.
  */
 const READABLE_COLUMNS = [
   "user_id",
@@ -32,7 +34,7 @@ const updateSchema = z.object({
   email_notifications: z.boolean().optional(),
   schedule_enabled: z.boolean().optional(),
   schedule_frequency: z.enum(["weekly", "monthly"]).optional(),
-  custom_ai_provider: z.string().max(60).optional(),
+  custom_ai_provider: z.enum(["google", "openai", "anthropic"]).optional(),
   /** Write-only. `null` clears the stored key. */
   custom_ai_key: z.string().max(500).nullable().optional(),
   filter_languages: z.array(z.string().max(60)).max(50).optional(),
@@ -61,11 +63,93 @@ function toClientShape(row: PreferenceRow | null): PreferenceRow {
   return { ...rest, custom_ai_key_set: Boolean(custom_ai_key) };
 }
 
+function providerTestMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/API_KEY_INVALID|api key not valid|invalid api key|401|unauthorized/i.test(message)) {
+    return "The provider rejected the configured API credential.";
+  }
+  if (/403|forbidden|permission/i.test(message)) {
+    return "The credential is valid enough to reach the provider, but it does not have permission for the configured model.";
+  }
+  if (/429|rate limit|quota/i.test(message)) {
+    return "The provider is currently rate-limited or out of quota.";
+  }
+  if (/404|not found|model.*not.*found/i.test(message)) {
+    return "The configured provider model or endpoint is not available.";
+  }
+  if (/timed out|timeout/i.test(message)) {
+    return "The provider test timed out before a usable response was received.";
+  }
+  return "The provider connection test failed. Check the provider credential and try again.";
+}
+
 router.get(
   "/preferences",
   requireAuth,
   asyncHandler(async (req, res) => {
     res.json(toClientShape(await readPreferences(req)));
+  }),
+);
+
+router.get(
+  "/preferences/ai-status",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const credential = await loadAiCredential(req.supabase!, req.userId!);
+    const platform = platformAiStatus();
+    res.json({
+      active_provider: credential.provider,
+      configured: Boolean(credential.apiKey),
+      credential_source: credential.source,
+      platform_default: platform.defaultProvider,
+      providers: platform.providers,
+    });
+  }),
+);
+
+router.post(
+  "/preferences/ai-test",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const credential = await loadAiCredential(req.supabase!, req.userId!);
+    if (!credential.apiKey) {
+      throw Object.assign(
+        new Error(`No usable ${credential.provider} credential is configured.`),
+        { status: 400 },
+      );
+    }
+
+    const started = Date.now();
+    try {
+      const response = await Promise.race([
+        callAI(
+          {
+            messages: [
+              { role: "system", content: "Return exactly the word ready." },
+              { role: "user", content: "Provider readiness check." },
+            ],
+          },
+          credential,
+        ),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("AI provider test timed out after 20 seconds")), 20_000),
+        ),
+      ]);
+
+      if (!response.content.trim()) throw new Error("AI provider returned an empty readiness response");
+
+      res.json({
+        ok: true,
+        provider: credential.provider,
+        credential_source: credential.source,
+        latency_ms: Date.now() - started,
+      });
+    } catch (error) {
+      captureException(error, {
+        tags: { subsystem: "ai-provider-test", provider: credential.provider },
+      });
+      throw Object.assign(new Error(providerTestMessage(error)), { status: 422 });
+    }
   }),
 );
 
