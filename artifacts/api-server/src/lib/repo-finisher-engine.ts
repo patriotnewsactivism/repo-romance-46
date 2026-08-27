@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { callAI } from "./ai-provider";
-import { loadAiCredential } from "./credentials";
+import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "./credentials";
 
 const MAX_CHANGES = 25;
 const MAX_FILE_BYTES = 750_000;
@@ -116,17 +116,6 @@ export function validateRepoName(repo: string) {
   }
 }
 
-async function getConnection(supabase: SupabaseClient, userId: string) {
-  const { data, error } = await supabase
-    .from("github_connections")
-    .select("github_login, access_token")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (error) throw new Error(`Failed to read GitHub connection: ${error.message}`);
-  if (!data?.access_token) throw Object.assign(new Error("Connect GitHub first."), { status: 400 });
-  return data as { github_login: string; access_token: string };
-}
-
 async function getBranchHead(token: string, repo: string, branch: string) {
   const refRes = await ghFetch(token, `/repos/${repo}/git/ref/heads/${encodeURIComponent(branch)}`);
   if (!refRes.ok) throw new Error(`Failed to get base branch ref: ${refRes.status}`);
@@ -165,8 +154,8 @@ async function getFileContent(token: string, repo: string, path: string, ref: st
 
 async function loadRepoContext(supabase: SupabaseClient, userId: string, repoName: string): Promise<RepoContext> {
   validateRepoName(repoName);
-  const connection = await getConnection(supabase, userId);
-  const token = connection.access_token;
+  const connection = requireGithubCredential(await loadGithubCredential(supabase, userId));
+  const token = connection.token;
 
   const repoRes = await ghFetch(token, `/repos/${repoName}`);
   if (!repoRes.ok) throw Object.assign(new Error(`Repo not found or inaccessible: ${repoName}`), { status: 404 });
@@ -584,8 +573,8 @@ export async function executePreparedPlan(
     throw Object.assign(new Error("Stored completion plan no longer matches its approval hash."), { status: 409 });
   }
 
-  const connection = await getConnection(supabase, userId);
-  const token = connection.access_token;
+  const connection = requireGithubCredential(await loadGithubCredential(supabase, userId));
+  const token = connection.token;
   const current = await getBranchHead(token, plan.repo, plan.defaultBranch);
   if (current.commitSha !== plan.baseSha) {
     throw Object.assign(
@@ -665,8 +654,8 @@ export async function verifyCommitChecks(
 ): Promise<VerificationResult> {
   validateRepoName(repo);
   if (!/^[0-9a-f]{40}$/i.test(headSha)) throw Object.assign(new Error("Invalid commit SHA."), { status: 400 });
-  const connection = await getConnection(supabase, userId);
-  const token = connection.access_token;
+  const connection = requireGithubCredential(await loadGithubCredential(supabase, userId));
+  const token = connection.token;
 
   const [checksRes, statusRes] = await Promise.all([
     ghFetch(token, `/repos/${repo}/commits/${headSha}/check-runs?per_page=100`),

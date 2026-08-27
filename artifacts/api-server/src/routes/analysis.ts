@@ -6,6 +6,7 @@ import { asyncHandler } from "../lib/async-handler";
 import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "../lib/credentials";
 import { waitUntil } from "@vercel/functions";
 import { callAI } from "../lib/ai-provider";
+import { captureException, flushSentry } from "../instrument";
 
 const router: IRouter = Router();
 
@@ -1389,7 +1390,12 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Analysis failed";
     console.error(`[analysis ${analysisId}] failed:`, msg);
+    captureException(e, {
+      tags: { subsystem: "analysis", analysis_id: analysisId },
+      extra: { message: msg },
+    });
     await supabase.from("analyses").update({ status: "failed", error: msg, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", analysisId);
+    await flushSentry();
   }
 }
 
@@ -1397,10 +1403,15 @@ function startAnalysisJob(ctx: AnalysisContext, analysisId: string): void {
   const job = runAnalysisJob(ctx, analysisId).catch(async (e) => {
     console.error(`[analysis ${analysisId}] unexpected background error:`, e);
     const msg = e instanceof Error ? e.message : "Analysis worker stopped unexpectedly";
+    captureException(e, {
+      tags: { subsystem: "analysis-worker", analysis_id: analysisId },
+      extra: { message: msg },
+    });
     await ctx.supabase
       .from("analyses")
       .update({ status: "failed", error: msg, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq("id", analysisId);
+    await flushSentry();
   });
 
   if (process.env.VERCEL) {
