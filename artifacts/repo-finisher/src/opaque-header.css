@@ -1,0 +1,13 @@
+/* Mobile browser chrome can make semi-transparent sticky headers nearly unreadable.
+ * Force the app's card-opacity utility headers to render as solid surfaces. */
+.bg-card\/50,
+.bg-card\/60 {
+  background-color: hsl(var(--card)) !important;
+}
+
+@supports (background-color: color-mix(in srgb, black 50%, white)) {
+  .bg-card\/50,
+  .bg-card\/60 {
+    background-color: hsl(var(--card)) !important;
+  }
+}
