@@ -1,17 +1,73 @@
 import { useEffect, useState } from 'react';
 import { useLocation, Link } from 'wouter';
-import { useGetPreferences, useUpdatePreferences, getGetPreferencesQueryKey, useDisconnectGithub, useGetGithubStatus } from '@workspace/api-client-react';
+import {
+  useGetPreferences,
+  useUpdatePreferences,
+  getGetPreferencesQueryKey,
+  useDisconnectGithub,
+  useGetGithubStatus,
+  customFetch,
+} from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { getSession, signOut } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
-import { GitBranch, ArrowLeft, Zap, Gauge, Brain, LogOut } from 'lucide-react';
+import {
+  GitBranch,
+  ArrowLeft,
+  Zap,
+  Gauge,
+  Brain,
+  LogOut,
+  CheckCircle2,
+  AlertTriangle,
+  Loader2,
+} from 'lucide-react';
 import { toast } from 'sonner';
+
+type CredentialSource = 'byok' | 'platform' | 'none';
+
+interface AiProviderStatus {
+  active_provider: string;
+  configured: boolean;
+  credential_source: CredentialSource;
+  platform_default: string;
+  providers: {
+    google: { platformConfigured: boolean };
+    openai: { platformConfigured: boolean };
+    anthropic: { platformConfigured: boolean };
+  };
+}
+
+interface AiTestResult {
+  ok: boolean;
+  provider: string;
+  credential_source: CredentialSource;
+  latency_ms: number;
+}
+
+function providerLabel(provider: string) {
+  switch (provider) {
+    case 'google': return 'Google Gemini';
+    case 'openai': return 'OpenAI';
+    case 'anthropic': return 'Anthropic';
+    default: return provider || 'AI provider';
+  }
+}
+
+function credentialLabel(source: CredentialSource) {
+  switch (source) {
+    case 'byok': return 'Stored BYOK credential';
+    case 'platform': return 'Platform credential';
+    default: return 'No usable credential';
+  }
+}
 
 export default function Settings() {
   const [, setLocation] = useLocation();
@@ -21,8 +77,12 @@ export default function Settings() {
   const updatePreferences = useUpdatePreferences();
   const disconnectGithub = useDisconnectGithub();
 
-  const [aiProvider, setAiProvider] = useState('');
+  const [aiProvider, setAiProvider] = useState('google');
   const [aiKey, setAiKey] = useState('');
+  const [aiStatus, setAiStatus] = useState<AiProviderStatus | null>(null);
+  const [aiStatusLoading, setAiStatusLoading] = useState(false);
+  const [aiStatusError, setAiStatusError] = useState<string | null>(null);
+  const [testingAi, setTestingAi] = useState(false);
   const [analysisTier, setAnalysisTier] = useState<'fast' | 'balanced' | 'deep'>('balanced');
   const [filterLanguages, setFilterLanguages] = useState('');
   const [excludeArchived, setExcludeArchived] = useState(true);
@@ -31,15 +91,14 @@ export default function Settings() {
 
   useEffect(() => {
     getSession().then(session => {
-      if (!session) {
-        setLocation('/auth');
-      }
+      if (!session) setLocation('/auth');
     });
   }, [setLocation]);
 
   useEffect(() => {
     if (preferences) {
-      setAiProvider(preferences.custom_ai_provider || '');
+      const savedProvider = preferences.custom_ai_provider || 'google';
+      setAiProvider(savedProvider === 'github_models' ? 'google' : savedProvider);
       // The key itself is write-only server-side; we only learn whether one is stored.
       setAiKey('');
       setAnalysisTier(preferences.analysis_tier || 'balanced');
@@ -50,7 +109,37 @@ export default function Settings() {
     }
   }, [preferences]);
 
+  const loadAiStatus = async () => {
+    setAiStatusLoading(true);
+    setAiStatusError(null);
+    try {
+      const status = await customFetch<AiProviderStatus>('/api/preferences/ai-status', { responseType: 'json' });
+      setAiStatus(status);
+    } catch (error) {
+      setAiStatusError(error instanceof Error ? error.message : 'Unable to read AI provider status');
+    } finally {
+      setAiStatusLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (preferences) void loadAiStatus();
+    // Re-read readiness after the preference query changes; secret values never enter browser state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preferences]);
+
   const handleSave = () => {
+    const savedProvider = preferences?.custom_ai_provider === 'github_models'
+      ? 'google'
+      : (preferences?.custom_ai_provider || 'google');
+
+    if (preferences?.custom_ai_key_set && aiProvider !== savedProvider && !aiKey) {
+      toast.error('A BYOK key is already stored for the current provider', {
+        description: 'Enter a replacement key for the new provider, or remove the stored key before switching providers.',
+      });
+      return;
+    }
+
     const languagesArray = filterLanguages
       .split(',')
       .map(l => l.trim())
@@ -59,7 +148,7 @@ export default function Settings() {
     updatePreferences.mutate(
       {
         data: {
-          custom_ai_provider: aiProvider || undefined,
+          custom_ai_provider: aiProvider,
           // Only send the key when the user actually typed one, so saving other
           // settings never clears a key we were never shown.
           ...(aiKey ? { custom_ai_key: aiKey } : {}),
@@ -73,7 +162,9 @@ export default function Settings() {
       {
         onSuccess: () => {
           toast.success('Settings saved');
+          setAiKey('');
           queryClient.invalidateQueries({ queryKey: getGetPreferencesQueryKey() });
+          void loadAiStatus();
         },
         onError: (error) => {
           toast.error('Failed to save settings', { description: error.message });
@@ -82,9 +173,30 @@ export default function Settings() {
     );
   };
 
+  const handleTestProvider = async () => {
+    setTestingAi(true);
+    try {
+      const result = await customFetch<AiTestResult>('/api/preferences/ai-test', {
+        method: 'POST',
+        responseType: 'json',
+        body: JSON.stringify({}),
+      });
+      toast.success(`${providerLabel(result.provider)} is ready`, {
+        description: `${credentialLabel(result.credential_source)} · ${result.latency_ms} ms`,
+      });
+      await loadAiStatus();
+    } catch (error) {
+      toast.error('AI provider test failed', {
+        description: error instanceof Error ? error.message : 'The provider did not pass the readiness check.',
+      });
+    } finally {
+      setTestingAi(false);
+    }
+  };
+
   const handleDisconnect = async () => {
     if (!confirm('Disconnect GitHub? This will sign you out.')) return;
-    
+
     disconnectGithub.mutate(undefined, {
       onSuccess: async () => {
         await signOut();
@@ -102,22 +214,22 @@ export default function Settings() {
       value: 'fast',
       icon: Zap,
       title: 'Fast',
-      description: 'Single AI model, quickest results',
-      detail: 'No profiling or critique steps — straight to synthesis'
+      description: 'Quickest repository completion analysis',
+      detail: 'Minimal strategy passes for rapid triage and completion planning'
     },
     {
       value: 'balanced',
       icon: Gauge,
       title: 'Balanced',
-      description: 'Reasoning models for strategy, best for most users',
-      detail: 'Profile → Critique → Synthesize with optimized models'
+      description: 'Best balance of reasoning depth and runtime',
+      detail: 'Profile → critique → synthesize with completion coverage checks'
     },
     {
       value: 'deep',
       icon: Brain,
       title: 'Deep',
-      description: 'Most powerful models, extended thinking',
-      detail: 'Claude extended thinking or o3 for maximum insight'
+      description: 'Maximum analysis depth for complex repositories',
+      detail: 'More context, critique, and extended reasoning when the provider supports it'
     }
   ];
 
@@ -138,7 +250,7 @@ export default function Settings() {
   return (
     <div className="min-h-screen bg-background dark">
       {/* Header */}
-      <div className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+      <div className="border-b border-border bg-card sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center gap-4">
@@ -169,9 +281,9 @@ export default function Settings() {
             {githubStatus?.connected && (
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <img 
-                    src={githubStatus.avatarUrl || ''} 
-                    alt={githubStatus.login || ''} 
+                  <img
+                    src={githubStatus.avatarUrl || ''}
+                    alt={githubStatus.login || ''}
                     className="w-10 h-10 rounded-full"
                   />
                   <div>
@@ -179,8 +291,8 @@ export default function Settings() {
                     <div className="text-sm text-muted-foreground">@{githubStatus.login}</div>
                   </div>
                 </div>
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={handleDisconnect}
                   disabled={disconnectGithub.isPending}
                   data-testid="button-disconnect"
@@ -207,10 +319,10 @@ export default function Settings() {
                 return (
                   <button
                     key={tier.value}
-                    onClick={() => setAnalysisTier(tier.value as any)}
+                    onClick={() => setAnalysisTier(tier.value as 'fast' | 'balanced' | 'deep')}
                     className={`p-4 border rounded-lg text-left transition-all ${
-                      isSelected 
-                        ? 'border-primary bg-primary/5' 
+                      isSelected
+                        ? 'border-primary bg-primary/5'
                         : 'border-border hover:border-primary/40'
                     }`}
                     data-testid={`tier-${tier.value}`}
@@ -230,57 +342,116 @@ export default function Settings() {
         <Card>
           <CardHeader>
             <CardTitle>AI Provider</CardTitle>
-            <CardDescription>Configure custom AI provider (optional)</CardDescription>
+            <CardDescription>
+              Google Gemini is the default. Use a platform credential or store your own encrypted BYOK key.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="ai-provider">Provider</Label>
               <Select value={aiProvider} onValueChange={setAiProvider}>
                 <SelectTrigger id="ai-provider" data-testid="select-ai-provider">
-                  <SelectValue placeholder="Default (GitHub Models)" />
+                  <SelectValue placeholder="Google Gemini (default)" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Default (GitHub Models)</SelectItem>
+                  <SelectItem value="google">Google Gemini (default)</SelectItem>
                   <SelectItem value="openai">OpenAI</SelectItem>
                   <SelectItem value="anthropic">Anthropic</SelectItem>
-                  <SelectItem value="google">Google</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            {aiProvider && (
-              <div className="space-y-2">
-                <Label htmlFor="ai-key">API Key</Label>
-                <Input
-                  id="ai-key"
-                  type="password"
-                  value={aiKey}
-                  onChange={(e) => setAiKey(e.target.value)}
-                  placeholder={preferences?.custom_ai_key_set ? 'A key is stored — type to replace it' : 'sk-...'}
-                  data-testid="input-ai-key"
-                />
-                <p className="text-xs text-muted-foreground">
-                  {preferences?.custom_ai_key_set
-                    ? 'Your key is encrypted at rest and never sent back to the browser. Leave this blank to keep it.'
-                    : 'Your key is encrypted before it is stored and is never returned to the browser.'}
-                </p>
-                {preferences?.custom_ai_key_set && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() =>
-                      updatePreferences.mutate(
-                        { data: { custom_ai_key: null } },
-                        { onSuccess: () => toast.success('Stored API key removed') },
-                      )
-                    }
-                    data-testid="button-clear-ai-key"
-                  >
-                    Remove stored key
-                  </Button>
+
+            <div className="space-y-2">
+              <Label htmlFor="ai-key">BYOK API Key</Label>
+              <Input
+                id="ai-key"
+                type="password"
+                value={aiKey}
+                onChange={(e) => setAiKey(e.target.value)}
+                placeholder={preferences?.custom_ai_key_set ? 'A key is stored — type to replace it' : 'Optional provider API key'}
+                data-testid="input-ai-key"
+              />
+              <p className="text-xs text-muted-foreground">
+                {preferences?.custom_ai_key_set
+                  ? 'Your key is encrypted at rest and never sent back to the browser. Leave this blank to keep it.'
+                  : 'If the platform has a credential for this provider, you do not need to supply one. BYOK keys are encrypted before storage.'}
+              </p>
+              {preferences?.custom_ai_key_set && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    updatePreferences.mutate(
+                      { data: { custom_ai_key: null } },
+                      {
+                        onSuccess: () => {
+                          toast.success('Stored API key removed');
+                          queryClient.invalidateQueries({ queryKey: getGetPreferencesQueryKey() });
+                          void loadAiStatus();
+                        },
+                      },
+                    )
+                  }
+                  data-testid="button-clear-ai-key"
+                >
+                  Remove stored key
+                </Button>
+              )}
+            </div>
+
+            <div className="rounded-lg border p-4 space-y-3">
+              <div className="flex items-start gap-3">
+                {aiStatusLoading ? (
+                  <Loader2 className="w-5 h-5 mt-0.5 animate-spin text-muted-foreground" />
+                ) : aiStatus?.configured ? (
+                  <CheckCircle2 className="w-5 h-5 mt-0.5 text-emerald-500" />
+                ) : (
+                  <AlertTriangle className="w-5 h-5 mt-0.5 text-amber-500" />
                 )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">Provider readiness</span>
+                    {aiStatus && (
+                      <Badge variant="outline" className={aiStatus.configured ? 'text-emerald-500' : 'text-amber-500'}>
+                        {aiStatus.configured ? 'Configured' : 'Missing credential'}
+                      </Badge>
+                    )}
+                  </div>
+                  {aiStatus ? (
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {providerLabel(aiStatus.active_provider)} · {credentialLabel(aiStatus.credential_source)}
+                    </p>
+                  ) : aiStatusError ? (
+                    <p className="text-sm text-destructive mt-1">{aiStatusError}</p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground mt-1">Checking the active provider…</p>
+                  )}
+                </div>
               </div>
-            )}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestProvider}
+                  disabled={testingAi || !aiStatus?.configured}
+                  data-testid="button-test-ai-provider"
+                >
+                  {testingAi && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                  {testingAi ? 'Testing…' : 'Test provider'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void loadAiStatus()}
+                  disabled={aiStatusLoading}
+                >
+                  Refresh status
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -300,17 +471,13 @@ export default function Settings() {
                 placeholder="e.g. TypeScript, Python, Go"
                 data-testid="input-filter-languages"
               />
-              <p className="text-xs text-muted-foreground">
-                Leave empty to include all languages
-              </p>
+              <p className="text-xs text-muted-foreground">Leave empty to include all languages</p>
             </div>
 
             <div className="flex items-center justify-between">
               <Label htmlFor="exclude-archived" className="cursor-pointer">
                 <div className="font-semibold mb-1">Exclude archived repos</div>
-                <div className="text-sm text-muted-foreground">
-                  Don't analyze archived repositories
-                </div>
+                <div className="text-sm text-muted-foreground">Don't analyze archived repositories</div>
               </Label>
               <Switch
                 id="exclude-archived"
@@ -337,7 +504,8 @@ export default function Settings() {
                 <Input
                   id="max-repos"
                   type="number"
-                  min="1"
+                  min="2"
+                  max="500"
                   value={maxRepos}
                   onChange={(e) => setMaxRepos(e.target.value)}
                   placeholder="No limit"
