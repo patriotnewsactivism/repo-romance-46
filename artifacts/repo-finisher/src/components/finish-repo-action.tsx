@@ -144,7 +144,7 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
     if (!runId) return;
     if (!quiet) setBusy("refresh");
     try {
-      const data = await customFetch<RunDetailResponse>(`/repo-finisher/runs/${runId}`, { responseType: "json" });
+      const data = await customFetch<RunDetailResponse>(`/api/repo-finisher/runs/${runId}`, { responseType: "json" });
       setDetail(data);
     } catch (error) {
       if (!quiet) toast.error(error instanceof Error ? error.message.slice(0, 240) : "Unable to refresh run.");
@@ -165,7 +165,7 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
     setDetail(null);
     setShowPlan(true);
     try {
-      const data = await postJson<PreviewResponse>("/repo-finisher/preview", {
+      const data = await postJson<PreviewResponse>("/api/repo-finisher/preview", {
         repo,
         nextSteps,
         analysisId,
@@ -184,7 +184,7 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
     if (!preview) return;
     setBusy("approve");
     try {
-      await postJson(`/repo-finisher/runs/${preview.runId}/approve`, { planHash: preview.planHash });
+      await postJson(`/api/repo-finisher/runs/${preview.runId}/approve`, { planHash: preview.planHash });
       await refreshRun(true);
       toast.success("Exact plan approved. No repository changes have been made yet.");
     } catch (error) {
@@ -198,7 +198,7 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
     if (!runId) return;
     setBusy("execute");
     try {
-      await postJson(`/repo-finisher/runs/${runId}/execute`);
+      await postJson(`/api/repo-finisher/runs/${runId}/execute`);
       await refreshRun(true);
       toast.success("Approved plan executed into a draft PR. CI verification is enforced.");
     } catch (error) {
@@ -213,7 +213,7 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
     if (!runId) return;
     setBusy("cancel");
     try {
-      await postJson(`/repo-finisher/runs/${runId}/cancel`);
+      await postJson(`/api/repo-finisher/runs/${runId}/cancel`);
       await refreshRun(true);
       toast.success("Completion run cancelled before execution.");
     } catch (error) {
@@ -232,7 +232,6 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
   const currentSummary = detail?.run.summary ?? preview?.summary;
   const baseSha = detail?.run.baseSha ?? preview?.baseSha;
   const planHash = detail?.run.planHash ?? preview?.planHash;
-  const canCancel = status === "awaiting_approval" || status === "approved";
 
   return (
     <div className="space-y-3">
@@ -366,14 +365,12 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
             <Button variant="outline" size="sm" onClick={reset}>Start a new plan</Button>
           )}
 
-          {runId && !["executing", "verifying"].includes(status ?? "") && (
+          {runId && status !== "executing" && status !== "verifying" && (
             <Button variant="ghost" size="sm" onClick={() => void refreshRun()} disabled={busy !== null} className="gap-2">
               {busy === "refresh" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
               Refresh status
             </Button>
           )}
-
-          {canCancel && status !== "awaiting_approval" && status !== "approved" ? null : null}
         </Card>
       )}
     </div>
