@@ -74,6 +74,7 @@ const expensiveLimiter = rateLimit({
 });
 
 app.use("/api", globalLimiter);
+app.post("/api/preferences/ai-test", expensiveLimiter);
 app.use(["/api/analysis", "/api/repo-finisher", "/api/vibe-tools", "/api/valuation"], expensiveLimiter);
 
 app.use("/api", router);
