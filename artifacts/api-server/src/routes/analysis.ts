@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
 import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "../lib/credentials";
-import { decryptSecret } from "../lib/secrets";
+import { waitUntil } from "@vercel/functions";
 import { callAI } from "../lib/ai-provider";
 
 const router: IRouter = Router();
@@ -488,37 +488,31 @@ const RecommendationSchema = z.object({
 });
 
 /** The static fallback system prompt used when portfolio profiling is unavailable */
-const FALLBACK_SYSTEM_PROMPT = `You are an expert product strategist and technical marketer reviewing a developer's GitHub portfolio.
-You analyze repos to find opportunities to FINISH, COMBINE, or REPURPOSE them into shippable products.
+const FALLBACK_SYSTEM_PROMPT = `You are RepoFinisher's senior product architect. Your primary mission is to map each viable repository to production-ready completion.
 
-## Reasoning & Planning Before Action (CRITICAL)
-Before writing any recommendation, you MUST explicitly conduct step-by-step reasoning:
-1. **Identify the Real Problem**: For each repo digest, determine what specifically is blocking it from being shippable or marketable — a missing feature, missing packaging, or the wrong target audience — not a generic gap.
-2. **Consider Edge Cases, Risks & Trade-offs**: Weigh effort vs. market_potential honestly. Watch for COMBINE pairings that look synergistic on paper but share no real technical overlap in the actual code.
-3. **Form an Execution Plan**: Decide the FINISH/COMBINE/REPURPOSE call and rank order before writing next_steps, so every recommendation traces back to specific files or features you actually saw in the digest.
+DEFAULT DECISION: FINISH THE REPOSITORY INDEPENDENTLY.
+- At least 95% of primary recommendations should be FINISH recommendations.
+- Give each viable repo its own completion path rather than collapsing multiple repos into one idea.
+- COMBINE or REPURPOSE is exceptional. Use it only when concrete code-level evidence shows that finishing the repo independently is clearly inferior, duplicative, or technically nonsensical. Never invent a combination just to create variety.
+- A dormant repo is not automatically a combine/repurpose candidate; first determine how to finish it.
 
-For each repo digest, identify:
-- FINISH: repos that are close to shippable — describe exactly what's missing and how to get it to v1.
-- COMBINE: 2+ repos that together form a stronger product than any alone. List their full names. Explain the synergy.
-- REPURPOSE: repos whose code could be rebranded/positioned as a marketable tool for a different audience.
+For every FINISH recommendation, build a real path to completion, not a generic checklist. Inspect the supplied evidence and identify the intended product, current completion blockers, missing core functionality, broken/stubbed flows, backend/data/auth/security gaps, UX gaps, testing/build issues, deployment readiness, observability, documentation, and rollback/operations needs that actually apply.
 
-For every recommendation give:
-- kind, title (5-8 words, punchy)
-- repos (full_name array — use the exact full_name from the digest)
-- pitch (2-3 sentence "market as X" — be specific about the target user and value prop)
-- effort (1=hours, 5=months)
-- market_potential (1=niche, 5=broad)
-- next_steps (3-5 concrete, specific todos — reference actual files, features, or APIs from the repo digests)
-- tech_stack (array of detected technologies, frameworks, languages, tools — include those from dependencies and file extensions)
-- marketing_tweet (a punchy, engaging tweet promoting the product — include relevant hashtags, max 280 chars)
-- marketing_linkedin (a professional LinkedIn post — 3-4 sentences with a hook + value prop + CTA)
-- estimated_hours (realistic total hours to complete, 1-500)
+Before producing the final recommendation, internally draft the completion plan, challenge its assumptions, look for omissions and failure modes, then revise it. Do not expose private chain-of-thought. Return only the improved conclusion, concrete evidence, and executable completion steps.
 
-Also produce:
-- summary_md (markdown, ~200 words) covering the portfolio — note trends, strengths, and gaps
+Every next_steps array must function as an implementation-quality completion directive: reference actual files/features/APIs where evidence exists; order work by dependency; include acceptance criteria; require build/typecheck/lint/tests as appropriate; require deployment and smoke verification when the repo is deployable; and never call a repo complete while known blockers remain.
 
-Return 5-12 recommendations. Rank by (market_potential * 2 - effort) desc.
-Be specific and reference actual code, files, and features you see in the digests. Generic advice is useless.`;
+For every recommendation return:
+- kind, title, repos, pitch
+- effort (1-5), market_potential (1-5)
+- next_steps: concrete completion sequence with acceptance criteria
+- tech_stack
+- marketing_tweet / marketing_linkedin only when useful
+- estimated_hours
+
+Also produce summary_md describing portfolio-level completion priorities.
+
+Preserve coverage: return one primary recommendation for every viable repo represented by the detailed digests, up to 40 per synthesis. Prefer FINISH and independent completion. Generic advice is not acceptable.`;
 
 const AI_JSON_SCHEMA = {
   type: "object",
@@ -569,10 +563,10 @@ function getStageModels(provider: string, tier: string): StageModels {
     github_models: "gpt-4o-mini",
     openai: "gpt-4o",
     anthropic: "claude-sonnet-4-20250514",
-    google: "gemini-2.5-flash",
+    google: "gemini-3.7-flash",
     custom: "gpt-4o",
   };
-  const base = DEFAULT[provider] ?? "gpt-4o";
+  const base = DEFAULT[provider] ?? "gemini-3.7-flash";
 
   if (tier === "fast") {
     return { profilerModel: base, critiqueModel: base, synthesisModel: base, useThinking: false, thinkingBudget: 0 };
@@ -592,7 +586,7 @@ function getStageModels(provider: string, tier: string): StageModels {
           thinkingBudget: 10000,
         };
       case "google":
-        return { profilerModel: "gemini-2.5-pro", critiqueModel: "gemini-2.5-pro", synthesisModel: "gemini-2.5-pro", useThinking: false, thinkingBudget: 0 };
+        return { profilerModel: "gemini-3.7-flash", critiqueModel: "gemini-3.7-flash", synthesisModel: "gemini-3.7-flash", useThinking: false, thinkingBudget: 0 };
       default:
         return { profilerModel: base, critiqueModel: base, synthesisModel: base, useThinking: false, thinkingBudget: 0 };
     }
@@ -612,7 +606,7 @@ function getStageModels(provider: string, tier: string): StageModels {
         thinkingBudget: 0,
       };
     case "google":
-      return { profilerModel: "gemini-2.5-flash", critiqueModel: "gemini-2.5-flash", synthesisModel: "gemini-2.5-pro", useThinking: false, thinkingBudget: 0 };
+      return { profilerModel: "gemini-3.7-flash", critiqueModel: "gemini-3.7-flash", synthesisModel: "gemini-3.7-flash", useThinking: false, thinkingBudget: 0 };
     default: // github_models — no reasoning models available, use what we have
       return { profilerModel: "gpt-4o-mini", critiqueModel: "gpt-4o-mini", synthesisModel: "gpt-4o-mini", useThinking: false, thinkingBudget: 0 };
   }
@@ -659,11 +653,11 @@ developer_profile (string): 2-3 sentences precisely characterizing this develope
 
 domain_clusters (array): Group the repos into 2-6 meaningful clusters by theme. Each cluster: { "name": string, "repos": [full_names], "theme": string (1 sentence description) }.
 
-custom_system_prompt (string): A specialized, domain-aware system prompt (200-350 words) for the main portfolio analysis AI. Replace generic advice with domain-specific direction. Examples of what to include:
+custom_system_prompt (string): A specialized, domain-aware system prompt (200-350 words) for the main portfolio analysis AI. It MUST be completion-first: require independent FINISH recommendations for at least 95% of viable repos and allow COMBINE/REPURPOSE only as rare, evidence-backed exceptions. Replace generic advice with domain-specific completion direction. Examples of what to include:
   - For ML/AI repos: "Look for opportunities to wrap ML models as production APIs or browser demos. Prioritize repos with model weights or training pipelines as FINISH candidates."
-  - For web devs: "Look for SaaS-worthy patterns — auth, billing, multi-tenancy. Flag repos with partial backend infrastructure as high-value COMBINE candidates."
+  - For web devs: "Look for SaaS-worthy patterns — auth, billing, multi-tenancy. Finish each app independently by identifying its exact missing production capabilities; do not combine repos merely because their stacks are compatible."
   - For CLIs/devtools: "Target developer audiences. Evaluate marketability as paid OSS tools or hosted services."
-  Tailor the FINISH/COMBINE/REPURPOSE instructions to what makes sense for this developer's stack.
+  Tailor the completion rubric to the developer's stack. Treat COMBINE/REPURPOSE as exceptional alternatives that require strong code-level evidence.
 
 strategy_summary (string): 1-2 sentences explaining the analysis approach chosen for this portfolio.
 
@@ -722,6 +716,11 @@ async function callBatchedAI(
   return RecommendationSchema.parse(parsed);
 }
 
+function isNonRetryableAIError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /API_KEY_INVALID|api key not valid|invalid api key|no api key|401|403|unauthorized|forbidden/i.test(message);
+}
+
 async function callBatchedAIWithRetry(
   batch: string[],
   systemPrompt: string,
@@ -734,6 +733,7 @@ async function callBatchedAIWithRetry(
       return await callBatchedAI(batch, systemPrompt, aiConfig);
     } catch (e) {
       lastErr = e;
+      if (isNonRetryableAIError(e)) throw e;
       if (attempt < maxAttempts) await sleep(2000 * attempt);
     }
   }
@@ -823,7 +823,7 @@ async function critiqueResults(
   stageModels: StageModels,
 ): Promise<AnalysisCritique> {
   const recsText = recommendations
-    .slice(0, 12)
+    .slice(0, 40)
     .map(
       (r, i) =>
         `${i + 1}. [${r.kind.toUpperCase()}] ${r.title}\n   repos: ${r.repos.join(", ")}\n   pitch: ${r.pitch}\n   effort: ${r.effort}/5, market: ${r.market_potential}/5\n   next_steps: ${r.next_steps.slice(0, 3).join("; ")}`,
@@ -841,7 +841,7 @@ Before producing your critique, you MUST explicitly conduct step-by-step reasoni
 Produce JSON with:
 - gaps (string[]): Important repos, patterns, or opportunity types that were missed or underweighted. Be specific — name the repos.
 - too_generic (array of {title, reason}): Recommendations that are too generic — next_steps like "add tests" or "write documentation" without specifics, or pitches that don't reference actual code.
-- missed_synergies (string[]): Repo combinations that weren't considered. Look for backend+frontend pairs, library+demo pairs, similar-domain repos that would be stronger together.
+- missed_synergies (string[]): Exceptional alternatives only. Return at most one evidence-backed combine/repurpose case if independent completion is clearly inferior; otherwise return an empty array.
 - refinement_notes (string): Direct, prescriptive guidance for the synthesis step (the AI that produces the final recommendations reads this). Tell it specifically what to change, add, remove, or sharpen. Be blunt.
 
 A weak critique wastes the synthesis pass. Be specific, be harsh, be useful.
@@ -897,7 +897,7 @@ async function synthesizeWithReasoning(
   }
 
   const recsText = allRecommendations
-    .slice(0, 15)
+    .slice(0, 50)
     .map((r, i) => `${i + 1}. [${r.kind}] ${r.title} — repos: ${r.repos.join(", ")} — ${r.pitch}`)
     .join("\n");
 
@@ -922,10 +922,11 @@ Before producing the final JSON, you MUST explicitly conduct step-by-step reason
 
 Apply the critique feedback strictly:
 1. Remove or rewrite any recommendation flagged as too generic — every next_step must reference specific files, APIs, or features visible in the repo digests.
-2. Add missed synergies and gap opportunities the critique identified.
-3. Sharpen pitches to name a specific target user and value prop.
-4. Produce a fresh summary_md (200 words) that reflects this specific developer's portfolio, not a generic template.
-5. Return 5-12 final recommendations ranked by (market_potential * 2 - effort).
+2. Preserve a separate FINISH path for each viable repo represented in the draft. Do not collapse independent repos into a combined recommendation.
+3. Treat critique.missed_synergies as advisory only: use a COMBINE/REPURPOSE result only when the evidence is compelling, and keep at least 95% of final recommendations as FINISH.
+4. Sharpen pitches to name a specific target user and value prop, and make next_steps an executable completion directive with acceptance criteria.
+5. Produce a fresh summary_md (200 words) that reflects this specific developer's portfolio, not a generic template.
+6. Preserve completion coverage for up to 40 viable repos and rank within that set by (market_potential * 2 - effort).
 
 The final output must feel like it was written by someone who actually READ the code, not generic advice.
 
@@ -991,12 +992,12 @@ ${repoIndex}
 Here are the recommendations already generated:
 ${existingRecs}
 
-Now find 1-5 ADDITIONAL "combine" recommendations that merge repos which were NOT already paired together.
-Look for synergies across different repos — e.g., a frontend repo + a backend repo = full-stack product.
-Also look for "repurpose" opportunities that weren't caught.
+Now perform a COMPLETION COVERAGE pass. Find viable repos in the index that do not yet have their own primary FINISH recommendation and add up to 10 missing FINISH recommendations.
+Do not generate COMBINE or REPURPOSE recommendations in this pass. Do not merge repos merely because they share a stack.
+Each added recommendation must map that repository's path to production-ready completion using the evidence available.
 
 Return JSON with the same schema as before (summary_md + recommendations array).
-Only include NEW recommendations not already in the list above. If no new opportunities exist, return an empty recommendations array.`;
+Only include NEW FINISH recommendations that improve repo coverage. If completion coverage is already adequate, return an empty recommendations array.`;
 
   try {
     const result = await callAI(
@@ -1039,14 +1040,17 @@ interface AnalysisContext {
 
 async function createAnalysisRow(ctx: AnalysisContext): Promise<string> {
   const { supabase, userId, prefs, triggerType } = ctx;
+  const provider = prefs?.custom_ai_provider || "google";
+  const tier = prefs?.analysis_tier || "balanced";
+  const models = getStageModels(provider, tier);
   const { data: analysis, error: aErr } = await supabase
     .from("analyses")
     .insert({
       user_id: userId,
       status: "running",
       trigger_type: triggerType,
-      ai_provider: prefs?.custom_ai_provider || "openai",
-      ai_model: prefs?.custom_ai_provider === "github_models" ? "gpt-4o-mini" : "gpt-4o",
+      ai_provider: provider,
+      ai_model: models.synthesisModel,
     })
     .select("id")
     .single();
@@ -1062,7 +1066,7 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
 
   const reportProgress: ProgressFn = async (msg: string) => {
     console.log(`[analysis ${analysisId}] ${msg}`);
-    await supabase.from("analyses").update({ error: msg }).eq("id", analysisId);
+    await supabase.from("analyses").update({ error: msg, updated_at: new Date().toISOString() }).eq("id", analysisId);
   };
 
   try {
@@ -1090,11 +1094,30 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
       );
     }
 
-    const provider = prefs?.custom_ai_provider || "openai";
-    let aiKey = prefs?.custom_ai_key || null;
-    if (provider === "github_models" && !aiKey) aiKey = token;
+    const provider = prefs?.custom_ai_provider || "google";
+    const aiKey = prefs?.custom_ai_key || null;
     const aiConfig = { provider, apiKey: aiKey };
     const stageModels = getStageModels(provider, tier);
+
+    if (!aiKey) {
+      throw new Error(`AI provider "${provider}" has no configured API key. Configure a valid server-side or BYOK credential before running analysis.`);
+    }
+
+    await reportProgress(`Validating ${provider} / ${stageModels.profilerModel}…`);
+    await withTimeout(
+      callAI(
+        {
+          messages: [
+            { role: "system", content: "Reply with exactly: ready" },
+            { role: "user", content: "AI provider preflight." },
+          ],
+          model: stageModels.profilerModel,
+        },
+        aiConfig,
+      ),
+      15000,
+      "AI provider preflight",
+    );
 
     // ── Step 2: Profile portfolio ────────────────────────────────────────────
     await reportProgress("Profiling your portfolio…");
@@ -1182,7 +1205,7 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
     if (metaOnlyRepos.length > 0) {
       const metaBlock = [
         `=== ADDITIONAL REPOS — metadata only (not deeply analyzed) ===`,
-        `Consider these for COMBINE or REPURPOSE recommendations if they overlap with the detailed repos above.`,
+        `Map these to independent FINISH paths where the metadata supports it. Do not invent COMBINE or REPURPOSE ideas from metadata alone.`,
         ...metaOnlyRepos.map(repoMetaLine),
       ].join("\n");
       digests.push(metaBlock);
@@ -1243,9 +1266,9 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
       await reportProgress(`${failedBatches}/${batches.length} batches failed, continuing with partial results…`);
     }
 
-    // Cross-batch discovery for portfolios spanning multiple batches
+    // Cross-batch completion-coverage pass for portfolios spanning multiple batches
     if (hasMultipleBatches && draftRecommendations.length > 0) {
-      await reportProgress("Discovering cross-batch opportunities…");
+      await reportProgress("Checking cross-batch completion coverage…");
       const crossBatchRecs = await synthesizeCrossBatch(draftRecommendations, digests, aiConfig);
       if (crossBatchRecs.length > 0) draftRecommendations.push(...crossBatchRecs);
     }
@@ -1366,14 +1389,25 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Analysis failed";
     console.error(`[analysis ${analysisId}] failed:`, msg);
-    await supabase.from("analyses").update({ status: "failed", error: msg }).eq("id", analysisId);
+    await supabase.from("analyses").update({ status: "failed", error: msg, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", analysisId);
   }
 }
 
 function startAnalysisJob(ctx: AnalysisContext, analysisId: string): void {
-  runAnalysisJob(ctx, analysisId).catch((e) => {
+  const job = runAnalysisJob(ctx, analysisId).catch(async (e) => {
     console.error(`[analysis ${analysisId}] unexpected background error:`, e);
+    const msg = e instanceof Error ? e.message : "Analysis worker stopped unexpectedly";
+    await ctx.supabase
+      .from("analyses")
+      .update({ status: "failed", error: msg, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq("id", analysisId);
   });
+
+  if (process.env.VERCEL) {
+    waitUntil(job);
+  } else {
+    void job;
+  }
 }
 
 async function getAnalysisContext(supabase: SupabaseClient, userId: string, triggerType: string): Promise<AnalysisContext> {
@@ -1386,14 +1420,22 @@ async function getAnalysisContext(supabase: SupabaseClient, userId: string, trig
     .maybeSingle();
 
   const noopProgress: ProgressFn = async () => {};
+  const aiCredential = await loadAiCredential(supabase, userId, credential.token);
+  const normalizedPrefs: AnalysisContext["prefs"] = {
+    custom_ai_provider: aiCredential.provider,
+    custom_ai_key: aiCredential.apiKey,
+    filter_max_repos: prefs?.filter_max_repos ?? 200,
+    filter_languages: prefs?.filter_languages ?? null,
+    filter_min_stars: prefs?.filter_min_stars ?? 0,
+    filter_exclude_archived: prefs?.filter_exclude_archived ?? true,
+    analysis_tier: prefs?.analysis_tier ?? "balanced",
+  };
 
   return {
     supabase,
     userId,
     token: credential.token,
-    // `custom_ai_key` is sealed at rest; unseal it once here so every consumer
-    // of this context works with a usable key rather than ciphertext.
-    prefs: prefs ? ({ ...prefs, custom_ai_key: decryptSecret((prefs as { custom_ai_key: string | null }).custom_ai_key) } as AnalysisContext["prefs"]) : null,
+    prefs: normalizedPrefs,
     triggerType,
     onProgress: noopProgress,
   };
@@ -1440,6 +1482,24 @@ router.get(
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!analysis) throw Object.assign(new Error("Analysis not found"), { status: 404 });
+
+    if (
+      analysis.status === "running" &&
+      analysis.updated_at &&
+      Date.now() - new Date(analysis.updated_at as string).getTime() > 10 * 60 * 1000
+    ) {
+      const staleMessage = "Analysis worker stopped reporting progress for more than 10 minutes. Rerun the analysis.";
+      const now = new Date().toISOString();
+      await req.supabase!
+        .from("analyses")
+        .update({ status: "failed", error: staleMessage, completed_at: now, updated_at: now })
+        .eq("id", id)
+        .eq("user_id", req.userId!);
+      analysis.status = "failed";
+      analysis.error = staleMessage;
+      analysis.completed_at = now;
+      analysis.updated_at = now;
+    }
 
     const { data: items } = await req.supabase!
       .from("analysis_items")

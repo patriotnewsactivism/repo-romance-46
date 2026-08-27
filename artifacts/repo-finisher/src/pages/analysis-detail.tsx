@@ -41,7 +41,7 @@ export default function AnalysisDetail() {
     if (detail?.analysis.status === 'running') {
       pollInterval.current = window.setInterval(() => {
         queryClient.invalidateQueries({ queryKey: getGetAnalysisQueryKey(analysisId) });
-      }, 3000);
+      }, 10000);
     } else {
       if (pollInterval.current) {
         clearInterval(pollInterval.current);
