@@ -15,6 +15,7 @@ import {
   finalizeRunEvolution,
   loadBaselineInvestmentMetrics,
 } from "../lib/post-run-evolution";
+import { insertCompletionRunCompat } from "../lib/completion-run-persistence";
 
 const router: IRouter = Router();
 const DIRECT_PROMPT_VERSION = "direct-finisher-v2-measured";
@@ -46,13 +47,13 @@ interface CompletionRunRow {
   pr_url: string | null;
   ci_status: string | null;
   error: string | null;
-  analysis_id: string | null;
-  item_rank: number | null;
-  prompt_version: string | null;
-  baseline_metrics: unknown;
-  outcome_metrics: unknown;
-  outcome_score: number | null;
-  evaluated_at: string | null;
+  analysis_id?: string | null;
+  item_rank?: number | null;
+  prompt_version?: string | null;
+  baseline_metrics?: unknown;
+  outcome_metrics?: unknown;
+  outcome_score?: number | null;
+  evaluated_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -181,27 +182,25 @@ router.post(
       loadBaselineInvestmentMetrics(req.supabase!, req.userId!, input.analysisId, input.repo),
     ]);
     const now = new Date().toISOString();
-    const { data: runData, error } = await req.supabase!
-      .from("completion_runs")
-      .insert({
-        user_id: req.userId!,
-        repo: plan.repo,
-        default_branch: plan.defaultBranch,
-        base_sha: plan.baseSha,
-        plan_hash: planHash,
-        plan,
-        status: "awaiting_approval",
-        analysis_id: input.analysisId ?? null,
-        item_rank: input.itemRank ?? null,
-        prompt_version: DIRECT_PROMPT_VERSION,
-        baseline_metrics: baselineMetrics,
-        created_at: now,
-        updated_at: now,
-      })
-      .select("*")
-      .single();
-    if (error) throw dbError("Failed to create completion run", error);
-    const run = runData as CompletionRunRow;
+    const runInsert = await insertCompletionRunCompat(req.supabase!, {
+      user_id: req.userId!,
+      repo: plan.repo,
+      default_branch: plan.defaultBranch,
+      base_sha: plan.baseSha,
+      plan_hash: planHash,
+      plan,
+      status: "awaiting_approval",
+      analysis_id: input.analysisId ?? null,
+      item_rank: input.itemRank ?? null,
+      prompt_version: DIRECT_PROMPT_VERSION,
+      baseline_metrics: baselineMetrics,
+      created_at: now,
+      updated_at: now,
+    });
+    if (runInsert.error || !runInsert.data) {
+      throw dbError("Failed to create completion run", runInsert.error);
+    }
+    const run = runInsert.data as unknown as CompletionRunRow;
 
     const stepRows = plan.changes.map((change, index) => ({
       run_id: run.id,
@@ -227,7 +226,13 @@ router.post(
       "plan_created",
       "info",
       `Prepared ${plan.changes.length} exact file change${plan.changes.length === 1 ? "" : "s"} for approval.`,
-      { baseSha: plan.baseSha, planHash, promptVersion: DIRECT_PROMPT_VERSION, baselineMetrics },
+      {
+        baseSha: plan.baseSha,
+        planHash,
+        promptVersion: DIRECT_PROMPT_VERSION,
+        baselineMetrics,
+        outcomeTelemetryPersisted: runInsert.telemetryPersisted,
+      },
     );
 
     res.status(201).json({
@@ -242,6 +247,7 @@ router.post(
       changes: plan.changes.map(({ mode: _mode, ...change }) => change),
       promptVersion: DIRECT_PROMPT_VERSION,
       baselineMetrics,
+      outcomeTelemetryPersisted: runInsert.telemetryPersisted,
       createdAt: run.created_at,
     });
   }),
