@@ -7,6 +7,7 @@ import { loadAiCredential, loadGithubCredential, requireGithubCredential } from 
 import { loadAdaptiveLearningContext } from "../lib/adaptive-learning";
 import { prepareFinishPlan } from "../lib/repo-finisher-engine";
 import { normalizeInvestmentMetrics } from "../lib/run-outcome-score";
+import { insertCompletionRunCompat } from "../lib/completion-run-persistence";
 
 const router: IRouter = Router();
 const AGENT_PROMPT_VERSION = "agentic-finisher-v2-outcome-optimized";
@@ -231,9 +232,9 @@ router.post(
 
     const now = new Date().toISOString();
     const baselineMetrics = normalizeInvestmentMetrics(investmentContext);
-    const { data: runData, error: runError } = await req.supabase!
-      .from("completion_runs")
-      .insert({
+    const runInsert = await insertCompletionRunCompat(
+      req.supabase!,
+      {
         user_id: userId,
         repo: plan.repo,
         default_branch: plan.defaultBranch,
@@ -247,12 +248,14 @@ router.post(
         baseline_metrics: baselineMetrics,
         created_at: now,
         updated_at: now,
-      })
-      .select("id, status, created_at")
-      .single();
-    if (runError) throw new Error(`Failed to create autonomous completion run: ${runError.message}`);
+      },
+      "id, status, created_at",
+    );
+    if (runInsert.error || !runInsert.data) {
+      throw new Error(`Failed to create autonomous completion run: ${runInsert.error?.message ?? "unknown database error"}`);
+    }
 
-    const run = runData as { id: string; status: string; created_at: string };
+    const run = runInsert.data as { id: string; status: string; created_at: string };
     const stepRows = plan.changes.map((change, index) => ({
       run_id: run.id,
       user_id: userId,
@@ -283,6 +286,7 @@ router.post(
         learningGuidance: learning.promptGuidance,
         strategyPerformance: learning.strategyPerformance,
         baselineMetrics,
+        outcomeTelemetryPersisted: runInsert.telemetryPersisted,
         combinedNextSteps,
       },
     });
@@ -306,6 +310,7 @@ router.post(
         promptVersion: AGENT_PROMPT_VERSION,
       },
       baselineMetrics,
+      outcomeTelemetryPersisted: runInsert.telemetryPersisted,
       createdAt: run.created_at,
     });
   }),
