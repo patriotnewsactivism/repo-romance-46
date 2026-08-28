@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { FinishRepoAction } from '@/components/finish-repo-action';
 import { PortfolioFinishControl } from '@/components/portfolio-finish-control';
+import { TieredIntelligencePanel } from '@/components/tiered-intelligence-panel';
 import {
   AlertTriangle,
   DollarSign,
@@ -215,6 +216,7 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
       </Card>
 
       <PortfolioFinishControl analysisId={analysisId} repoCount={data.ranking.length} />
+      <TieredIntelligencePanel analysisId={analysisId} repoCount={data.ranking.length} />
 
       {data.errors.length > 0 && (
         <Card className="p-4 border-amber-500/30">
@@ -250,26 +252,10 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
           </div>
 
           <div className="grid gap-2 grid-cols-2 xl:grid-cols-4">
-            <div className="rounded border p-3">
-              <div className="text-xs text-muted-foreground">Completion</div>
-              <div className="font-semibold">{item.completionPct}%</div>
-              <div className="text-[11px] text-muted-foreground">Readiness {item.productionReadinessPct}%</div>
-            </div>
-            <div className="rounded border p-3">
-              <div className="text-xs text-muted-foreground">Present → potential</div>
-              <div className="font-semibold break-words">{money(item.presentValueUsd.low)}–{money(item.presentValueUsd.high)}</div>
-              <div className="text-[11px] text-emerald-500 break-words">→ {money(item.potentialValueUsd.low)}–{money(item.potentialValueUsd.high)}</div>
-            </div>
-            <div className="rounded border p-3">
-              <div className="text-xs text-muted-foreground">Remaining work</div>
-              <div className="font-semibold">~{Math.round(item.remainingWork.hours)}h</div>
-              <div className="text-[11px] text-muted-foreground break-words">{money(item.remainingWork.costUsd.low)}–{money(item.remainingWork.costUsd.high)}</div>
-            </div>
-            <div className="rounded border p-3">
-              <div className="text-xs text-muted-foreground">Commercialization</div>
-              <div className="font-semibold">{item.commercializationProbability}%</div>
-              <div className="text-[11px] text-muted-foreground">Evidence {item.evidenceConfidence}/100</div>
-            </div>
+            <div className="rounded border p-3"><div className="text-xs text-muted-foreground">Completion</div><div className="font-semibold">{item.completionPct}%</div><div className="text-[11px] text-muted-foreground">Readiness {item.productionReadinessPct}%</div></div>
+            <div className="rounded border p-3"><div className="text-xs text-muted-foreground">Present → potential</div><div className="font-semibold break-words">{money(item.presentValueUsd.low)}–{money(item.presentValueUsd.high)}</div><div className="text-[11px] text-emerald-500 break-words">→ {money(item.potentialValueUsd.low)}–{money(item.potentialValueUsd.high)}</div></div>
+            <div className="rounded border p-3"><div className="text-xs text-muted-foreground">Remaining work</div><div className="font-semibold">~{Math.round(item.remainingWork.hours)}h</div><div className="text-[11px] text-muted-foreground break-words">{money(item.remainingWork.costUsd.low)}–{money(item.remainingWork.costUsd.high)}</div></div>
+            <div className="rounded border p-3"><div className="text-xs text-muted-foreground">Commercialization</div><div className="font-semibold">{item.commercializationProbability}%</div><div className="text-[11px] text-muted-foreground">Evidence {item.evidenceConfidence}/100</div></div>
           </div>
 
           <div className="grid gap-2 sm:grid-cols-3">
@@ -278,23 +264,14 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
             <div className="rounded border p-3 text-sm flex justify-between gap-3"><span className="text-muted-foreground">Competitive pressure</span><span className="font-semibold">{item.competitivePressure}/100</span></div>
           </div>
 
-          <FinishRepoAction
-            repo={item.repo}
-            nextSteps={item.details?.recommendedNextSteps ?? []}
-            analysisId={analysisId}
-          />
+          <FinishRepoAction repo={item.repo} nextSteps={item.details?.recommendedNextSteps ?? []} analysisId={analysisId} />
 
           <details className="rounded border p-3">
-            <summary className="cursor-pointer text-sm font-medium flex items-center gap-2">
-              <DollarSign className="h-4 w-4" /> Evidence ledger
-            </summary>
+            <summary className="cursor-pointer text-sm font-medium flex items-center gap-2"><DollarSign className="h-4 w-4" /> Evidence ledger</summary>
             <div className="mt-3 space-y-2">
               {item.evidence.map((evidence, index) => (
                 <div key={`${evidence.label}-${index}`} className="rounded-md border p-3">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Badge variant="outline" className={evidenceClass(evidence)}>{evidence.class.replace('_', ' ')}</Badge>
-                    <span className="text-sm font-medium">{evidence.label}</span>
-                  </div>
+                  <div className="flex items-center gap-2 flex-wrap"><Badge variant="outline" className={evidenceClass(evidence)}>{evidence.class.replace('_', ' ')}</Badge><span className="text-sm font-medium">{evidence.label}</span></div>
                   <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{evidence.detail}</p>
                 </div>
               ))}

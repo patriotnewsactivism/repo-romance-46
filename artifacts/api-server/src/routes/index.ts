@@ -11,6 +11,7 @@ import selfHealingCiRouter from "./self-healing-ci";
 import valuationRouter from "./valuation";
 import investmentIntelligenceRouter from "./investment-intelligence";
 import portfolioIntelligenceRouter from "./portfolio-intelligence";
+import tieredIntelligenceRouter from "./tiered-intelligence";
 import vibeToolsRouter from "./vibe-tools";
 import observabilityRouter from "./observability";
 
@@ -26,6 +27,7 @@ router.use(agenticFinisherRouter);
 router.use(portfolioFinisherRouter);
 router.use(selfHealingCiRouter);
 router.use(valuationRouter);
+router.use(tieredIntelligenceRouter);
 router.use(portfolioIntelligenceRouter);
 router.use(investmentIntelligenceRouter);
 router.use(vibeToolsRouter);
