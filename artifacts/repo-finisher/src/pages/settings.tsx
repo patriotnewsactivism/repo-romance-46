@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useLocation, Link } from 'wouter';
+import { useLocation } from 'wouter';
 import {
   useGetPreferences,
   useUpdatePreferences,
@@ -10,6 +10,7 @@ import {
 } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { getSession, signOut } from '@/lib/auth';
+import { AppHeader } from '@/components/app-header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -19,8 +20,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import {
-  GitBranch,
-  ArrowLeft,
   Zap,
   Gauge,
   Brain,
@@ -99,7 +98,6 @@ export default function Settings() {
     if (preferences) {
       const savedProvider = preferences.custom_ai_provider || 'google';
       setAiProvider(savedProvider === 'github_models' ? 'google' : savedProvider);
-      // The key itself is write-only server-side; we only learn whether one is stored.
       setAiKey('');
       setAnalysisTier(preferences.analysis_tier || 'balanced');
       setFilterLanguages(preferences.filter_languages?.join(', ') || '');
@@ -124,7 +122,6 @@ export default function Settings() {
 
   useEffect(() => {
     if (preferences) void loadAiStatus();
-    // Re-read readiness after the preference query changes; secret values never enter browser state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preferences]);
 
@@ -149,8 +146,6 @@ export default function Settings() {
       {
         data: {
           custom_ai_provider: aiProvider,
-          // Only send the key when the user actually typed one, so saving other
-          // settings never clears a key we were never shown.
           ...(aiKey ? { custom_ai_key: aiKey } : {}),
           analysis_tier: analysisTier,
           filter_languages: languagesArray.length > 0 ? languagesArray : undefined,
@@ -249,29 +244,16 @@ export default function Settings() {
 
   return (
     <div className="min-h-screen bg-background dark">
-      {/* Header */}
-      <div className="border-b border-border bg-card sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center gap-4">
-              <Link href="/dashboard">
-                <Button variant="ghost" size="sm" data-testid="button-back">
-                  <ArrowLeft className="w-4 h-4 mr-2" />
-                  Dashboard
-                </Button>
-              </Link>
-              <div className="h-6 w-px bg-border" />
-              <div className="flex items-center gap-2">
-                <GitBranch className="w-5 h-5 text-primary" />
-                <span className="font-semibold">Settings</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <AppHeader
+        section="Settings"
+        user={githubStatus?.connected ? {
+          login: githubStatus.login,
+          displayName: githubStatus.displayName,
+          avatarUrl: githubStatus.avatarUrl,
+        } : null}
+      />
 
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-        {/* GitHub Connection */}
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
         <Card>
           <CardHeader>
             <CardTitle>GitHub Connection</CardTitle>
@@ -279,16 +261,16 @@ export default function Settings() {
           </CardHeader>
           <CardContent className="space-y-4">
             {githubStatus?.connected && (
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3 min-w-0">
                   <img
                     src={githubStatus.avatarUrl || ''}
                     alt={githubStatus.login || ''}
-                    className="w-10 h-10 rounded-full"
+                    className="w-10 h-10 rounded-full shrink-0"
                   />
-                  <div>
-                    <div className="font-semibold">{githubStatus.displayName || githubStatus.login}</div>
-                    <div className="text-sm text-muted-foreground">@{githubStatus.login}</div>
+                  <div className="min-w-0">
+                    <div className="font-semibold truncate">{githubStatus.displayName || githubStatus.login}</div>
+                    <div className="text-sm text-muted-foreground truncate">@{githubStatus.login}</div>
                   </div>
                 </div>
                 <Button
@@ -296,6 +278,7 @@ export default function Settings() {
                   onClick={handleDisconnect}
                   disabled={disconnectGithub.isPending}
                   data-testid="button-disconnect"
+                  className="sm:shrink-0"
                 >
                   <LogOut className="w-4 h-4 mr-2" />
                   Disconnect
@@ -305,7 +288,6 @@ export default function Settings() {
           </CardContent>
         </Card>
 
-        {/* Analysis Tier */}
         <Card>
           <CardHeader>
             <CardTitle>Analysis Tier</CardTitle>
@@ -338,7 +320,6 @@ export default function Settings() {
           </CardContent>
         </Card>
 
-        {/* AI Provider */}
         <Card>
           <CardHeader>
             <CardTitle>AI Provider</CardTitle>
@@ -455,11 +436,10 @@ export default function Settings() {
           </CardContent>
         </Card>
 
-        {/* Repository Filters */}
         <Card>
           <CardHeader>
             <CardTitle>Repository Filters</CardTitle>
-            <CardDescription>Control which repos are included in analysis</CardDescription>
+            <CardDescription>Analyze and value up to 500 repositories in a portfolio run.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -474,8 +454,8 @@ export default function Settings() {
               <p className="text-xs text-muted-foreground">Leave empty to include all languages</p>
             </div>
 
-            <div className="flex items-center justify-between">
-              <Label htmlFor="exclude-archived" className="cursor-pointer">
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="exclude-archived" className="cursor-pointer min-w-0">
                 <div className="font-semibold mb-1">Exclude archived repos</div>
                 <div className="text-sm text-muted-foreground">Don't analyze archived repositories</div>
               </Label>
@@ -500,7 +480,7 @@ export default function Settings() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="max-repos">Max repositories</Label>
+                <Label htmlFor="max-repos">Max repositories (2–500)</Label>
                 <Input
                   id="max-repos"
                   type="number"
@@ -508,15 +488,15 @@ export default function Settings() {
                   max="500"
                   value={maxRepos}
                   onChange={(e) => setMaxRepos(e.target.value)}
-                  placeholder="No limit"
+                  placeholder="200"
                   data-testid="input-max-repos"
                 />
+                <p className="text-xs text-muted-foreground">The old 30-repository valuation ceiling no longer applies.</p>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Save Button */}
         <div className="flex justify-end">
           <Button
             onClick={handleSave}
