@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { useParams, useLocation, Link } from 'wouter';
-import { useGetAnalysis, getGetAnalysisQueryKey, useGetActionPlan, useShareAnalysis, useRerunAnalysis } from '@workspace/api-client-react';
+import { useGetAnalysis, getGetAnalysisQueryKey, useShareAnalysis, useRerunAnalysis } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { getSession } from '@/lib/auth';
+import { AppHeader } from '@/components/app-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -15,7 +16,7 @@ import { StrategyView } from '@/components/strategy-view';
 import { ActionPlanView } from '@/components/action-plan-view';
 import { ValuationView } from '@/components/valuation-view';
 import { InvestmentIntelligenceView } from '@/components/investment-intelligence-view';
-import { GitBranch, ArrowLeft, Loader2, Brain, Layers, Sparkles, Search, Zap, Share2, RefreshCw, Settings } from 'lucide-react';
+import { Loader2, Brain, Layers, Sparkles, Search, Zap, Share2, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function AnalysisDetail() {
@@ -23,7 +24,7 @@ export default function AnalysisDetail() {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const analysisId = params.id as string;
-  
+
   const { data: detail, isLoading } = useGetAnalysis(analysisId);
   const shareAnalysis = useShareAnalysis();
   const rerunAnalysis = useRerunAnalysis();
@@ -31,29 +32,22 @@ export default function AnalysisDetail() {
 
   useEffect(() => {
     getSession().then(session => {
-      if (!session) {
-        setLocation('/auth');
-      }
+      if (!session) setLocation('/auth');
     });
   }, [setLocation]);
 
-  // Poll for updates when running
   useEffect(() => {
     if (detail?.analysis.status === 'running') {
       pollInterval.current = window.setInterval(() => {
         queryClient.invalidateQueries({ queryKey: getGetAnalysisQueryKey(analysisId) });
       }, 10000);
-    } else {
-      if (pollInterval.current) {
-        clearInterval(pollInterval.current);
-        pollInterval.current = null;
-      }
+    } else if (pollInterval.current) {
+      clearInterval(pollInterval.current);
+      pollInterval.current = null;
     }
 
     return () => {
-      if (pollInterval.current) {
-        clearInterval(pollInterval.current);
-      }
+      if (pollInterval.current) clearInterval(pollInterval.current);
     };
   }, [detail?.analysis.status, analysisId, queryClient]);
 
@@ -61,13 +55,11 @@ export default function AnalysisDetail() {
     shareAnalysis.mutate(
       { id: analysisId, data: { isPublic } },
       {
-        onSuccess: (result) => {
+        onSuccess: () => {
           toast.success(isPublic ? 'Analysis is now public' : 'Analysis is now private');
           queryClient.invalidateQueries({ queryKey: getGetAnalysisQueryKey(analysisId) });
         },
-        onError: (error) => {
-          toast.error('Failed to update sharing', { description: error.message });
-        }
+        onError: (error) => toast.error('Failed to update sharing', { description: error.message }),
       }
     );
   };
@@ -80,9 +72,7 @@ export default function AnalysisDetail() {
           toast.success('Started new analysis');
           setLocation(`/analysis/${data.id}`);
         },
-        onError: (error) => {
-          toast.error('Failed to rerun analysis', { description: error.message });
-        }
+        onError: (error) => toast.error('Failed to rerun analysis', { description: error.message }),
       }
     );
   };
@@ -108,11 +98,9 @@ export default function AnalysisDetail() {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-background dark">
-        <div className="border-b border-border bg-card/50 backdrop-blur-sm">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex justify-between items-center h-16">
-              <Skeleton className="h-6 w-48" />
-            </div>
+        <div className="border-b border-border bg-background/95">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center">
+            <Skeleton className="h-6 w-48" />
           </div>
         </div>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -125,16 +113,14 @@ export default function AnalysisDetail() {
 
   if (!detail) {
     return (
-      <div className="min-h-screen bg-background dark flex items-center justify-center">
+      <div className="min-h-screen bg-background dark flex items-center justify-center p-4">
         <Card className="max-w-md">
           <CardHeader>
             <CardTitle>Analysis Not Found</CardTitle>
             <CardDescription>The requested analysis could not be found</CardDescription>
           </CardHeader>
           <CardContent>
-            <Link href="/dashboard">
-              <Button>Back to Dashboard</Button>
-            </Link>
+            <Link href="/dashboard"><Button>Back to Dashboard</Button></Link>
           </CardContent>
         </Card>
       </div>
@@ -146,56 +132,32 @@ export default function AnalysisDetail() {
 
   return (
     <div className="min-h-screen bg-background dark">
-      {/* Header */}
-      <div className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center gap-4">
-              <Link href="/dashboard">
-                <Button variant="ghost" size="sm" data-testid="button-back">
-                  <ArrowLeft className="w-4 h-4 mr-2" />
-                  Dashboard
-                </Button>
-              </Link>
-              <div className="h-6 w-px bg-border" />
-              <div className="flex items-center gap-2">
-                <GitBranch className="w-5 h-5 text-primary" />
-                <span className="font-semibold">Analysis</span>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleRerun}
-                disabled={rerunAnalysis.isPending || analysis.status === 'running'}
-                data-testid="button-rerun"
-              >
-                <RefreshCw className="w-4 h-4 mr-2" />
-                Rerun
-              </Button>
-              <Link href="/settings">
-                <Button variant="ghost" size="sm" data-testid="button-settings-header">
-                  <Settings className="w-4 h-4" />
-                </Button>
-              </Link>
-            </div>
-          </div>
-        </div>
-      </div>
+      <AppHeader
+        section="Analysis"
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRerun}
+            disabled={rerunAnalysis.isPending || analysis.status === 'running'}
+            data-testid="button-rerun"
+            className="gap-2"
+          >
+            <RefreshCw className={`w-4 h-4 ${rerunAnalysis.isPending ? 'animate-spin' : ''}`} />
+            <span className="hidden md:inline">Rerun</span>
+          </Button>
+        }
+      />
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-        {/* Status Banner */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
         {analysis.status === 'running' && (
           <Card className="border-primary/40 bg-gradient-to-r from-primary/5 to-transparent">
             <CardContent className="pt-6">
               <div className="flex items-center gap-3">
-                <StageIcon className="w-5 h-5 text-primary animate-pulse" />
-                <div>
+                <StageIcon className="w-5 h-5 text-primary animate-pulse shrink-0" />
+                <div className="min-w-0">
                   <p className="font-semibold">Analysis in progress</p>
-                  {analysis.error && (
-                    <p className="text-sm text-muted-foreground mt-1">{analysis.error}</p>
-                  )}
+                  {analysis.error && <p className="text-sm text-muted-foreground mt-1 break-words">{analysis.error}</p>}
                 </div>
               </div>
             </CardContent>
@@ -205,46 +167,37 @@ export default function AnalysisDetail() {
         {analysis.status === 'failed' && (
           <Card className="border-destructive/40 bg-destructive/5">
             <CardContent className="pt-6">
-              <div className="flex items-center gap-3">
-                <p className="font-semibold text-destructive">Analysis failed</p>
-              </div>
-              {analysis.error && (
-                <p className="text-sm text-muted-foreground mt-2">{analysis.error}</p>
-              )}
+              <p className="font-semibold text-destructive">Analysis failed</p>
+              {analysis.error && <p className="text-sm text-muted-foreground mt-2 break-words">{analysis.error}</p>}
             </CardContent>
           </Card>
         )}
 
-        {/* Main Content */}
         {analysis.status === 'complete' && (
           <Tabs defaultValue="recommendations" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-3 sm:grid-cols-6 lg:w-auto lg:inline-grid">
-              <TabsTrigger value="recommendations" data-testid="tab-recommendations">
-                Recommendations
-                {items.length > 0 && (
-                  <Badge variant="secondary" className="ml-2 font-mono text-xs">
-                    {items.length}
-                  </Badge>
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="strategy" data-testid="tab-strategy">Strategy</TabsTrigger>
-              <TabsTrigger value="action-plan" data-testid="tab-action-plan">Action Plan</TabsTrigger>
-              <TabsTrigger value="investment" data-testid="tab-investment">Investment</TabsTrigger>
-              <TabsTrigger value="valuation" data-testid="tab-valuation">Valuation</TabsTrigger>
-              <TabsTrigger value="share" data-testid="tab-share">
-                <Share2 className="w-4 h-4 mr-1" />
-                Share
-              </TabsTrigger>
-            </TabsList>
+            <div className="w-full overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <TabsList className="inline-flex h-auto min-w-max items-center justify-start gap-1 p-1">
+                <TabsTrigger value="recommendations" data-testid="tab-recommendations" className="shrink-0">
+                  Recommendations
+                  {items.length > 0 && (
+                    <Badge variant="secondary" className="ml-2 font-mono text-xs">{items.length}</Badge>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="strategy" data-testid="tab-strategy" className="shrink-0">Strategy</TabsTrigger>
+                <TabsTrigger value="action-plan" data-testid="tab-action-plan" className="shrink-0">Action Plan</TabsTrigger>
+                <TabsTrigger value="investment" data-testid="tab-investment" className="shrink-0">Portfolio Value</TabsTrigger>
+                <TabsTrigger value="valuation" data-testid="tab-valuation" className="shrink-0">Legacy Valuation</TabsTrigger>
+                <TabsTrigger value="share" data-testid="tab-share" className="shrink-0">
+                  <Share2 className="w-4 h-4 mr-1" />
+                  Share
+                </TabsTrigger>
+              </TabsList>
+            </div>
 
             <TabsContent value="recommendations" className="space-y-4">
               {items.length > 0 ? (
                 items.map(item => (
-                  <RecommendationCard 
-                    key={item.id} 
-                    recommendation={item} 
-                    analysisId={analysisId}
-                  />
+                  <RecommendationCard key={item.id} recommendation={item} analysisId={analysisId} />
                 ))
               ) : (
                 <Card>
@@ -255,37 +208,22 @@ export default function AnalysisDetail() {
               )}
             </TabsContent>
 
-            <TabsContent value="strategy">
-              <StrategyView analysis={analysis} />
-            </TabsContent>
-
-            <TabsContent value="action-plan">
-              <ActionPlanView analysisId={analysisId} />
-            </TabsContent>
-
-            <TabsContent value="investment">
-              <InvestmentIntelligenceView analysisId={analysisId} />
-            </TabsContent>
-
-            <TabsContent value="valuation">
-              <ValuationView analysisId={analysisId} />
-            </TabsContent>
+            <TabsContent value="strategy"><StrategyView analysis={analysis} /></TabsContent>
+            <TabsContent value="action-plan"><ActionPlanView analysisId={analysisId} /></TabsContent>
+            <TabsContent value="investment"><InvestmentIntelligenceView analysisId={analysisId} /></TabsContent>
+            <TabsContent value="valuation"><ValuationView analysisId={analysisId} /></TabsContent>
 
             <TabsContent value="share">
               <Card>
                 <CardHeader>
                   <CardTitle>Public Sharing</CardTitle>
-                  <CardDescription>
-                    Make this analysis publicly accessible via a shareable link
-                  </CardDescription>
+                  <CardDescription>Make this analysis publicly accessible via a shareable link</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="public-toggle" className="cursor-pointer">
+                  <div className="flex items-center justify-between gap-4">
+                    <Label htmlFor="public-toggle" className="cursor-pointer min-w-0">
                       <div className="font-semibold mb-1">Public access</div>
-                      <div className="text-sm text-muted-foreground">
-                        Anyone with the link can view this analysis
-                      </div>
+                      <div className="text-sm text-muted-foreground">Anyone with the link can view this analysis</div>
                     </Label>
                     <Switch
                       id="public-toggle"
