@@ -21,6 +21,7 @@ type RunStatus =
   | "approved"
   | "executing"
   | "verifying"
+  | "repairing"
   | "succeeded"
   | "failed"
   | "cancelled"
@@ -84,8 +85,17 @@ interface RunDetailResponse {
     message: string;
     totalChecks: number;
     completedChecks: number;
-    failedChecks: number;
+    failedChecks: string[];
   } | null;
+}
+
+interface SelfHealResponse {
+  runId: string;
+  scheduled: boolean;
+  status: RunStatus;
+  repairAttempts?: number;
+  maxRepairAttempts?: number;
+  reason?: string;
 }
 
 interface LegacyResult {
@@ -117,6 +127,7 @@ function statusLabel(status: RunStatus | null) {
     case "approved": return "Approved";
     case "executing": return "Executing";
     case "verifying": return "Verifying CI";
+    case "repairing": return "Self-healing CI";
     case "succeeded": return "Succeeded";
     case "failed": return "Failed";
     case "cancelled": return "Cancelled";
@@ -128,7 +139,7 @@ function statusLabel(status: RunStatus | null) {
 function statusClass(status: RunStatus | null) {
   if (status === "succeeded" || status === "approved") return "border-emerald-500/40 text-emerald-600";
   if (status === "failed" || status === "stale") return "border-red-500/40 text-red-600";
-  if (status === "executing" || status === "verifying") return "border-blue-500/40 text-blue-600";
+  if (status === "executing" || status === "verifying" || status === "repairing") return "border-blue-500/40 text-blue-600";
   return "border-amber-500/40 text-amber-600";
 }
 
@@ -141,11 +152,21 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
   const runId = detail?.run.id ?? preview?.runId ?? null;
   const status = detail?.run.status ?? preview?.status ?? null;
 
+  const fetchRun = useCallback(async (id: string) => {
+    return customFetch<RunDetailResponse>(`/api/repo-finisher/runs/${id}`, { responseType: "json" });
+  }, []);
+
   const loadRun = useCallback(async (id: string) => {
-    const data = await customFetch<RunDetailResponse>(`/api/repo-finisher/runs/${id}`, { responseType: "json" });
+    let data = await fetchRun(id);
+    if (data.run.status === "failed") {
+      const heal = await postJson<SelfHealResponse>(`/api/repo-finisher/runs/${id}/self-heal`).catch(() => null);
+      if (heal?.scheduled || heal?.status === "repairing") {
+        data = await fetchRun(id);
+      }
+    }
     setDetail(data);
     return data;
-  }, []);
+  }, [fetchRun]);
 
   const refreshRun = useCallback(async (quiet = false) => {
     if (!runId) return;
@@ -160,7 +181,7 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
   }, [loadRun, runId]);
 
   useEffect(() => {
-    if (!runId || (status !== "executing" && status !== "verifying")) return;
+    if (!runId || (status !== "executing" && status !== "verifying" && status !== "repairing")) return;
     const timer = window.setInterval(() => void refreshRun(true), 4000);
     return () => window.clearInterval(timer);
   }, [refreshRun, runId, status]);
@@ -174,20 +195,21 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
 
     try {
       const payload: Record<string, unknown> = { repo, nextSteps, analysisId };
-      // Historical analysis ranks are zero-based, while the older preview schema
-      // accepted only positive ranks. Omit rank zero rather than blocking the top repo.
       if (typeof itemRank === "number" && itemRank > 0) payload.itemRank = itemRank;
 
       const planned = await postJson<PreviewResponse>("/api/repo-finisher/agentic-preview", payload);
       createdRunId = planned.runId;
       setPreview(planned);
 
+      await postJson(`/api/repo-finisher/runs/${planned.runId}/repair-policy`, { enabled: true, maxAttempts: 2 });
       await postJson(`/api/repo-finisher/runs/${planned.runId}/approve`, { planHash: planned.planHash });
       await postJson(`/api/repo-finisher/runs/${planned.runId}/execute`);
       const latest = await loadRun(planned.runId);
 
       if (latest.run.status === "succeeded") {
         toast.success(`${repo.split("/")[1]} was finished and verified in a draft PR.`);
+      } else if (latest.run.status === "repairing") {
+        toast.success(`CI found a failure and RepoFinisher is repairing it automatically.`);
       } else if (latest.run.status === "verifying") {
         toast.success(`Autonomous changes are in a draft PR. CI verification is running.`);
       } else {
@@ -221,7 +243,7 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
     try {
       await postJson(`/api/repo-finisher/runs/${runId}/execute`);
       await loadRun(runId);
-      toast.success("Execution resumed; CI verification is enforced.");
+      toast.success("Execution resumed; CI verification and bounded self-healing are enforced.");
     } catch (error) {
       await loadRun(runId).catch(() => undefined);
       toast.error(error instanceof Error ? error.message.slice(0, 240) : "Execution failed.");
@@ -283,7 +305,7 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
           </Button>
           {!compact && (
             <p className="mt-2 text-xs text-muted-foreground">
-              One click runs the agent council, generates an exact plan, records your approval for that generated hash, creates a draft PR, and verifies CI.
+              One click runs the agent council, generates an exact plan, records your approval for that generated hash, creates a draft PR, verifies CI, and can make up to two bounded code-only repair attempts if CI fails. Tests, workflows, security policy files, and lockfiles cannot be changed by self-healing.
             </p>
           )}
         </div>
@@ -366,10 +388,14 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
             </div>
           )}
 
-          {(busy === "finish" || status === "executing" || status === "verifying") && (
+          {(busy === "finish" || status === "executing" || status === "verifying" || status === "repairing") && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
-              {status === "verifying" ? "Waiting for required checks…" : "Autonomous agents are finishing the repository…"}
+              {status === "repairing"
+                ? "CI failed; a bounded repair agent is fixing the branch without weakening validation…"
+                : status === "verifying"
+                  ? "Waiting for required checks…"
+                  : "Autonomous agents are finishing the repository…"}
             </div>
           )}
 
@@ -397,7 +423,7 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
             <Button variant="outline" size="sm" onClick={reset}>Start a new autonomous run</Button>
           )}
 
-          {runId && status !== "executing" && status !== "verifying" && busy === null && (
+          {runId && status !== "executing" && status !== "verifying" && status !== "repairing" && busy === null && (
             <Button variant="ghost" size="sm" onClick={() => void refreshRun()} className="gap-2">
               <RefreshCw className="h-3.5 w-3.5" />
               Refresh status
