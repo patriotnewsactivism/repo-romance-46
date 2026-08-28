@@ -53,15 +53,26 @@ export type AiCredentialSource = "byok" | "platform" | "none";
 
 export interface AiCredential {
   provider: string;
+  model: string | null;
   apiKey: string | null;
   source: AiCredentialSource;
 }
 
-const SUPPORTED_PLATFORM_PROVIDERS = new Set(["google", "openai", "anthropic"]);
+export const SUPPORTED_AI_PROVIDERS = ["google", "openai", "anthropic", "openrouter"] as const;
+const SUPPORTED_PLATFORM_PROVIDERS = new Set<string>(SUPPORTED_AI_PROVIDERS);
+
+export function normalizeAiProvider(value: string | null | undefined, fallback = "google"): string {
+  const configured = String(value || "").trim().toLowerCase();
+  if (SUPPORTED_PLATFORM_PROVIDERS.has(configured)) return configured;
+  // Historical providers no longer have a runtime implementation. Route them
+  // to the current platform default without destroying their stored row.
+  if (configured === "github_models" || configured === "lovable" || !configured) return fallback;
+  return fallback;
+}
 
 export function platformAiProvider(): string {
   const configured = (process.env.AI_PROVIDER || "google").trim().toLowerCase();
-  return SUPPORTED_PLATFORM_PROVIDERS.has(configured) ? configured : "google";
+  return normalizeAiProvider(configured, "google");
 }
 
 function platformAiKey(provider: string): string | null {
@@ -72,8 +83,22 @@ function platformAiKey(provider: string): string | null {
       return process.env.OPENAI_API_KEY || null;
     case "anthropic":
       return process.env.ANTHROPIC_API_KEY || null;
+    case "openrouter":
+      return process.env.OPENROUTER_API_KEY || null;
     default:
       return null;
+  }
+}
+
+function platformAiModel(provider: string): string | null {
+  const common = process.env.AI_MODEL?.trim();
+  if (common) return common;
+  switch (provider) {
+    case "google": return process.env.GEMINI_MODEL?.trim() || null;
+    case "openai": return process.env.OPENAI_MODEL?.trim() || null;
+    case "anthropic": return process.env.ANTHROPIC_MODEL?.trim() || null;
+    case "openrouter": return process.env.OPENROUTER_MODEL?.trim() || null;
+    default: return null;
   }
 }
 
@@ -85,18 +110,18 @@ export function platformAiStatus() {
       google: { platformConfigured: Boolean(platformAiKey("google")) },
       openai: { platformConfigured: Boolean(platformAiKey("openai")) },
       anthropic: { platformConfigured: Boolean(platformAiKey("anthropic")) },
+      openrouter: { platformConfigured: Boolean(platformAiKey("openrouter")) },
     },
   };
 }
 
 /**
- * Resolve which provider and key to use for a user.
+ * Resolve which provider, model, and key to use for a user.
  *
  * Google Gemini remains the default when AI_PROVIDER is unset. A user's
  * encrypted BYOK credential wins when present; otherwise the server-side
- * credential for the selected provider is used. Historical `github_models`
- * preferences are transparently routed to the current platform default because
- * GitHub Models has been retired.
+ * credential for the selected provider is used. Historical providers are
+ * transparently routed to the current platform default.
  */
 export async function loadAiCredential(
   supabase: SupabaseClient,
@@ -105,15 +130,19 @@ export async function loadAiCredential(
 ): Promise<AiCredential> {
   const { data, error } = await supabase
     .from("user_preferences")
-    .select("custom_ai_provider, custom_ai_key")
+    .select("custom_ai_provider, custom_ai_model, custom_ai_key")
     .eq("user_id", userId)
     .maybeSingle();
   if (error) throw new Error(`Failed to load AI preferences: ${error.message}`);
 
-  const row = (data ?? null) as { custom_ai_provider: string | null; custom_ai_key: string | null } | null;
+  const row = (data ?? null) as {
+    custom_ai_provider: string | null;
+    custom_ai_model: string | null;
+    custom_ai_key: string | null;
+  } | null;
   const fallbackProvider = platformAiProvider();
-  const requestedProvider = row?.custom_ai_provider || fallbackProvider;
-  const provider = requestedProvider === "github_models" ? fallbackProvider : requestedProvider;
+  const provider = normalizeAiProvider(row?.custom_ai_provider, fallbackProvider);
+  const model = row?.custom_ai_model?.trim() || platformAiModel(provider);
 
   let userKey: string | null = null;
   try {
@@ -125,10 +154,10 @@ export async function loadAiCredential(
     // configured. The user can also re-enter the key from Settings.
     userKey = null;
   }
-  if (userKey) return { provider, apiKey: userKey, source: "byok" };
+  if (userKey) return { provider, model, apiKey: userKey, source: "byok" };
 
   const platformKey = platformAiKey(provider);
-  if (platformKey) return { provider, apiKey: platformKey, source: "platform" };
+  if (platformKey) return { provider, model, apiKey: platformKey, source: "platform" };
 
-  return { provider, apiKey: null, source: "none" };
+  return { provider, model, apiKey: null, source: "none" };
 }
