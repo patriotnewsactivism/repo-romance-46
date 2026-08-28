@@ -1,7 +1,8 @@
-// Centralized AI provider routing — handles Google Gemini, OpenAI, Anthropic, and legacy/custom providers.
+// Centralized AI provider routing — handles Google Gemini, OpenAI, Anthropic, OpenRouter, and legacy/custom providers.
 
 export interface AIProviderConfig {
-  provider: string; // "google" | "openai" | "anthropic" | "custom" | legacy "github_models"
+  provider: string;
+  model?: string | null;
   apiKey: string | null;
 }
 
@@ -27,12 +28,11 @@ export interface AIResponse {
   thinkingContent?: string;
 }
 
-// Gemini 3.7 Flash is the platform default: production-stable, 1M context,
-// structured outputs, tunable thinking, and strong coding/agent performance.
 const DEFAULT_MODELS: Record<string, string> = {
   google: "gemini-3.7-flash",
   openai: "gpt-4o",
   anthropic: "claude-sonnet-4-20250514",
+  openrouter: "openrouter/auto",
   custom: "gpt-4o",
   // Kept only so old saved preferences fail gracefully until migrated.
   github_models: "gpt-4o-mini",
@@ -125,13 +125,14 @@ const PROVIDER_ENDPOINTS: Record<string, string> = {
   openai: "https://api.openai.com/v1/chat/completions",
   anthropic: "https://api.anthropic.com/v1/messages",
   google: "https://generativelanguage.googleapis.com/v1beta/models",
+  openrouter: "https://openrouter.ai/api/v1/chat/completions",
   custom: "https://api.openai.com/v1/chat/completions",
 };
 
 export async function callAI(request: AIRequest, config: AIProviderConfig): Promise<AIResponse> {
   // Never silently fall back to OpenAI. Gemini is the explicit platform default.
   const provider = config.provider || "google";
-  const model = request.model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.google;
+  const model = request.model || config.model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.google;
   const requestTimeoutMs = resolveAIRequestTimeoutMs(request);
 
   if (provider === "anthropic" && config.apiKey) {
@@ -147,9 +148,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       messages: userMessages.map((m) => ({ role: m.role, content: m.content })),
     };
 
-    if (useThinking) {
-      body.thinking = { type: "enabled", budget_tokens: thinkingBudget };
-    }
+    if (useThinking) body.thinking = { type: "enabled", budget_tokens: thinkingBudget };
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -170,9 +169,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       throw new Error(`Anthropic API error ${res.status}: ${text.slice(0, 300)}`);
     }
 
-    const json = (await res.json()) as {
-      content: Array<{ type: string; text?: string; thinking?: string }>;
-    };
+    const json = (await res.json()) as { content: Array<{ type: string; text?: string; thinking?: string }> };
     const textBlock = json.content?.find((b) => b.type === "text");
     const thinkingBlock = json.content?.find((b) => b.type === "thinking");
     return {
@@ -191,9 +188,6 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       }));
 
     const generationConfig: Record<string, unknown> = {
-      // Structured-output calls can become very slow when Gemini spends a large
-      // thinking budget on JSON that is already constrained by a schema. Keep
-      // those calls on low thinking unless the caller explicitly asks for more.
       thinkingConfig: {
         thinkingLevel: request.thinkingLevel || (request.responseFormat ? "low" : "medium"),
       },
@@ -203,10 +197,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       generationConfig.responseJsonSchema = request.responseFormat.json_schema.schema;
     }
 
-    const body: Record<string, unknown> = {
-      contents,
-      generationConfig,
-    };
+    const body: Record<string, unknown> = { contents, generationConfig };
     if (systemMsg) body.systemInstruction = { parts: [{ text: systemMsg }] };
 
     const url = `${PROVIDER_ENDPOINTS.google}/${model}:generateContent`;
@@ -214,10 +205,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       url,
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": config.apiKey,
-        },
+        headers: { "Content-Type": "application/json", "x-goog-api-key": config.apiKey },
         body: JSON.stringify(body),
       },
       "google",
@@ -229,55 +217,50 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       throw new Error(`Google Gemini API error ${res.status}: ${text.slice(0, 300)}`);
     }
 
-    const json = (await res.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-    const content = json.candidates?.[0]?.content?.parts
-      ?.map((part) => part.text || "")
-      .join("") || "";
+    const json = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    const content = json.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "";
     return { content };
   }
 
   if (
-    (provider === "github_models" || provider === "openai" || provider === "custom") &&
+    (provider === "github_models" || provider === "openai" || provider === "openrouter" || provider === "custom") &&
     config.apiKey
   ) {
-    const body: Record<string, unknown> = {
-      model,
-      messages: request.messages,
-    };
+    const body: Record<string, unknown> = { model, messages: request.messages };
     if (request.responseFormat) body.response_format = request.responseFormat;
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${config.apiKey}`,
+    };
+    if (provider === "openrouter") {
+      headers["X-Title"] = "RepoFinisher";
+    }
 
     const res = await fetchWithRetry(
       PROVIDER_ENDPOINTS[provider],
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${config.apiKey}`,
-        },
-        body: JSON.stringify(body),
-      },
+      { method: "POST", headers, body: JSON.stringify(body) },
       provider,
       requestTimeoutMs,
     );
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`AI error ${res.status}: ${text.slice(0, 300)}`);
+      throw new Error(`${provider} API error ${res.status}: ${text.slice(0, 300)}`);
     }
 
-    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    return { content: json.choices?.[0]?.message?.content || "" };
+    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }> };
+    const raw = json.choices?.[0]?.message?.content;
+    if (typeof raw === "string") return { content: raw };
+    if (Array.isArray(raw)) return { content: raw.map((part) => part.text || "").join("") };
+    return { content: "" };
   }
 
   if (provider === "github_models") {
-    throw new Error(
-      "GitHub Models is no longer a supported platform default. Switch the provider to Google Gemini.",
-    );
+    throw new Error("GitHub Models is no longer a supported platform default. Switch the provider to Google Gemini.");
   }
 
   throw new Error(
-    `No usable credential is configured for "${provider}". For Google, configure GEMINI_API_KEY/GOOGLE_API_KEY on the API server or save a Google BYOK key in Settings.`,
+    `No usable credential is configured for "${provider}". Save a BYOK key in Settings or configure the matching server-side provider key.`,
   );
 }

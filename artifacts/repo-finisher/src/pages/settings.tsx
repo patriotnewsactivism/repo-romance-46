@@ -27,28 +27,51 @@ import {
   CheckCircle2,
   AlertTriangle,
   Loader2,
+  Save,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 type CredentialSource = 'byok' | 'platform' | 'none';
+type AiProvider = 'google' | 'openai' | 'anthropic' | 'openrouter';
 
 interface AiProviderStatus {
   active_provider: string;
+  active_model: string | null;
   configured: boolean;
   credential_source: CredentialSource;
+  stored_key_set: boolean;
+  requested_provider: string;
+  requested_model: string | null;
   platform_default: string;
   providers: {
     google: { platformConfigured: boolean };
     openai: { platformConfigured: boolean };
     anthropic: { platformConfigured: boolean };
+    openrouter: { platformConfigured: boolean };
   };
+}
+
+interface AiSaveResult extends AiProviderStatus {
+  saved: boolean;
 }
 
 interface AiTestResult {
   ok: boolean;
   provider: string;
+  model: string | null;
   credential_source: CredentialSource;
   latency_ms: number;
+}
+
+function normalizeProvider(provider: string | null | undefined): AiProvider {
+  switch ((provider || '').toLowerCase()) {
+    case 'openai': return 'openai';
+    case 'anthropic': return 'anthropic';
+    case 'openrouter': return 'openrouter';
+    case 'google':
+    default:
+      return 'google';
+  }
 }
 
 function providerLabel(provider: string) {
@@ -56,6 +79,7 @@ function providerLabel(provider: string) {
     case 'google': return 'Google Gemini';
     case 'openai': return 'OpenAI';
     case 'anthropic': return 'Anthropic';
+    case 'openrouter': return 'OpenRouter';
     default: return provider || 'AI provider';
   }
 }
@@ -68,6 +92,15 @@ function credentialLabel(source: CredentialSource) {
   }
 }
 
+function modelPlaceholder(provider: AiProvider) {
+  switch (provider) {
+    case 'openrouter': return 'openrouter/auto or provider/model-slug';
+    case 'google': return 'gemini-3.7-flash (leave blank for default)';
+    case 'openai': return 'Leave blank for platform default';
+    case 'anthropic': return 'Leave blank for platform default';
+  }
+}
+
 export default function Settings() {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
@@ -76,11 +109,13 @@ export default function Settings() {
   const updatePreferences = useUpdatePreferences();
   const disconnectGithub = useDisconnectGithub();
 
-  const [aiProvider, setAiProvider] = useState('google');
+  const [aiProvider, setAiProvider] = useState<AiProvider>('google');
+  const [aiModel, setAiModel] = useState('');
   const [aiKey, setAiKey] = useState('');
   const [aiStatus, setAiStatus] = useState<AiProviderStatus | null>(null);
   const [aiStatusLoading, setAiStatusLoading] = useState(false);
   const [aiStatusError, setAiStatusError] = useState<string | null>(null);
+  const [savingAi, setSavingAi] = useState(false);
   const [testingAi, setTestingAi] = useState(false);
   const [analysisTier, setAnalysisTier] = useState<'fast' | 'balanced' | 'deep'>('balanced');
   const [filterLanguages, setFilterLanguages] = useState('');
@@ -96,8 +131,7 @@ export default function Settings() {
 
   useEffect(() => {
     if (preferences) {
-      const savedProvider = preferences.custom_ai_provider || 'google';
-      setAiProvider(savedProvider === 'github_models' ? 'google' : savedProvider);
+      setAiProvider(normalizeProvider(preferences.custom_ai_provider));
       setAiKey('');
       setAnalysisTier(preferences.analysis_tier || 'balanced');
       setFilterLanguages(preferences.filter_languages?.join(', ') || '');
@@ -113,6 +147,8 @@ export default function Settings() {
     try {
       const status = await customFetch<AiProviderStatus>('/api/preferences/ai-status', { responseType: 'json' });
       setAiStatus(status);
+      setAiProvider(normalizeProvider(status.requested_provider || status.active_provider));
+      setAiModel(status.requested_model || '');
     } catch (error) {
       setAiStatusError(error instanceof Error ? error.message : 'Unable to read AI provider status');
     } finally {
@@ -126,17 +162,6 @@ export default function Settings() {
   }, [preferences]);
 
   const handleSave = () => {
-    const savedProvider = preferences?.custom_ai_provider === 'github_models'
-      ? 'google'
-      : (preferences?.custom_ai_provider || 'google');
-
-    if (preferences?.custom_ai_key_set && aiProvider !== savedProvider && !aiKey) {
-      toast.error('A BYOK key is already stored for the current provider', {
-        description: 'Enter a replacement key for the new provider, or remove the stored key before switching providers.',
-      });
-      return;
-    }
-
     const languagesArray = filterLanguages
       .split(',')
       .map(l => l.trim())
@@ -145,8 +170,6 @@ export default function Settings() {
     updatePreferences.mutate(
       {
         data: {
-          custom_ai_provider: aiProvider,
-          ...(aiKey ? { custom_ai_key: aiKey } : {}),
           analysis_tier: analysisTier,
           filter_languages: languagesArray.length > 0 ? languagesArray : undefined,
           filter_exclude_archived: excludeArchived,
@@ -156,16 +179,70 @@ export default function Settings() {
       },
       {
         onSuccess: () => {
-          toast.success('Settings saved');
-          setAiKey('');
+          toast.success('Repository settings saved');
           queryClient.invalidateQueries({ queryKey: getGetPreferencesQueryKey() });
-          void loadAiStatus();
         },
         onError: (error) => {
-          toast.error('Failed to save settings', { description: error.message });
+          toast.error('Failed to save repository settings', { description: error.message });
         }
       }
     );
+  };
+
+  const handleSaveAiProvider = async () => {
+    setSavingAi(true);
+    try {
+      const saved = await customFetch<AiSaveResult>('/api/preferences/ai', {
+        method: 'PATCH',
+        responseType: 'json',
+        body: JSON.stringify({
+          provider: aiProvider,
+          model: aiModel.trim() || null,
+          ...(aiKey.trim() ? { api_key: aiKey.trim() } : {}),
+        }),
+      });
+      setAiStatus(saved);
+      setAiProvider(normalizeProvider(saved.requested_provider || saved.active_provider));
+      setAiModel(saved.requested_model || '');
+      setAiKey('');
+      await queryClient.invalidateQueries({ queryKey: getGetPreferencesQueryKey() });
+      toast.success(`${providerLabel(saved.active_provider)} settings saved`, {
+        description: saved.configured
+          ? `${credentialLabel(saved.credential_source)}${saved.active_model ? ` · ${saved.active_model}` : ''}`
+          : 'Settings were saved, but this provider still needs a usable credential.',
+      });
+    } catch (error) {
+      toast.error('Failed to save AI provider', {
+        description: error instanceof Error ? error.message : 'The AI provider settings could not be saved.',
+      });
+    } finally {
+      setSavingAi(false);
+    }
+  };
+
+  const handleClearAiKey = async () => {
+    setSavingAi(true);
+    try {
+      const saved = await customFetch<AiSaveResult>('/api/preferences/ai', {
+        method: 'PATCH',
+        responseType: 'json',
+        body: JSON.stringify({
+          provider: aiProvider,
+          model: aiModel.trim() || null,
+          clear_key: true,
+        }),
+      });
+      setAiStatus(saved);
+      setAiKey('');
+      await queryClient.invalidateQueries({ queryKey: getGetPreferencesQueryKey() });
+      toast.success('Stored API key removed');
+    } catch (error) {
+      toast.error('Failed to remove stored API key', {
+        description: error instanceof Error ? error.message : 'The stored key could not be removed.',
+      });
+    } finally {
+      setSavingAi(false);
+    }
   };
 
   const handleTestProvider = async () => {
@@ -177,7 +254,7 @@ export default function Settings() {
         body: JSON.stringify({}),
       });
       toast.success(`${providerLabel(result.provider)} is ready`, {
-        description: `${credentialLabel(result.credential_source)} · ${result.latency_ms} ms`,
+        description: `${credentialLabel(result.credential_source)}${result.model ? ` · ${result.model}` : ''} · ${result.latency_ms} ms`,
       });
       await loadAiStatus();
     } catch (error) {
@@ -228,6 +305,12 @@ export default function Settings() {
     }
   ];
 
+  const aiHasUnsavedChanges = Boolean(
+    aiKey.trim() ||
+    (aiStatus && normalizeProvider(aiStatus.requested_provider) !== aiProvider) ||
+    (aiStatus && (aiStatus.requested_model || '') !== aiModel.trim())
+  );
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-background dark">
@@ -263,11 +346,14 @@ export default function Settings() {
             {githubStatus?.connected && (
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3 min-w-0">
-                  <img
-                    src={githubStatus.avatarUrl || ''}
-                    alt={githubStatus.login || ''}
-                    className="w-10 h-10 rounded-full shrink-0"
-                  />
+                  {githubStatus.avatarUrl ? (
+                    <img
+                      src={githubStatus.avatarUrl}
+                      alt={githubStatus.login || ''}
+                      className="w-10 h-10 rounded-full shrink-0"
+                      onError={(event) => { event.currentTarget.style.display = 'none'; }}
+                    />
+                  ) : null}
                   <div className="min-w-0">
                     <div className="font-semibold truncate">{githubStatus.displayName || githubStatus.login}</div>
                     <div className="text-sm text-muted-foreground truncate">@{githubStatus.login}</div>
@@ -322,24 +408,46 @@ export default function Settings() {
 
         <Card>
           <CardHeader>
-            <CardTitle>AI Provider</CardTitle>
+            <CardTitle>AI Provider & Model</CardTitle>
             <CardDescription>
-              Google Gemini is the default. Use a platform credential or store your own encrypted BYOK key.
+              Save the provider, exact model, and optional BYOK credential independently from the rest of Settings.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="ai-provider">Provider</Label>
-              <Select value={aiProvider} onValueChange={setAiProvider}>
-                <SelectTrigger id="ai-provider" data-testid="select-ai-provider">
-                  <SelectValue placeholder="Google Gemini (default)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="google">Google Gemini (default)</SelectItem>
-                  <SelectItem value="openai">OpenAI</SelectItem>
-                  <SelectItem value="anthropic">Anthropic</SelectItem>
-                </SelectContent>
-              </Select>
+          <CardContent className="space-y-5">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="ai-provider">Provider</Label>
+                <Select value={aiProvider} onValueChange={(value) => setAiProvider(value as AiProvider)}>
+                  <SelectTrigger id="ai-provider" data-testid="select-ai-provider">
+                    <SelectValue placeholder="Google Gemini" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="google">Google Gemini</SelectItem>
+                    <SelectItem value="openrouter">OpenRouter</SelectItem>
+                    <SelectItem value="openai">OpenAI</SelectItem>
+                    <SelectItem value="anthropic">Anthropic</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="ai-model">Model</Label>
+                <Input
+                  id="ai-model"
+                  value={aiModel}
+                  onChange={(e) => setAiModel(e.target.value)}
+                  placeholder={modelPlaceholder(aiProvider)}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  data-testid="input-ai-model"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {aiProvider === 'openrouter'
+                    ? 'Use the exact OpenRouter model slug. Leave blank to use openrouter/auto.'
+                    : 'Leave blank to use RepoFinisher’s provider default, or enter an exact supported model identifier.'}
+                </p>
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -349,31 +457,35 @@ export default function Settings() {
                 type="password"
                 value={aiKey}
                 onChange={(e) => setAiKey(e.target.value)}
-                placeholder={preferences?.custom_ai_key_set ? 'A key is stored — type to replace it' : 'Optional provider API key'}
+                placeholder={aiStatus?.stored_key_set || preferences?.custom_ai_key_set ? 'A key is stored — type to replace it' : 'Optional provider API key'}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 data-testid="input-ai-key"
               />
               <p className="text-xs text-muted-foreground">
-                {preferences?.custom_ai_key_set
-                  ? 'Your key is encrypted at rest and never sent back to the browser. Leave this blank to keep it.'
-                  : 'If the platform has a credential for this provider, you do not need to supply one. BYOK keys are encrypted before storage.'}
+                {aiStatus?.stored_key_set || preferences?.custom_ai_key_set
+                  ? 'The key is write-only and encrypted at rest. Leaving this blank keeps it unless you switch providers.'
+                  : 'If the Render API has a platform credential for this provider, BYOK is optional. A key entered here is encrypted before storage.'}
               </p>
-              {preferences?.custom_ai_key_set && (
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                onClick={handleSaveAiProvider}
+                disabled={savingAi}
+                data-testid="button-save-ai-provider"
+              >
+                {savingAi ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                {savingAi ? 'Saving AI settings…' : 'Save AI Provider'}
+              </Button>
+              {(aiStatus?.stored_key_set || preferences?.custom_ai_key_set) && (
                 <Button
                   type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    updatePreferences.mutate(
-                      { data: { custom_ai_key: null } },
-                      {
-                        onSuccess: () => {
-                          toast.success('Stored API key removed');
-                          queryClient.invalidateQueries({ queryKey: getGetPreferencesQueryKey() });
-                          void loadAiStatus();
-                        },
-                      },
-                    )
-                  }
+                  variant="outline"
+                  onClick={handleClearAiKey}
+                  disabled={savingAi}
                   data-testid="button-clear-ai-key"
                 >
                   Remove stored key
@@ -398,13 +510,15 @@ export default function Settings() {
                         {aiStatus.configured ? 'Configured' : 'Missing credential'}
                       </Badge>
                     )}
+                    {aiHasUnsavedChanges && <Badge variant="outline">Unsaved changes</Badge>}
                   </div>
                   {aiStatus ? (
-                    <p className="text-sm text-muted-foreground mt-1">
+                    <p className="text-sm text-muted-foreground mt-1 break-words">
                       {providerLabel(aiStatus.active_provider)} · {credentialLabel(aiStatus.credential_source)}
+                      {aiStatus.active_model ? ` · ${aiStatus.active_model}` : ''}
                     </p>
                   ) : aiStatusError ? (
-                    <p className="text-sm text-destructive mt-1">{aiStatusError}</p>
+                    <p className="text-sm text-destructive mt-1 break-words">{aiStatusError}</p>
                   ) : (
                     <p className="text-sm text-muted-foreground mt-1">Checking the active provider…</p>
                   )}
@@ -416,11 +530,11 @@ export default function Settings() {
                   variant="outline"
                   size="sm"
                   onClick={handleTestProvider}
-                  disabled={testingAi || !aiStatus?.configured}
+                  disabled={testingAi || !aiStatus?.configured || aiHasUnsavedChanges}
                   data-testid="button-test-ai-provider"
                 >
                   {testingAi && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                  {testingAi ? 'Testing…' : 'Test provider'}
+                  {testingAi ? 'Testing…' : aiHasUnsavedChanges ? 'Save before testing' : 'Test provider'}
                 </Button>
                 <Button
                   type="button"
@@ -504,7 +618,7 @@ export default function Settings() {
             size="lg"
             data-testid="button-save-settings"
           >
-            {updatePreferences.isPending ? 'Saving...' : 'Save Settings'}
+            {updatePreferences.isPending ? 'Saving...' : 'Save Repository Settings'}
           </Button>
         </div>
       </div>
