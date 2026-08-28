@@ -9,7 +9,7 @@ import { selectSpecialists, specialistObjective, type SpecialistRole } from "./s
 const MAX_EVIDENCE_FILES = 24;
 const MAX_FILE_CHARS = 4_000;
 const MAX_TOTAL_EVIDENCE_CHARS = 84_000;
-const REASONING_VERSION = "reasoning-orchestrator-v3";
+const REASONING_VERSION = "reasoning-orchestrator-v4-hypothesis-critic-specialists";
 
 interface RepoTreeEntry {
   path: string;
@@ -17,7 +17,7 @@ interface RepoTreeEntry {
   size?: number;
 }
 
-interface RepoEvidence {
+export interface RepoEvidence {
   repository: {
     repo: string;
     description: string | null;
@@ -51,6 +51,7 @@ interface Finding {
   confidence: number;
   evidence: string[];
   rootCause: string;
+  alternativeCauses: string[];
   recommendedAction: string;
   validation: string;
 }
@@ -76,6 +77,16 @@ interface SpecialistResult {
   priorities: string[];
   risks: string[];
   validation: string[];
+  confidence: number;
+}
+
+interface PlannerResult {
+  summary: string;
+  nextSteps: string[];
+  risks: string[];
+  validation: string[];
+  stopConditions: string[];
+  confidence: number;
 }
 
 export interface ReasonedPlanningResult {
@@ -121,6 +132,31 @@ function encodePath(path: string) {
   return path.split("/").map(encodeURIComponent).join("/");
 }
 
+function arrayOfStrings(value: unknown, max = 25): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(String).map((item) => item.trim()).filter(Boolean).slice(0, max);
+}
+
+function finite(value: unknown, fallback: number, min = 0, max = 100) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
+}
+
+function unique(values: string[], max = 25) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of values) {
+    const value = String(raw || "").trim();
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(value);
+    if (result.length >= max) break;
+  }
+  return result;
+}
+
 function filePriority(path: string, requested: string[]) {
   const lower = path.toLowerCase();
   let score = 0;
@@ -141,7 +177,7 @@ function filePriority(path: string, requested: string[]) {
 async function fetchFile(token: string, repo: string, path: string, ref: string) {
   const response = await ghFetch(token, `/repos/${repo}/contents/${encodePath(path)}?ref=${encodeURIComponent(ref)}`);
   if (!response.ok) return null;
-  const json = (await response.json()) as { content?: string; encoding?: string };
+  const json = await response.json() as { content?: string; encoding?: string };
   if (json.encoding !== "base64" || !json.content) return null;
   return Buffer.from(json.content, "base64").toString("utf-8");
 }
@@ -149,40 +185,50 @@ async function fetchFile(token: string, repo: string, path: string, ref: string)
 async function collectRepoEvidence(token: string, repoName: string, requestedNextSteps: string[]): Promise<RepoEvidence> {
   const repoResponse = await ghFetch(token, `/repos/${repoName}`);
   if (!repoResponse.ok) throw Object.assign(new Error(`Repo not found or inaccessible: ${repoName}`), { status: 404 });
-  const repo = (await repoResponse.json()) as Record<string, unknown>;
+  const repo = await repoResponse.json() as Record<string, unknown>;
   const defaultBranch = String(repo.default_branch || "main");
   const branchResponse = await ghFetch(token, `/repos/${repoName}/branches/${encodeURIComponent(defaultBranch)}`);
   if (!branchResponse.ok) throw new Error(`Unable to inspect ${repoName} default branch.`);
-  const branch = (await branchResponse.json()) as { commit?: { sha?: string } };
+  const branch = await branchResponse.json() as { commit?: { sha?: string } };
   const headSha = String(branch.commit?.sha || "");
+  if (!/^[0-9a-f]{40}$/i.test(headSha)) throw new Error(`Unable to resolve a valid head SHA for ${repoName}.`);
   const treeResponse = await ghFetch(token, `/repos/${repoName}/git/trees/${headSha}?recursive=1`);
   if (!treeResponse.ok) throw new Error(`Unable to inspect ${repoName} tree.`);
-  const treeJson = (await treeResponse.json()) as { tree?: RepoTreeEntry[]; truncated?: boolean };
+  const treeJson = await treeResponse.json() as { tree?: RepoTreeEntry[]; truncated?: boolean };
+  if (treeJson.truncated) throw new Error(`Repository tree for ${repoName} is truncated; refusing to reason from incomplete structural evidence.`);
   const tree = (treeJson.tree ?? []).filter((entry) => entry.type === "blob");
 
   const selected = tree
     .filter((entry) => (entry.size ?? 0) <= 250_000)
-    .map((entry) => ({ entry, score: filePriority(entry.path, requestedNextSteps) }))
+    .map((entry) => ({ path: entry.path, score: filePriority(entry.path, requestedNextSteps) }))
     .filter(({ score }) => score > 0)
-    .sort((a, b) => b.score - a.score || a.entry.path.localeCompare(b.entry.path))
-    .slice(0, MAX_EVIDENCE_FILES)
-    .map(({ entry }) => entry.path);
+    .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path))
+    .slice(0, MAX_EVIDENCE_FILES);
 
-  const files: Array<{ path: string; content: string }> = [];
-  let total = 0;
+  // Fetch concurrently for latency, then enforce the global evidence budget in a
+  // deterministic sequential packing pass. No worker mutates a shared budget.
+  const fetched = new Map<string, string>();
   let cursor = 0;
   const workers = Math.min(6, selected.length);
   await Promise.all(Array.from({ length: workers }, async () => {
     while (cursor < selected.length) {
-      const path = selected[cursor++];
-      if (total >= MAX_TOTAL_EVIDENCE_CHARS) continue;
-      const content = await fetchFile(token, repoName, path, headSha);
-      if (content === null) continue;
-      const bounded = content.slice(0, Math.min(MAX_FILE_CHARS, MAX_TOTAL_EVIDENCE_CHARS - total));
-      total += bounded.length;
-      files.push({ path, content: bounded });
+      const item = selected[cursor++];
+      const content = await fetchFile(token, repoName, item.path, headSha);
+      if (content !== null) fetched.set(item.path, content.slice(0, MAX_FILE_CHARS));
     }
   }));
+
+  const files: Array<{ path: string; content: string }> = [];
+  let remaining = MAX_TOTAL_EVIDENCE_CHARS;
+  for (const item of selected) {
+    if (remaining <= 0) break;
+    const content = fetched.get(item.path);
+    if (content === undefined) continue;
+    const bounded = content.slice(0, Math.min(MAX_FILE_CHARS, remaining));
+    if (!bounded) continue;
+    files.push({ path: item.path, content: bounded });
+    remaining -= bounded.length;
+  }
 
   const paths = tree.map((entry) => entry.path.toLowerCase());
   return {
@@ -209,7 +255,7 @@ async function collectRepoEvidence(token: string, repoName: string, requestedNex
       hasFrontendSignals: paths.some((path) => /\.(tsx|jsx|vue|svelte)$/.test(path) || /^(app|pages|src\/components)\//.test(path)),
       hasBackendSignals: paths.some((path) => /^(api|server|functions|src\/server)\//.test(path)),
     },
-    files: files.sort((a, b) => a.path.localeCompare(b.path)),
+    files,
   };
 }
 
@@ -226,7 +272,7 @@ async function loadAnalysisContext(supabase: SupabaseClient, userId: string, ana
   const intelligence = record.investment_intelligence && typeof record.investment_intelligence === "object"
     ? record.investment_intelligence as Record<string, unknown>
     : null;
-  const ranking = Array.isArray(intelligence?.ranking) ? intelligence!.ranking as Array<Record<string, unknown>> : [];
+  const ranking = Array.isArray(intelligence?.ranking) ? intelligence.ranking as Array<Record<string, unknown>> : [];
   return {
     repoIntelligence: ranking.find((entry) => String(entry.repo || "") === repo) ?? null,
     strategySummary: record.strategy_summary ?? null,
@@ -259,29 +305,88 @@ async function insertTrace(
 
 async function updateTrace(supabase: SupabaseClient, userId: string, traceId: string | null, values: Record<string, unknown>) {
   if (!traceId) return;
-  await supabase
-    .from("reasoning_traces")
-    .update({ ...values, updated_at: new Date().toISOString() })
-    .eq("id", traceId)
-    .eq("user_id", userId);
+  await supabase.from("reasoning_traces").update({ ...values, updated_at: new Date().toISOString() }).eq("id", traceId).eq("user_id", userId);
 }
 
-async function runEvidenceAnalyst(
-  ai: { provider: string; apiKey: string | null },
-  context: Record<string, unknown>,
-): Promise<EvidenceAnalysis> {
+function normalizeFinding(value: unknown, index: number): Finding | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const severity = ["critical", "high", "medium", "low"].includes(String(row.severity)) ? String(row.severity) as Finding["severity"] : "medium";
+  const rootCause = String(row.rootCause || "").trim();
+  const recommendedAction = String(row.recommendedAction || "").trim();
+  if (!rootCause || !recommendedAction) return null;
+  return {
+    id: String(row.id || `finding-${index + 1}`),
+    category: String(row.category || "general"),
+    severity,
+    confidence: finite(row.confidence, 50),
+    evidence: arrayOfStrings(row.evidence, 8),
+    rootCause,
+    alternativeCauses: arrayOfStrings(row.alternativeCauses, 6),
+    recommendedAction,
+    validation: String(row.validation || "Validate with the repository's existing tests/build/runtime evidence."),
+  };
+}
+
+function normalizeEvidenceAnalysis(value: unknown): EvidenceAnalysis {
+  const row = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const rawFindings = Array.isArray(row.findings) ? row.findings : [];
+  return {
+    summary: String(row.summary || "Repository evidence was inspected, but the analyst returned no reliable summary."),
+    findings: rawFindings.map(normalizeFinding).filter((item): item is Finding => item !== null).slice(0, 16),
+    unknowns: arrayOfStrings(row.unknowns, 10),
+  };
+}
+
+function normalizeCritic(value: unknown): CriticResult {
+  const row = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return {
+    acceptedFindingIds: arrayOfStrings(row.acceptedFindingIds, 16),
+    rejectedFindingIds: arrayOfStrings(row.rejectedFindingIds, 16),
+    critique: arrayOfStrings(row.critique, 12),
+    regressionRisks: arrayOfStrings(row.regressionRisks, 12),
+    missingEvidence: arrayOfStrings(row.missingEvidence, 12),
+    confidence: finite(row.confidence, 50),
+  };
+}
+
+function normalizeSpecialist(role: SpecialistRole, value: unknown): SpecialistResult {
+  const row = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return {
+    role,
+    summary: String(row.summary || `No reliable ${role} specialist summary was returned.`),
+    priorities: arrayOfStrings(row.priorities, 8),
+    risks: arrayOfStrings(row.risks, 8),
+    validation: arrayOfStrings(row.validation, 8),
+    confidence: finite(row.confidence, 50),
+  };
+}
+
+function normalizePlanner(value: unknown): PlannerResult {
+  const row = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return {
+    summary: String(row.summary || "Complete the verified blockers in prerequisite order and prove each result."),
+    nextSteps: arrayOfStrings(row.nextSteps, 25),
+    risks: arrayOfStrings(row.risks, 12),
+    validation: arrayOfStrings(row.validation, 12),
+    stopConditions: arrayOfStrings(row.stopConditions, 8),
+    confidence: finite(row.confidence, 50),
+  };
+}
+
+async function runEvidenceAnalyst(ai: { provider: string; apiKey: string | null }, context: Record<string, unknown>): Promise<EvidenceAnalysis> {
   const result = await callAI({
     messages: [
       {
         role: "system",
-        content: `You are RepoFinisher's evidence analyst. Diagnose why this repository is not yet finished using only supplied evidence.\n\n${IMMUTABLE_AGENT_SAFETY_POLICY}\n\nDo not assume a feature is broken merely because it exists. Distinguish verified blockers, likely blockers, and unknowns. Root-cause the highest-value gaps before proposing changes. Return strict JSON.`,
+        content: `You are RepoFinisher's evidence analyst and root-cause investigator. Diagnose why this repository is not yet genuinely finished using only supplied evidence.\n\n${IMMUTABLE_AGENT_SAFETY_POLICY}\n\nFor every material gap, distinguish verified evidence from inference, state the most likely root cause, list plausible alternative causes that must be disproved, and define an observable validation result. Prefer blockers to cosmetic scope. Return strict JSON only.`,
       },
       { role: "user", content: JSON.stringify(context) },
     ],
     responseFormat: {
       type: "json_schema",
       json_schema: {
-        name: "repo_evidence_analysis",
+        name: "repo_evidence_analysis_v4",
         strict: true,
         schema: {
           type: "object",
@@ -301,10 +406,11 @@ async function runEvidenceAnalyst(
                   confidence: { type: "number", minimum: 0, maximum: 100 },
                   evidence: { type: "array", maxItems: 8, items: { type: "string" } },
                   rootCause: { type: "string" },
+                  alternativeCauses: { type: "array", maxItems: 6, items: { type: "string" } },
                   recommendedAction: { type: "string" },
                   validation: { type: "string" },
                 },
-                required: ["id", "category", "severity", "confidence", "evidence", "rootCause", "recommendedAction", "validation"],
+                required: ["id", "category", "severity", "confidence", "evidence", "rootCause", "alternativeCauses", "recommendedAction", "validation"],
               },
             },
             unknowns: { type: "array", maxItems: 10, items: { type: "string" } },
@@ -316,25 +422,22 @@ async function runEvidenceAnalyst(
     thinkingLevel: "high",
     timeoutMs: 60_000,
   }, ai);
-  return JSON.parse(result.content || "{}") as EvidenceAnalysis;
+  try { return normalizeEvidenceAnalysis(JSON.parse(result.content || "{}")); } catch { return normalizeEvidenceAnalysis({}); }
 }
 
-async function runCritic(
-  ai: { provider: string; apiKey: string | null },
-  context: Record<string, unknown>,
-): Promise<CriticResult> {
+async function runCritic(ai: { provider: string; apiKey: string | null }, context: Record<string, unknown>): Promise<CriticResult> {
   const result = await callAI({
     messages: [
       {
         role: "system",
-        content: `You are RepoFinisher's skeptical verification critic. Attack the proposed diagnosis, reject unsupported findings, identify regression risk and missing evidence, and protect existing working behavior.\n\n${IMMUTABLE_AGENT_SAFETY_POLICY}\n\nReturn strict JSON only.`,
+        content: `You are RepoFinisher's skeptical verification critic. Try to falsify the diagnosis. Reject unsupported findings, identify missing evidence and regression risk, detect plans that merely move symptoms, and protect existing working behavior.\n\n${IMMUTABLE_AGENT_SAFETY_POLICY}\n\nConfidence means confidence in your critique, not a cap on the planner. Return strict JSON only.`,
       },
       { role: "user", content: JSON.stringify(context) },
     ],
     responseFormat: {
       type: "json_schema",
       json_schema: {
-        name: "repo_reasoning_critique",
+        name: "repo_reasoning_critique_v4",
         strict: true,
         schema: {
           type: "object",
@@ -354,26 +457,22 @@ async function runCritic(
     thinkingLevel: "high",
     timeoutMs: 60_000,
   }, ai);
-  return JSON.parse(result.content || "{}") as CriticResult;
+  try { return normalizeCritic(JSON.parse(result.content || "{}")); } catch { return normalizeCritic({}); }
 }
 
-async function runSpecialist(
-  ai: { provider: string; apiKey: string | null },
-  role: SpecialistRole,
-  context: Record<string, unknown>,
-): Promise<SpecialistResult> {
+async function runSpecialist(ai: { provider: string; apiKey: string | null }, role: SpecialistRole, context: Record<string, unknown>): Promise<SpecialistResult> {
   const result = await callAI({
     messages: [
       {
         role: "system",
-        content: `You are RepoFinisher's ${role} specialist. ${specialistObjective(role)}\n\n${IMMUTABLE_AGENT_SAFETY_POLICY}\n\nChallenge the shared diagnosis where your specialty evidence disagrees. Return strict JSON only.`,
+        content: `You are RepoFinisher's ${role} specialist. ${specialistObjective(role)}\n\n${IMMUTABLE_AGENT_SAFETY_POLICY}\n\nChallenge the shared diagnosis when specialty evidence disagrees. Prioritize only changes that materially improve verified completion/readiness. Return strict JSON only.`,
       },
       { role: "user", content: JSON.stringify(context) },
     ],
     responseFormat: {
       type: "json_schema",
       json_schema: {
-        name: `${role.replace(/-/g, "_")}_specialist`,
+        name: `${role.replace(/-/g, "_")}_specialist_v4`,
         strict: true,
         schema: {
           type: "object",
@@ -383,34 +482,31 @@ async function runSpecialist(
             priorities: { type: "array", maxItems: 8, items: { type: "string" } },
             risks: { type: "array", maxItems: 8, items: { type: "string" } },
             validation: { type: "array", maxItems: 8, items: { type: "string" } },
+            confidence: { type: "number", minimum: 0, maximum: 100 },
           },
-          required: ["summary", "priorities", "risks", "validation"],
+          required: ["summary", "priorities", "risks", "validation", "confidence"],
         },
       },
     },
     thinkingLevel: "medium",
     timeoutMs: 50_000,
   }, ai);
-  const parsed = JSON.parse(result.content || "{}") as Omit<SpecialistResult, "role">;
-  return { role, ...parsed };
+  try { return normalizeSpecialist(role, JSON.parse(result.content || "{}")); } catch { return normalizeSpecialist(role, {}); }
 }
 
-async function runPlanner(
-  ai: { provider: string; apiKey: string | null },
-  context: Record<string, unknown>,
-) {
+async function runPlanner(ai: { provider: string; apiKey: string | null }, context: Record<string, unknown>): Promise<PlannerResult> {
   const result = await callAI({
     messages: [
       {
         role: "system",
-        content: `You are RepoFinisher's principal planner. Synthesize evidence, the skeptical critique, measured learning, prompt-strategy guidance, and specialist reviews into the smallest ordered completion plan that has the highest probability of passing validation.\n\n${IMMUTABLE_AGENT_SAFETY_POLICY}\n\nRules:\n- Every next step must correspond to supplied evidence or an accepted finding.\n- Prefer root-cause fixes over symptoms.\n- Put prerequisites before dependents.\n- Include validation requirements in the plan, but never change acceptance criteria merely to pass.\n- Explicitly stop if evidence is too weak, budget/risk is exceeded, or repeated attempts show no measurable progress.\n- Return strict JSON only.`,
+        content: `You are RepoFinisher's principal completion planner. Synthesize repository evidence, competing root-cause hypotheses, skeptical critique, measured operational learning, prompt-strategy guidance, and specialist reviews into the smallest ordered plan most likely to make the intended product genuinely complete.\n\n${IMMUTABLE_AGENT_SAFETY_POLICY}\n\nRules:\n- Every next step must be grounded in supplied evidence, an accepted finding, or a clearly labeled prerequisite.\n- Prefer root-cause fixes over symptoms and high-value user-flow completion over cosmetic scope.\n- Put prerequisites before dependents.\n- Explicitly plan verification and failure handling, but never change acceptance criteria just to pass.\n- Use measured learning as evidence, not dogma; current repository evidence wins when they conflict.\n- Reject repeated failed strategies unless new evidence materially changes the hypothesis.\n- Stop if evidence is too weak, risk/budget is exceeded, or repeated attempts show no measurable progress.\n- Return strict JSON only.`,
       },
       { role: "user", content: JSON.stringify(context) },
     ],
     responseFormat: {
       type: "json_schema",
       json_schema: {
-        name: "repo_reasoned_completion_plan",
+        name: "repo_reasoned_completion_plan_v4",
         strict: true,
         schema: {
           type: "object",
@@ -430,29 +526,24 @@ async function runPlanner(
     thinkingLevel: "high",
     timeoutMs: 65_000,
   }, ai);
-  return JSON.parse(result.content || "{}") as {
-    summary: string;
-    nextSteps: string[];
-    risks: string[];
-    validation: string[];
-    stopConditions: string[];
-    confidence: number;
-  };
+  try { return normalizePlanner(JSON.parse(result.content || "{}")); } catch { return normalizePlanner({}); }
 }
 
-function unique(values: string[], max = 25) {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const value of values) {
-    const normalized = String(value || "").trim();
-    if (!normalized) continue;
-    const key = normalized.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(normalized);
-    if (out.length >= max) break;
-  }
-  return out;
+function evidenceConfidence(diagnosis: EvidenceAnalysis, critic: CriticResult) {
+  const accepted = new Set(critic.acceptedFindingIds);
+  const findings = diagnosis.findings.filter((finding) => accepted.size === 0 ? !critic.rejectedFindingIds.includes(finding.id) : accepted.has(finding.id));
+  if (!findings.length) return 40;
+  return findings.reduce((sum, finding) => sum + finding.confidence, 0) / findings.length;
+}
+
+function finalConfidence(planner: PlannerResult, diagnosis: EvidenceAnalysis, critic: CriticResult, specialists: SpecialistResult[]) {
+  const evidence = evidenceConfidence(diagnosis, critic);
+  const specialist = specialists.length
+    ? specialists.reduce((sum, item) => sum + item.confidence, 0) / specialists.length
+    : 55;
+  const raw = planner.confidence * 0.5 + evidence * 0.25 + specialist * 0.15 + critic.confidence * 0.1;
+  const uncertaintyPenalty = Math.min(18, diagnosis.unknowns.length * 1.5 + critic.missingEvidence.length * 1.5);
+  return Math.round(Math.max(10, Math.min(99, raw - uncertaintyPenalty)) * 10) / 10;
 }
 
 export async function reasonAboutRepositoryPlan(
@@ -489,18 +580,14 @@ export async function reasonAboutRepositoryPlan(
     const aiCredential = await loadAiCredential(supabase, userId, github.token);
     const ai = { provider: aiCredential.provider, apiKey: aiCredential.apiKey };
     const memory = memoryGuidance(memories, 14);
-    const legacyGuidance = learning.promptGuidance.slice(0, 12);
+    const legacyGuidance = arrayOfStrings(learning.promptGuidance, 12);
     const specialistSelections = selectSpecialists({
       repo: input.repo,
       description: evidence.repository.description,
       language: evidence.repository.language,
       topics: evidence.repository.topics,
       requestedNextSteps,
-      analysisText: [
-        JSON.stringify(analysisContext?.repoIntelligence ?? {}),
-        String(analysisContext?.strategySummary ?? ""),
-        String(analysisContext?.critique ?? ""),
-      ],
+      analysisText: [JSON.stringify(analysisContext?.repoIntelligence ?? {}), String(analysisContext?.strategySummary ?? ""), String(analysisContext?.critique ?? "")],
     }, 3);
 
     await updateTrace(supabase, userId, traceId, {
@@ -512,43 +599,38 @@ export async function reasonAboutRepositoryPlan(
         repository: evidence.repository,
         treeSignals: evidence.treeSignals,
         filesInspected: evidence.files.map((file) => file.path),
+        evidenceChars: evidence.files.reduce((sum, file) => sum + file.content.length, 0),
         requestedNextSteps,
         analysisContext,
-        memory,
+        operationalMemory: memory,
         legacyGuidance,
       },
     });
 
     if (!ai.apiKey) {
-      const fallback = unique([
+      const nextSteps = unique([
         ...requestedNextSteps,
         ...memory,
         ...legacyGuidance,
-        "Run existing tests, typechecks, build, security checks, and deployment-preview smoke verification; fix root causes rather than weakening acceptance criteria.",
+        "Run existing tests, typechecks, build, security checks, and deployment-preview smoke verification; repair root causes without weakening acceptance criteria.",
       ]);
-      const result: ReasonedPlanningResult = {
+      const fallback: ReasonedPlanningResult = {
         traceId,
         version: REASONING_VERSION,
         repo: input.repo,
         promptVersion: strategy.version,
         strategyArm: strategy.arm,
         specialists: specialistSelections.map((item) => item.role),
-        summary: "AI reasoning credential unavailable; using measured operational memory and deterministic repository evidence instead of silently dropping learning.",
-        nextSteps: fallback,
-        risks: ["Multi-agent reasoning could not run because no usable AI credential was available."],
-        validation: ["Require CI and deployment-preview verification before treating changes as successful."],
+        summary: "No usable AI reasoning credential was available, so this plan is limited to deterministic repository evidence and measured operational memory.",
+        nextSteps,
+        risks: ["Multi-agent hypothesis testing and critique could not run for this plan."],
+        validation: ["Require CI and deployment/runtime verification before treating changes as successful."],
         stopConditions: ["Stop if validation cannot be observed or the repository base moves during execution."],
         confidence: memory.length ? 55 : 35,
         evidence,
       };
-      await updateTrace(supabase, userId, traceId, {
-        stage: "complete",
-        status: "partial",
-        decision: result,
-        confidence: result.confidence,
-        completed_at: new Date().toISOString(),
-      });
-      return result;
+      await updateTrace(supabase, userId, traceId, { stage: "complete", status: "partial", decision: fallback, confidence: fallback.confidence, completed_at: new Date().toISOString() });
+      return fallback;
     }
 
     const sharedContext = {
@@ -579,25 +661,22 @@ export async function reasonAboutRepositoryPlan(
     });
 
     const critic = await runCritic(ai, { ...sharedContext, diagnosis });
-    await updateTrace(supabase, userId, traceId, {
-      stage: "specialist_review",
-      critiques: critic,
-      confidence: critic.confidence,
-    });
+    await updateTrace(supabase, userId, traceId, { stage: "specialist_review", critiques: critic, confidence: critic.confidence });
 
     const specialists = await Promise.all(
       specialistSelections.map((selection) => runSpecialist(ai, selection.role, { ...sharedContext, diagnosis, critic })),
     );
-    await updateTrace(supabase, userId, traceId, {
-      stage: "synthesizing_plan",
-      specialists: specialists.length ? specialists : specialistSelections,
-    });
+    await updateTrace(supabase, userId, traceId, { stage: "synthesizing_plan", specialists: specialists.length ? specialists : specialistSelections });
 
     const planned = await runPlanner(ai, { ...sharedContext, diagnosis, critic, specialists });
     const nextSteps = unique([
       ...planned.nextSteps,
       ...planned.validation.map((step) => `Validation requirement: ${step}`),
     ]);
+    if (!nextSteps.length) {
+      nextSteps.push("Re-inspect the highest-severity accepted finding and implement the smallest evidence-backed repair with an executable validation check.");
+    }
+
     const result: ReasonedPlanningResult = {
       traceId,
       version: REASONING_VERSION,
@@ -610,7 +689,7 @@ export async function reasonAboutRepositoryPlan(
       risks: unique([...critic.regressionRisks, ...specialists.flatMap((item) => item.risks), ...planned.risks], 16),
       validation: unique([...specialists.flatMap((item) => item.validation), ...planned.validation], 16),
       stopConditions: unique(planned.stopConditions, 8),
-      confidence: Math.round(Math.min(planned.confidence, Math.max(critic.confidence, 40)) * 10) / 10,
+      confidence: finalConfidence(planned, diagnosis, critic, specialists),
       evidence,
     };
 
@@ -626,12 +705,7 @@ export async function reasonAboutRepositoryPlan(
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await updateTrace(supabase, userId, traceId, {
-      stage: "failed",
-      status: "failed",
-      error: message,
-      completed_at: new Date().toISOString(),
-    });
+    await updateTrace(supabase, userId, traceId, { stage: "failed", status: "failed", error: message, completed_at: new Date().toISOString() });
     throw error;
   }
 }
