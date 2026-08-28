@@ -27,12 +27,12 @@ export function AppHeader({ section, user, actions }: AppHeaderProps) {
   const userLabel = user?.displayName || user?.login || null;
 
   return (
-    <header className="sticky top-0 z-[100] border-b border-border/80 bg-background/95 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/90">
+    <header className="sticky top-0 z-[100] border-b border-border bg-background text-foreground shadow-sm">
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-3 sm:px-6 lg:px-8">
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          <Link href="/dashboard" className="flex min-w-0 items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <Link href="/dashboard" className="flex min-w-0 items-center gap-2 rounded-md text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <GitBranch className="h-6 w-6 shrink-0 text-primary" />
-            <span className="truncate text-base font-bold sm:text-lg">RepoFinisher</span>
+            <span className="truncate text-base font-bold text-foreground sm:text-lg">RepoFinisher</span>
           </Link>
 
           {section && (
@@ -54,15 +54,15 @@ export function AppHeader({ section, user, actions }: AppHeaderProps) {
 
         {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
 
-        <nav className="hidden shrink-0 items-center gap-1 sm:flex" aria-label="Primary navigation">
+        <nav className="hidden shrink-0 items-center gap-1 text-foreground sm:flex" aria-label="Primary navigation">
           <Link href="/dashboard">
-            <Button variant="ghost" size="sm" className="gap-2">
+            <Button variant="ghost" size="sm" className="gap-2 text-foreground">
               <LayoutDashboard className="h-4 w-4" />
               Dashboard
             </Button>
           </Link>
           <Link href="/settings">
-            <Button variant="ghost" size="sm" className="gap-2">
+            <Button variant="ghost" size="sm" className="gap-2 text-foreground">
               <Settings className="h-4 w-4" />
               Settings
             </Button>
@@ -74,7 +74,7 @@ export function AppHeader({ section, user, actions }: AppHeaderProps) {
             <Button
               variant="outline"
               size="icon"
-              className="shrink-0 bg-background sm:hidden"
+              className="shrink-0 border-border bg-card text-foreground shadow-sm sm:hidden"
               aria-label="Open navigation menu"
               data-testid="button-mobile-menu"
             >

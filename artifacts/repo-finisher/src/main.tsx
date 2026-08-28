@@ -6,6 +6,7 @@ import { installGlobalErrorHandlers } from '@/lib/telemetry';
 
 import './index.css';
 import './opaque-header.css';
+import './dark-theme-root.css';
 
 installGlobalErrorHandlers();
 
