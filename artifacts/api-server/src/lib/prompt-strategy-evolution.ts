@@ -275,7 +275,7 @@ async function applyDecision(supabase: SupabaseClient, row: ExperimentRow, decis
     incumbent_guidance: working.incumbent_guidance,
     challenger_version: candidate.version,
     challenger_guidance: candidate.guidance,
-    status: "active",
+    status: "active" as const,
     promotion_history: history.slice(-50),
     updated_at: new Date().toISOString(),
   };
@@ -323,8 +323,6 @@ export async function resolvePromptStrategy(supabase: SupabaseClient, userId: st
       },
     };
   } catch {
-    // Prompt experimentation is an optimization layer. It must never block the
-    // repository completion path or weaken the immutable safety policy.
     return {
       version: CATALOG[0].version,
       guidance: CATALOG[0].guidance,
