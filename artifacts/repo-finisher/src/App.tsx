@@ -20,9 +20,19 @@ import NotFound from '@/pages/not-found';
 // AuthCallback persists Supabase's GitHub provider token immediately after the
 // OAuth code exchange. If this setup lives in App's useEffect, a child route's
 // effect can run first and POST /github/connect without a bearer token.
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+//
+// Production is deliberately given a stable fallback API URL as well. During a
+// hosting cutover or preview build VITE_API_BASE_URL may be absent; falling back
+// to same-origin in that situation sends /api/* to the static frontend host and
+// produces HTML 404s such as "Cannot GET /api/preferences/ai-status".
+const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
+const productionApiBaseUrl = 'https://repofinisher-api-live.onrender.com';
+const localHostnames = new Set(['localhost', '127.0.0.1', '::1']);
+const isLocalBrowser = typeof window !== 'undefined' && localHostnames.has(window.location.hostname);
+const apiBaseUrl = configuredApiBaseUrl || (isLocalBrowser ? undefined : productionApiBaseUrl);
+
 if (apiBaseUrl) {
-  setBaseUrl(apiBaseUrl);
+  setBaseUrl(apiBaseUrl.replace(/\/$/, ''));
 }
 
 setAuthTokenGetter(async () => {
