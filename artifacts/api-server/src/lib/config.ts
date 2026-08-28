@@ -20,6 +20,25 @@ function env(...names: string[]): string {
   return "";
 }
 
+const KNOWN_FRONTEND_ORIGINS = [
+  "https://repofinisher.donmatthews.live",
+  "https://repofinisher.netlify.app",
+  "https://repo-romance-46.vercel.app",
+] as const;
+
+function corsAllowedOrigins(): string[] {
+  const configured = env("CORS_ALLOWED_ORIGINS")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  // These are first-party RepoFinisher frontends, not a wildcard. Keeping them
+  // in the application-level allowlist prevents a missing hosting env var from
+  // breaking authenticated API calls during a frontend hosting cutover while
+  // still rejecting arbitrary third-party origins.
+  return [...new Set([...KNOWN_FRONTEND_ORIGINS, ...configured])];
+}
+
 export interface AppConfig {
   nodeEnv: string;
   isProduction: boolean;
@@ -29,7 +48,7 @@ export interface AppConfig {
   planSigningSecret: string;
   /** AES-256-GCM key (32 bytes, base64 or hex) for secrets at rest. */
   secretEncryptionKey: string;
-  /** Exact origins allowed to call this API. Empty means "same-origin only". */
+  /** Exact origins allowed to call this API. */
   corsAllowedOrigins: string[];
 }
 
@@ -42,10 +61,7 @@ export function loadConfig(): AppConfig {
     supabaseAnonKey: env("SUPABASE_ANON_KEY", "VITE_SUPABASE_ANON_KEY"),
     planSigningSecret: env("PLAN_SIGNING_SECRET"),
     secretEncryptionKey: env("SECRET_ENCRYPTION_KEY", "AI_KEY_ENCRYPTION_KEY"),
-    corsAllowedOrigins: env("CORS_ALLOWED_ORIGINS")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean),
+    corsAllowedOrigins: corsAllowedOrigins(),
   };
 }
 
