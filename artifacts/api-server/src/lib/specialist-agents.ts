@@ -43,9 +43,13 @@ const OBJECTIVES: Record<SpecialistRole, string> = {
 
 const KEYWORDS: Record<SpecialistRole, string[]> = {
   "frontend-ux": ["frontend", "react", "next", "vite", "ui", "ux", "web", "screen", "component", "dashboard", "navigation", "render", "css"],
-  "backend-api": ["backend", "api", "server", "express", "node", "worker", "webhook", "queue", "service", "endpoint", "lambda", "function", "idempotency"],
+  // Avoid generic nouns such as "service" here: a product description can use
+  // that word without providing evidence that backend/API specialist work exists.
+  "backend-api": ["backend", "api", "server", "express", "node", "worker", "webhook", "queue", "endpoint", "lambda", "function", "idempotency"],
   database: ["database", "postgres", "supabase", "sql", "migration", "schema", "rls", "prisma", "drizzle", "storage", "table", "index"],
-  "devops-deployment": ["deploy", "deployment", "ci", "github actions", "docker", "vercel", "render", "cloud run", "firebase", "runtime", "build", "release", "infrastructure"],
+  // "build" alone is equally generic (for example "build metadata"). Require
+  // actual CI/deployment/runtime/infrastructure evidence instead.
+  "devops-deployment": ["deploy", "deployment", "ci", "github actions", "docker", "vercel", "render", "cloud run", "firebase", "runtime", "release", "infrastructure"],
   "security-auth": ["security", "auth", "oauth", "login", "permission", "secret", "token", "jwt", "rls", "credential", "session", "cors", "authorization", "authentication"],
   "payments-growth": ["stripe", "payment", "billing", "subscription", "pricing", "checkout", "revenue", "seo", "growth", "marketing", "onboarding", "conversion"],
   accessibility: ["accessibility", "a11y", "screen reader", "keyboard", "aria", "contrast", "focus", "touch target", "wcag"],
