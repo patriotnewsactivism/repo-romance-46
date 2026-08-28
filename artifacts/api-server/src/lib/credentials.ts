@@ -27,7 +27,17 @@ export async function loadGithubCredential(
 
   if (!data) return null;
   const row = data as { github_login: string; access_token: string };
-  const token = decryptSecret(row.access_token);
+  let token: string | null = null;
+  try {
+    token = decryptSecret(row.access_token);
+  } catch {
+    // Hosting migrations can legitimately rotate the server-side encryption key.
+    // Treat an unreadable stored envelope as unavailable rather than crashing
+    // every authenticated route. The ciphertext stays untouched so it can still
+    // be recovered if the original key is restored; reconnecting GitHub writes a
+    // fresh envelope under the current key.
+    token = null;
+  }
   if (!token) return null;
   return { token, login: row.github_login };
 }
@@ -105,7 +115,16 @@ export async function loadAiCredential(
   const requestedProvider = row?.custom_ai_provider || fallbackProvider;
   const provider = requestedProvider === "github_models" ? fallbackProvider : requestedProvider;
 
-  const userKey = decryptSecret(row?.custom_ai_key ?? null);
+  let userKey: string | null = null;
+  try {
+    userKey = decryptSecret(row?.custom_ai_key ?? null);
+  } catch {
+    // Do not turn a provider migration/key-rotation issue into a full API outage.
+    // The stored ciphertext remains intact, but this runtime treats it as an
+    // unavailable BYOK key and falls back to a platform credential when one is
+    // configured. The user can also re-enter the key from Settings.
+    userKey = null;
+  }
   if (userKey) return { provider, apiKey: userKey, source: "byok" };
 
   const platformKey = platformAiKey(provider);
