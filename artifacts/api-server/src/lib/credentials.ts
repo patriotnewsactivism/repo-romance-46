@@ -9,6 +9,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { decryptSecret } from "./secrets";
+import { readAiVaultSecret } from "./ai-secret-store";
 
 export interface GithubCredential {
   token: string;
@@ -64,8 +65,6 @@ const SUPPORTED_PLATFORM_PROVIDERS = new Set<string>(SUPPORTED_AI_PROVIDERS);
 export function normalizeAiProvider(value: string | null | undefined, fallback = "google"): string {
   const configured = String(value || "").trim().toLowerCase();
   if (SUPPORTED_PLATFORM_PROVIDERS.has(configured)) return configured;
-  // Historical providers no longer have a runtime implementation. Route them
-  // to the current platform default without destroying their stored row.
   if (configured === "github_models" || configured === "lovable" || !configured) return fallback;
   return fallback;
 }
@@ -118,10 +117,9 @@ export function platformAiStatus() {
 /**
  * Resolve which provider, model, and key to use for a user.
  *
- * Google Gemini remains the default when AI_PROVIDER is unset. A user's
- * encrypted BYOK credential wins when present; otherwise the server-side
- * credential for the selected provider is used. Historical providers are
- * transparently routed to the current platform default.
+ * BYOK credentials are stored in Supabase Vault. The historical custom_ai_key
+ * column is read only as a compatibility fallback for old rows that have not
+ * yet been migrated. A user's BYOK credential wins over a platform credential.
  */
 export async function loadAiCredential(
   supabase: SupabaseClient,
@@ -130,7 +128,7 @@ export async function loadAiCredential(
 ): Promise<AiCredential> {
   const { data, error } = await supabase
     .from("user_preferences")
-    .select("custom_ai_provider, custom_ai_model, custom_ai_key")
+    .select("custom_ai_provider, custom_ai_model, custom_ai_key, custom_ai_vault_secret_id")
     .eq("user_id", userId)
     .maybeSingle();
   if (error) throw new Error(`Failed to load AI preferences: ${error.message}`);
@@ -139,20 +137,27 @@ export async function loadAiCredential(
     custom_ai_provider: string | null;
     custom_ai_model: string | null;
     custom_ai_key: string | null;
+    custom_ai_vault_secret_id: string | null;
   } | null;
   const fallbackProvider = platformAiProvider();
   const provider = normalizeAiProvider(row?.custom_ai_provider, fallbackProvider);
   const model = row?.custom_ai_model?.trim() || platformAiModel(provider);
 
   let userKey: string | null = null;
-  try {
-    userKey = decryptSecret(row?.custom_ai_key ?? null);
-  } catch {
-    // Do not turn a provider migration/key-rotation issue into a full API outage.
-    // The stored ciphertext remains intact, but this runtime treats it as an
-    // unavailable BYOK key and falls back to a platform credential when one is
-    // configured. The user can also re-enter the key from Settings.
-    userKey = null;
+  if (row?.custom_ai_vault_secret_id) {
+    try {
+      userKey = await readAiVaultSecret(userId, row.custom_ai_vault_secret_id);
+    } catch {
+      userKey = null;
+    }
+  }
+
+  if (!userKey && row?.custom_ai_key) {
+    try {
+      userKey = decryptSecret(row.custom_ai_key);
+    } catch {
+      userKey = null;
+    }
   }
   if (userKey) return { provider, model, apiKey: userKey, source: "byok" };
 
