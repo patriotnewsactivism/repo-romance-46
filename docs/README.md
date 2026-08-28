@@ -7,6 +7,7 @@ Start with:
 - [`../README.md`](../README.md) — product/repository overview.
 - [`../AGENTS.md`](../AGENTS.md) — mandatory operating contract for coding agents.
 - [`PROJECT_STATE.md`](PROJECT_STATE.md) — current deployment/status/priorities checkpoint.
+- [`DEFINITION_OF_DONE.md`](DEFINITION_OF_DONE.md) — evidence standard for calling RepoFinisher or a target repository complete.
 
 Architecture, operations, and governance:
 
@@ -14,6 +15,7 @@ Architecture, operations, and governance:
 - [`OPERATIONS.md`](OPERATIONS.md) — production deployment, environment, rollback, and incident runbook.
 - [`DECISIONS.md`](DECISIONS.md) — durable architecture/product decisions and their rationale.
 - [`GOVERNANCE.md`](GOVERNANCE.md) — branch/PR/CI/hosting/database governance rules and current branch-protection gap.
+- [`.github/pull_request_template.md`](../.github/pull_request_template.md) — operational checklist that turns the governance rules into a per-PR verification record.
 
 AI/autonomy:
 
@@ -39,6 +41,8 @@ Contribution workflow:
 1. `AGENTS.md` is the canonical agent-policy file.
 2. Model-specific root files (`CLAUDE.md`, `GEMINI.md`, `QWEN.md`, Copilot instructions) should remain thin pointers rather than fork policy.
 3. `PROJECT_STATE.md` is time-sensitive; update it as infrastructure/features are verified.
-4. Architecture/security/hosting changes must update the corresponding docs in the same PR.
-5. If code and docs disagree, verify current code/production state and fix the discrepancy instead of choosing whichever text is more convenient.
-6. Never place secret values in documentation.
+4. `DEFINITION_OF_DONE.md` defines the evidence threshold for completion claims; do not lower it to make a score look better.
+5. Architecture/security/hosting changes must update the corresponding docs in the same PR.
+6. Pull requests should use the repository PR template and record which deployment/runtime gates were actually verified.
+7. If code and docs disagree, verify current code/production state and fix the discrepancy instead of choosing whichever text is more convenient.
+8. Never place secret values in documentation.
