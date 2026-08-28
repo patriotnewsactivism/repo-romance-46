@@ -7,10 +7,10 @@ import {
   AlertTriangle,
   CheckCircle2,
   ExternalLink,
-  Eye,
   FileCode,
   Loader2,
   RefreshCw,
+  Rocket,
   ShieldCheck,
   XCircle,
 } from "lucide-react";
@@ -100,6 +100,7 @@ interface FinishRepoActionProps {
   analysisId?: string;
   itemRank?: number;
   initialResult?: LegacyResult | null;
+  compact?: boolean;
 }
 
 async function postJson<T>(path: string, body?: unknown): Promise<T> {
@@ -112,7 +113,7 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
 
 function statusLabel(status: RunStatus | null) {
   switch (status) {
-    case "awaiting_approval": return "Awaiting approval";
+    case "awaiting_approval": return "Plan ready";
     case "approved": return "Approved";
     case "executing": return "Executing";
     case "verifying": return "Verifying CI";
@@ -131,27 +132,32 @@ function statusClass(status: RunStatus | null) {
   return "border-amber-500/40 text-amber-600";
 }
 
-export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initialResult }: FinishRepoActionProps) {
+export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initialResult, compact = false }: FinishRepoActionProps) {
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [detail, setDetail] = useState<RunDetailResponse | null>(null);
-  const [busy, setBusy] = useState<"preview" | "approve" | "execute" | "cancel" | "refresh" | null>(null);
-  const [showPlan, setShowPlan] = useState(true);
+  const [busy, setBusy] = useState<"finish" | "approve" | "execute" | "cancel" | "refresh" | null>(null);
+  const [showPlan, setShowPlan] = useState(false);
 
   const runId = detail?.run.id ?? preview?.runId ?? null;
   const status = detail?.run.status ?? preview?.status ?? null;
+
+  const loadRun = useCallback(async (id: string) => {
+    const data = await customFetch<RunDetailResponse>(`/api/repo-finisher/runs/${id}`, { responseType: "json" });
+    setDetail(data);
+    return data;
+  }, []);
 
   const refreshRun = useCallback(async (quiet = false) => {
     if (!runId) return;
     if (!quiet) setBusy("refresh");
     try {
-      const data = await customFetch<RunDetailResponse>(`/api/repo-finisher/runs/${runId}`, { responseType: "json" });
-      setDetail(data);
+      await loadRun(runId);
     } catch (error) {
       if (!quiet) toast.error(error instanceof Error ? error.message.slice(0, 240) : "Unable to refresh run.");
     } finally {
       if (!quiet) setBusy(null);
     }
-  }, [runId]);
+  }, [loadRun, runId]);
 
   useEffect(() => {
     if (!runId || (status !== "executing" && status !== "verifying")) return;
@@ -159,22 +165,37 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
     return () => window.clearInterval(timer);
   }, [refreshRun, runId, status]);
 
-  const handlePreview = async () => {
-    setBusy("preview");
+  const handleOneClickFinish = async () => {
+    setBusy("finish");
     setPreview(null);
     setDetail(null);
-    setShowPlan(true);
+    setShowPlan(false);
+    let createdRunId: string | null = null;
+
     try {
-      const data = await postJson<PreviewResponse>("/api/repo-finisher/preview", {
-        repo,
-        nextSteps,
-        analysisId,
-        itemRank,
-      });
-      setPreview(data);
-      toast.success(`Prepared ${data.changes.length} exact change${data.changes.length === 1 ? "" : "s"} for review.`);
+      const payload: Record<string, unknown> = { repo, nextSteps, analysisId };
+      // Historical analysis ranks are zero-based, while the older preview schema
+      // accepted only positive ranks. Omit rank zero rather than blocking the top repo.
+      if (typeof itemRank === "number" && itemRank > 0) payload.itemRank = itemRank;
+
+      const planned = await postJson<PreviewResponse>("/api/repo-finisher/agentic-preview", payload);
+      createdRunId = planned.runId;
+      setPreview(planned);
+
+      await postJson(`/api/repo-finisher/runs/${planned.runId}/approve`, { planHash: planned.planHash });
+      await postJson(`/api/repo-finisher/runs/${planned.runId}/execute`);
+      const latest = await loadRun(planned.runId);
+
+      if (latest.run.status === "succeeded") {
+        toast.success(`${repo.split("/")[1]} was finished and verified in a draft PR.`);
+      } else if (latest.run.status === "verifying") {
+        toast.success(`Autonomous changes are in a draft PR. CI verification is running.`);
+      } else {
+        toast.success(`Autonomous completion run started for ${repo.split("/")[1]}.`);
+      }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message.slice(0, 240) : "Unable to prepare completion plan.");
+      if (createdRunId) await loadRun(createdRunId).catch(() => undefined);
+      toast.error(error instanceof Error ? error.message.slice(0, 240) : "Autonomous finishing failed.");
     } finally {
       setBusy(null);
     }
@@ -185,8 +206,8 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
     setBusy("approve");
     try {
       await postJson(`/api/repo-finisher/runs/${preview.runId}/approve`, { planHash: preview.planHash });
-      await refreshRun(true);
-      toast.success("Exact plan approved. No repository changes have been made yet.");
+      await loadRun(preview.runId);
+      toast.success("Exact plan approved. You can resume execution.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message.slice(0, 240) : "Unable to approve plan.");
     } finally {
@@ -199,10 +220,10 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
     setBusy("execute");
     try {
       await postJson(`/api/repo-finisher/runs/${runId}/execute`);
-      await refreshRun(true);
-      toast.success("Approved plan executed into a draft PR. CI verification is enforced.");
+      await loadRun(runId);
+      toast.success("Execution resumed; CI verification is enforced.");
     } catch (error) {
-      await refreshRun(true);
+      await loadRun(runId).catch(() => undefined);
       toast.error(error instanceof Error ? error.message.slice(0, 240) : "Execution failed.");
     } finally {
       setBusy(null);
@@ -214,8 +235,8 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
     setBusy("cancel");
     try {
       await postJson(`/api/repo-finisher/runs/${runId}/cancel`);
-      await refreshRun(true);
-      toast.success("Completion run cancelled before execution.");
+      await loadRun(runId);
+      toast.success("Completion run cancelled.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message.slice(0, 240) : "Unable to cancel run.");
     } finally {
@@ -226,7 +247,7 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
   const reset = () => {
     setPreview(null);
     setDetail(null);
-    setShowPlan(true);
+    setShowPlan(false);
   };
 
   const currentSummary = detail?.run.summary ?? preview?.summary;
@@ -249,17 +270,30 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
       )}
 
       {!runId && (
-        <Button onClick={handlePreview} disabled={busy !== null} className="gap-2" size="sm" data-testid={`button-finish-${repo}`}>
-          {busy === "preview" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
-          {busy === "preview" ? `Planning ${repo.split("/")[1]}...` : "Preview completion plan"}
-        </Button>
+        <div className={compact ? "" : "rounded-lg border border-primary/20 bg-primary/5 p-3"}>
+          <Button
+            onClick={handleOneClickFinish}
+            disabled={busy !== null}
+            className="gap-2"
+            size={compact ? "sm" : "default"}
+            data-testid={`button-finish-${repo}`}
+          >
+            {busy === "finish" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
+            {busy === "finish" ? `Finishing ${repo.split("/")[1]}…` : "Finish repository"}
+          </Button>
+          {!compact && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              One click runs the agent council, generates an exact plan, records your approval for that generated hash, creates a draft PR, and verifies CI.
+            </p>
+          )}
+        </div>
       )}
 
       {runId && (
-        <Card className="p-4 space-y-4">
+        <Card className="p-4 space-y-4 border-primary/20">
           <div className="flex flex-wrap items-center gap-2">
             <ShieldCheck className="h-5 w-5" />
-            <span className="font-semibold">Approval-bound completion run</span>
+            <span className="font-semibold">Autonomous completion run</span>
             <Badge variant="outline" className={`ml-auto ${statusClass(status)}`}>{statusLabel(status)}</Badge>
           </div>
 
@@ -286,7 +320,7 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
                 <div className="space-y-2">
                   {preview.changes.map((change) => (
                     <details key={change.path} className="rounded-md border p-3">
-                      <summary className="cursor-pointer text-sm">
+                      <summary className="cursor-pointer text-sm break-all">
                         <code>{change.status === "created" ? "+" : change.status === "modified" ? "~" : "-"} {change.path}</code>
                         <span className="ml-2 text-xs text-muted-foreground">{change.description}</span>
                       </summary>
@@ -302,8 +336,8 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
 
           {detail?.run.error && (
             <div className="flex items-start gap-2 rounded-md border border-red-500/30 p-3 text-sm text-red-600">
-              <XCircle className="h-4 w-4 mt-0.5" />
-              <span>{detail.run.error}</span>
+              <XCircle className="h-4 w-4 mt-0.5 shrink-0" />
+              <span className="break-words">{detail.run.error}</span>
             </div>
           )}
 
@@ -314,30 +348,28 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
             </div>
           )}
 
-          {status === "awaiting_approval" && preview && (
+          {status === "awaiting_approval" && preview && busy === null && (
             <div className="flex flex-wrap gap-2">
-              <Button onClick={handleApprove} disabled={busy !== null} size="sm" className="gap-2">
-                {busy === "approve" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                Approve exact plan
+              <Button onClick={handleApprove} size="sm" className="gap-2">
+                <ShieldCheck className="h-4 w-4" /> Resume approval
               </Button>
-              <Button variant="outline" onClick={handleCancel} disabled={busy !== null} size="sm">Cancel</Button>
+              <Button variant="outline" onClick={handleCancel} size="sm">Cancel</Button>
             </div>
           )}
 
-          {status === "approved" && (
+          {status === "approved" && busy === null && (
             <div className="flex flex-wrap gap-2">
-              <Button onClick={handleExecute} disabled={busy !== null} size="sm" className="gap-2">
-                {busy === "execute" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                Execute approved plan
+              <Button onClick={handleExecute} size="sm" className="gap-2">
+                <Rocket className="h-4 w-4" /> Resume execution
               </Button>
-              <Button variant="outline" onClick={handleCancel} disabled={busy !== null} size="sm">Cancel</Button>
+              <Button variant="outline" onClick={handleCancel} size="sm">Cancel</Button>
             </div>
           )}
 
-          {(status === "executing" || status === "verifying") && (
+          {(busy === "finish" || status === "executing" || status === "verifying") && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
-              {status === "executing" ? "Creating the approved atomic commit and draft PR…" : "Waiting for required checks…"}
+              {status === "verifying" ? "Waiting for required checks…" : "Autonomous agents are finishing the repository…"}
             </div>
           )}
 
@@ -355,19 +387,19 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
             <div className="space-y-2">
               <div className="flex items-start gap-2 text-sm text-amber-600">
                 <AlertTriangle className="h-4 w-4 mt-0.5" />
-                Repository base changed after approval. Execution was blocked.
+                Repository base changed after the plan was generated. Execution was blocked.
               </div>
               <Button variant="outline" size="sm" onClick={reset}>Re-plan from current base</Button>
             </div>
           )}
 
           {(status === "failed" || status === "cancelled") && (
-            <Button variant="outline" size="sm" onClick={reset}>Start a new plan</Button>
+            <Button variant="outline" size="sm" onClick={reset}>Start a new autonomous run</Button>
           )}
 
-          {runId && status !== "executing" && status !== "verifying" && (
-            <Button variant="ghost" size="sm" onClick={() => void refreshRun()} disabled={busy !== null} className="gap-2">
-              {busy === "refresh" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          {runId && status !== "executing" && status !== "verifying" && busy === null && (
+            <Button variant="ghost" size="sm" onClick={() => void refreshRun()} className="gap-2">
+              <RefreshCw className="h-3.5 w-3.5" />
               Refresh status
             </Button>
           )}
