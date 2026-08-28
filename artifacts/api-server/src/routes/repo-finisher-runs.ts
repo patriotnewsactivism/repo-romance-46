@@ -16,15 +16,17 @@ import {
   loadBaselineInvestmentMetrics,
 } from "../lib/post-run-evolution";
 import { insertCompletionRunCompat } from "../lib/completion-run-persistence";
+import { tryScheduleCiRepair, type SelfHealingRun } from "../lib/ci-repair";
 
 const router: IRouter = Router();
-const DIRECT_PROMPT_VERSION = "direct-finisher-v2-measured";
+const DIRECT_PROMPT_VERSION = "direct-finisher-v3-reasoning-learning";
 
 type RunStatus =
   | "awaiting_approval"
   | "approved"
   | "executing"
   | "verifying"
+  | "repairing"
   | "succeeded"
   | "failed"
   | "cancelled"
@@ -47,6 +49,10 @@ interface CompletionRunRow {
   pr_url: string | null;
   ci_status: string | null;
   error: string | null;
+  auto_repair_enabled?: boolean;
+  repair_attempts?: number;
+  max_repair_attempts?: number;
+  last_repair_error?: string | null;
   analysis_id?: string | null;
   item_rank?: number | null;
   prompt_version?: string | null;
@@ -107,6 +113,16 @@ async function setVerificationState(
 ) {
   if (run.status !== "verifying") return run.status;
 
+  if (verification.state === "failed" && run.auto_repair_enabled) {
+    const scheduled = await tryScheduleCiRepair(
+      supabase,
+      userId,
+      run as unknown as SelfHealingRun,
+      verification,
+    );
+    if (scheduled) return "repairing" as RunStatus;
+  }
+
   const nextStatus: RunStatus = verification.state === "passed" ? "succeeded" : verification.state === "failed" ? "failed" : "verifying";
   const now = new Date().toISOString();
   const nextError = verification.state === "failed" ? verification.message : null;
@@ -147,6 +163,7 @@ async function setVerificationState(
         totalChecks: verification.totalChecks,
         completedChecks: verification.completedChecks,
         failedChecks: verification.failedChecks,
+        sandbox: verification.sandbox ?? null,
       },
     );
   }
@@ -177,11 +194,12 @@ router.post(
       })
       .parse(req.body);
 
-    const [{ plan, planHash }, baselineMetrics] = await Promise.all([
+    const [{ plan, planHash, reasoning }, baselineMetrics] = await Promise.all([
       prepareFinishPlan(req.supabase!, req.userId!, input),
       loadBaselineInvestmentMetrics(req.supabase!, req.userId!, input.analysisId, input.repo),
     ]);
     const now = new Date().toISOString();
+    const promptVersion = plan.reasoning?.promptVersion ?? DIRECT_PROMPT_VERSION;
     const runInsert = await insertCompletionRunCompat(req.supabase!, {
       user_id: req.userId!,
       repo: plan.repo,
@@ -192,8 +210,10 @@ router.post(
       status: "awaiting_approval",
       analysis_id: input.analysisId ?? null,
       item_rank: input.itemRank ?? null,
-      prompt_version: DIRECT_PROMPT_VERSION,
+      prompt_version: promptVersion,
       baseline_metrics: baselineMetrics,
+      auto_repair_enabled: true,
+      max_repair_attempts: 3,
       created_at: now,
       updated_at: now,
     });
@@ -201,6 +221,14 @@ router.post(
       throw dbError("Failed to create completion run", runInsert.error);
     }
     const run = runInsert.data as unknown as CompletionRunRow;
+
+    if (reasoning?.traceId) {
+      await req.supabase!
+        .from("reasoning_traces")
+        .update({ completion_run_id: run.id, updated_at: now })
+        .eq("id", reasoning.traceId)
+        .eq("user_id", req.userId!);
+    }
 
     const stepRows = plan.changes.map((change, index) => ({
       run_id: run.id,
@@ -225,11 +253,12 @@ router.post(
       run.id,
       "plan_created",
       "info",
-      `Prepared ${plan.changes.length} exact file change${plan.changes.length === 1 ? "" : "s"} for approval.`,
+      `Prepared ${plan.changes.length} exact file change${plan.changes.length === 1 ? "" : "s"} after multi-stage reasoning and measured-learning retrieval.`,
       {
         baseSha: plan.baseSha,
         planHash,
-        promptVersion: DIRECT_PROMPT_VERSION,
+        promptVersion,
+        reasoning: plan.reasoning ?? null,
         baselineMetrics,
         outcomeTelemetryPersisted: runInsert.telemetryPersisted,
       },
@@ -245,8 +274,10 @@ router.post(
       summary: plan.summary,
       nextSteps: plan.nextSteps,
       changes: plan.changes.map(({ mode: _mode, ...change }) => change),
-      promptVersion: DIRECT_PROMPT_VERSION,
+      promptVersion,
+      reasoning: plan.reasoning ?? null,
       baselineMetrics,
+      autoRepair: { enabled: true, maxAttempts: 3 },
       outcomeTelemetryPersisted: runInsert.telemetryPersisted,
       createdAt: run.created_at,
     });
@@ -337,7 +368,8 @@ router.post(
     await recordEvent(req.supabase!, req.userId!, run.id, "execution_started", "info", "Executing the approved atomic plan.", {
       baseSha: run.base_sha,
       planHash: run.plan_hash,
-      promptVersion: run.prompt_version,
+      promptVersion: run.plan.reasoning?.promptVersion ?? run.prompt_version,
+      reasoningTraceId: run.plan.reasoning?.traceId ?? null,
     });
 
     try {
@@ -375,7 +407,7 @@ router.post(
         run.id,
         "draft_pr_created",
         "success",
-        `Created draft PR #${result.pr_number}; waiting for checks.`,
+        `Created draft PR #${result.pr_number}; waiting for checks. Self-healing is armed for verification failures.`,
         { prUrl: result.pr_url, branch: result.branch, headSha: result.head_sha },
       );
 
@@ -388,11 +420,13 @@ router.post(
         pr_number: result.pr_number,
         pr_url: result.pr_url,
         ci_status: "pending",
+        auto_repair_enabled: run.auto_repair_enabled ?? true,
+        max_repair_attempts: run.max_repair_attempts ?? 3,
         updated_at: verifyingAt,
       };
       const status = await setVerificationState(req.supabase!, req.userId!, currentRun, verification);
 
-      res.json({ runId: run.id, status, result, verification });
+      res.json({ runId: run.id, status, result, verification, autoRepairScheduled: status === "repairing" });
     } catch (error) {
       const executionError = error as Error & { code?: string };
       const failedAt = new Date().toISOString();
@@ -446,12 +480,14 @@ router.get(
       run = await loadRun(req.supabase!, runId);
     }
 
-    const [{ data: steps, error: stepsError }, { data: events, error: eventsError }] = await Promise.all([
+    const [{ data: steps, error: stepsError }, { data: events, error: eventsError }, { data: traces, error: tracesError }] = await Promise.all([
       req.supabase!.from("completion_steps").select("*").eq("run_id", run.id).order("ordinal", { ascending: true }),
       req.supabase!.from("completion_events").select("*").eq("run_id", run.id).order("created_at", { ascending: true }),
+      req.supabase!.from("reasoning_traces").select("*").eq("completion_run_id", run.id).eq("user_id", req.userId!).order("created_at", { ascending: true }),
     ]);
     if (stepsError) throw dbError("Failed to load completion steps", stepsError);
     if (eventsError) throw dbError("Failed to load completion events", eventsError);
+    if (tracesError) throw new Error(`Failed to load reasoning traces: ${tracesError.message}`);
 
     res.json({
       run: {
@@ -469,9 +505,14 @@ router.get(
         ciStatus: run.ci_status,
         error: run.error,
         summary: run.plan.summary,
+        reasoning: run.plan.reasoning ?? null,
         analysisId: run.analysis_id,
         itemRank: run.item_rank,
-        promptVersion: run.prompt_version,
+        promptVersion: run.plan.reasoning?.promptVersion ?? run.prompt_version,
+        autoRepairEnabled: run.auto_repair_enabled,
+        repairAttempts: run.repair_attempts ?? 0,
+        maxRepairAttempts: run.max_repair_attempts ?? 3,
+        lastRepairError: run.last_repair_error ?? null,
         baselineMetrics: run.baseline_metrics,
         outcomeMetrics: run.outcome_metrics,
         outcomeScore: run.outcome_score,
@@ -481,6 +522,7 @@ router.get(
       },
       steps: steps || [],
       events: events || [],
+      reasoningTraces: traces || [],
       verification,
     });
   }),
