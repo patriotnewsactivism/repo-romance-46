@@ -23,7 +23,6 @@ function env(...names: string[]): string {
 const KNOWN_FRONTEND_ORIGINS = [
   "https://repofinisher.donmatthews.live",
   "https://repofinisher.netlify.app",
-  "https://repo-romance-46.vercel.app",
 ] as const;
 
 function corsAllowedOrigins(): string[] {
