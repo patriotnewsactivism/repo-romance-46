@@ -13,7 +13,15 @@ import * as zod from 'zod';
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
-  "status": zod.string()
+  "status": zod.string(),
+  "observability": zod.object({
+  "sentry": zod.object({
+  "enabled": zod.boolean(),
+  "environment": zod.string(),
+  "release": zod.string().nullable(),
+  "traces_sample_rate": zod.number()
+})
+})
 })
 
 
@@ -95,6 +103,11 @@ export const GetAnalysisParams = zod.object({
   "id": zod.coerce.string()
 })
 
+export const getAnalysisResponseItemsItemMarketAnalysisOneNeedAssessmentScoreMin = 0;
+export const getAnalysisResponseItemsItemMarketAnalysisOneNeedAssessmentScoreMax = 100;
+
+
+
 export const GetAnalysisResponse = zod.object({
   "analysis": zod.object({
   "id": zod.string(),
@@ -154,19 +167,54 @@ export const GetAnalysisResponse = zod.object({
   "competitors": zod.array(zod.object({
   "name": zod.string(),
   "url": zod.string(),
-  "differentiator": zod.string()
+  "differentiator": zod.string(),
+  "evidence_basis": zod.string()
 })),
   "monetization": zod.array(zod.string()),
   "demand_score": zod.number(),
   "ship_readiness_score": zod.number(),
   "risks": zod.array(zod.string()),
-  "verdict": zod.enum(['ship_now', 'finish_first', 'combine_first', 'shelve'])
+  "verdict": zod.enum(['ship_now', 'finish_first', 'combine_first', 'shelve']),
+  "need_assessment": zod.object({
+  "score": zod.number().min(getAnalysisResponseItemsItemMarketAnalysisOneNeedAssessmentScoreMin).max(getAnalysisResponseItemsItemMarketAnalysisOneNeedAssessmentScoreMax),
+  "problem": zod.string(),
+  "urgency": zod.enum(['low', 'medium', 'high', 'critical']),
+  "evidence_confidence": zod.enum(['low', 'medium', 'high']),
+  "supporting_evidence": zod.array(zod.object({
+  "claim": zod.string(),
+  "source": zod.string(),
+  "strength": zod.enum(['assumption', 'weak', 'moderate', 'strong'])
+})),
+  "counter_evidence": zod.array(zod.string()),
+  "validation_experiments": zod.array(zod.object({
+  "experiment": zod.string(),
+  "success_metric": zod.string(),
+  "effort": zod.enum(['hours', 'days', 'weeks'])
+})),
+  "decision": zod.enum(['build_now', 'validate_first', 'deprioritize'])
+}),
+  "next_best_actions": zod.array(zod.object({
+  "title": zod.string(),
+  "why": zod.string(),
+  "impact": zod.enum(['low', 'medium', 'high']),
+  "effort": zod.enum(['hours', 'days', 'weeks']),
+  "acceptance_check": zod.string()
+}))
 }),zod.null()]).optional(),
   "valuation": zod.union([zod.object({
   "low_usd": zod.number(),
   "mid_usd": zod.number(),
   "high_usd": zod.number(),
-  "reasoning": zod.string()
+  "reasoning": zod.string(),
+  "basis": zod.enum(['replacement_cost', 'revenue_multiple', 'market_comparables', 'scenario_only']),
+  "confidence": zod.enum(['low', 'medium', 'high']),
+  "evidence": zod.array(zod.string()),
+  "missing_information": zod.array(zod.string()),
+  "potential_low_usd": zod.number(),
+  "potential_mid_usd": zod.number(),
+  "potential_high_usd": zod.number(),
+  "potential_assumptions": zod.array(zod.string()),
+  "what_changes_value": zod.array(zod.string())
 }),zod.null()]).optional(),
   "vibe_spec": zod.union([zod.object({
   "product_name": zod.string(),
@@ -340,6 +388,11 @@ export const GetPublicAnalysisParams = zod.object({
   "slug": zod.coerce.string()
 })
 
+export const getPublicAnalysisResponseItemsItemMarketAnalysisOneNeedAssessmentScoreMin = 0;
+export const getPublicAnalysisResponseItemsItemMarketAnalysisOneNeedAssessmentScoreMax = 100;
+
+
+
 export const GetPublicAnalysisResponse = zod.object({
   "analysis": zod.object({
   "id": zod.string(),
@@ -399,19 +452,54 @@ export const GetPublicAnalysisResponse = zod.object({
   "competitors": zod.array(zod.object({
   "name": zod.string(),
   "url": zod.string(),
-  "differentiator": zod.string()
+  "differentiator": zod.string(),
+  "evidence_basis": zod.string()
 })),
   "monetization": zod.array(zod.string()),
   "demand_score": zod.number(),
   "ship_readiness_score": zod.number(),
   "risks": zod.array(zod.string()),
-  "verdict": zod.enum(['ship_now', 'finish_first', 'combine_first', 'shelve'])
+  "verdict": zod.enum(['ship_now', 'finish_first', 'combine_first', 'shelve']),
+  "need_assessment": zod.object({
+  "score": zod.number().min(getPublicAnalysisResponseItemsItemMarketAnalysisOneNeedAssessmentScoreMin).max(getPublicAnalysisResponseItemsItemMarketAnalysisOneNeedAssessmentScoreMax),
+  "problem": zod.string(),
+  "urgency": zod.enum(['low', 'medium', 'high', 'critical']),
+  "evidence_confidence": zod.enum(['low', 'medium', 'high']),
+  "supporting_evidence": zod.array(zod.object({
+  "claim": zod.string(),
+  "source": zod.string(),
+  "strength": zod.enum(['assumption', 'weak', 'moderate', 'strong'])
+})),
+  "counter_evidence": zod.array(zod.string()),
+  "validation_experiments": zod.array(zod.object({
+  "experiment": zod.string(),
+  "success_metric": zod.string(),
+  "effort": zod.enum(['hours', 'days', 'weeks'])
+})),
+  "decision": zod.enum(['build_now', 'validate_first', 'deprioritize'])
+}),
+  "next_best_actions": zod.array(zod.object({
+  "title": zod.string(),
+  "why": zod.string(),
+  "impact": zod.enum(['low', 'medium', 'high']),
+  "effort": zod.enum(['hours', 'days', 'weeks']),
+  "acceptance_check": zod.string()
+}))
 }),zod.null()]).optional(),
   "valuation": zod.union([zod.object({
   "low_usd": zod.number(),
   "mid_usd": zod.number(),
   "high_usd": zod.number(),
-  "reasoning": zod.string()
+  "reasoning": zod.string(),
+  "basis": zod.enum(['replacement_cost', 'revenue_multiple', 'market_comparables', 'scenario_only']),
+  "confidence": zod.enum(['low', 'medium', 'high']),
+  "evidence": zod.array(zod.string()),
+  "missing_information": zod.array(zod.string()),
+  "potential_low_usd": zod.number(),
+  "potential_mid_usd": zod.number(),
+  "potential_high_usd": zod.number(),
+  "potential_assumptions": zod.array(zod.string()),
+  "what_changes_value": zod.array(zod.string())
 }),zod.null()]).optional(),
   "vibe_spec": zod.union([zod.object({
   "product_name": zod.string(),
@@ -673,6 +761,11 @@ export const AssessMarketAndValueBody = zod.object({
   "itemRank": zod.number()
 })
 
+export const assessMarketAndValueResponseMarketNeedAssessmentScoreMin = 0;
+export const assessMarketAndValueResponseMarketNeedAssessmentScoreMax = 100;
+
+
+
 export const AssessMarketAndValueResponse = zod.object({
   "market": zod.object({
   "tam_summary": zod.string(),
@@ -680,19 +773,54 @@ export const AssessMarketAndValueResponse = zod.object({
   "competitors": zod.array(zod.object({
   "name": zod.string(),
   "url": zod.string(),
-  "differentiator": zod.string()
+  "differentiator": zod.string(),
+  "evidence_basis": zod.string()
 })),
   "monetization": zod.array(zod.string()),
   "demand_score": zod.number(),
   "ship_readiness_score": zod.number(),
   "risks": zod.array(zod.string()),
-  "verdict": zod.enum(['ship_now', 'finish_first', 'combine_first', 'shelve'])
+  "verdict": zod.enum(['ship_now', 'finish_first', 'combine_first', 'shelve']),
+  "need_assessment": zod.object({
+  "score": zod.number().min(assessMarketAndValueResponseMarketNeedAssessmentScoreMin).max(assessMarketAndValueResponseMarketNeedAssessmentScoreMax),
+  "problem": zod.string(),
+  "urgency": zod.enum(['low', 'medium', 'high', 'critical']),
+  "evidence_confidence": zod.enum(['low', 'medium', 'high']),
+  "supporting_evidence": zod.array(zod.object({
+  "claim": zod.string(),
+  "source": zod.string(),
+  "strength": zod.enum(['assumption', 'weak', 'moderate', 'strong'])
+})),
+  "counter_evidence": zod.array(zod.string()),
+  "validation_experiments": zod.array(zod.object({
+  "experiment": zod.string(),
+  "success_metric": zod.string(),
+  "effort": zod.enum(['hours', 'days', 'weeks'])
+})),
+  "decision": zod.enum(['build_now', 'validate_first', 'deprioritize'])
+}),
+  "next_best_actions": zod.array(zod.object({
+  "title": zod.string(),
+  "why": zod.string(),
+  "impact": zod.enum(['low', 'medium', 'high']),
+  "effort": zod.enum(['hours', 'days', 'weeks']),
+  "acceptance_check": zod.string()
+}))
 }),
   "valuation": zod.object({
   "low_usd": zod.number(),
   "mid_usd": zod.number(),
   "high_usd": zod.number(),
-  "reasoning": zod.string()
+  "reasoning": zod.string(),
+  "basis": zod.enum(['replacement_cost', 'revenue_multiple', 'market_comparables', 'scenario_only']),
+  "confidence": zod.enum(['low', 'medium', 'high']),
+  "evidence": zod.array(zod.string()),
+  "missing_information": zod.array(zod.string()),
+  "potential_low_usd": zod.number(),
+  "potential_mid_usd": zod.number(),
+  "potential_high_usd": zod.number(),
+  "potential_assumptions": zod.array(zod.string()),
+  "what_changes_value": zod.array(zod.string())
 })
 })
 

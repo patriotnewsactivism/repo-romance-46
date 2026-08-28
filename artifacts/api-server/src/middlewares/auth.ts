@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { createHash } from "node:crypto";
 import type { Request, Response, NextFunction } from "express";
 import { config } from "../lib/config";
+import { captureException } from "../instrument";
 
 declare global {
   namespace Express {
@@ -110,6 +111,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
     })
     .catch((err: unknown) => {
       req.log?.error({ err }, "Failed to verify session");
+      captureException(err, { tags: { subsystem: "auth-verification" } });
       res.status(503).json({ error: "Could not verify session" });
     });
 }

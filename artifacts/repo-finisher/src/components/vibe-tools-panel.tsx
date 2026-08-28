@@ -195,40 +195,80 @@ export function VibeToolsPanel({ analysisId, itemRank, kind, repos, existing }: 
       {(market || valuation) && (
         <Card className="p-3 space-y-3 bg-muted/20">
           {valuation && (
-            <div className="flex items-center gap-3 pb-2 border-b border-border/50">
-              <DollarSign className="h-4 w-4 text-emerald-500" />
-              <div className="text-sm">
-                <span className="font-semibold">
-                  {fmtUsd(valuation.low_usd)} – {fmtUsd(valuation.high_usd)}
-                </span>
-                <span className="text-muted-foreground ml-2">
-                  (mid {fmtUsd(valuation.mid_usd)})
-                </span>
+            <div className="space-y-2 pb-3 border-b border-border/50">
+              <div className="flex items-start gap-3">
+                <DollarSign className="h-4 w-4 mt-0.5 text-emerald-500" />
+                <div className="text-sm flex-1">
+                  <div className="text-xs font-mono uppercase text-muted-foreground">Current evidence-based value</div>
+                  <div>
+                    <span className="font-semibold">
+                      {fmtUsd(valuation.low_usd)} – {fmtUsd(valuation.high_usd)}
+                    </span>
+                    <span className="text-muted-foreground ml-2">(mid {fmtUsd(valuation.mid_usd)})</span>
+                  </div>
+                </div>
+                {valuation.confidence && <Badge variant="outline">{valuation.confidence} confidence</Badge>}
               </div>
+              {typeof valuation.potential_mid_usd === "number" && (
+                <div className="pl-7 text-sm">
+                  <div className="text-xs font-mono uppercase text-muted-foreground">Potential scenario value</div>
+                  <div className="font-medium">
+                    {fmtUsd(valuation.potential_low_usd)} – {fmtUsd(valuation.potential_high_usd)}
+                    <span className="text-muted-foreground ml-2">(mid {fmtUsd(valuation.potential_mid_usd)})</span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
           {market && (
             <>
               <div className="flex flex-wrap gap-2 text-xs">
                 <Badge variant="secondary">Demand {market.demand_score}/100</Badge>
+                {market.need_assessment && <Badge variant="secondary">Need {market.need_assessment.score}/100</Badge>}
                 <Badge variant="secondary">Ready {market.ship_readiness_score}/100</Badge>
                 <Badge>{market.verdict.replace(/_/g, " ")}</Badge>
               </div>
               <p className="text-sm text-muted-foreground">{market.tam_summary}</p>
+              {market.need_assessment && <div className="rounded-md border border-border/60 bg-background/50 p-3 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="text-xs font-mono uppercase text-muted-foreground">Need assessment</div>
+                  <Badge variant="outline">{market.need_assessment.urgency} urgency</Badge>
+                  <Badge variant="outline">{market.need_assessment.evidence_confidence} evidence</Badge>
+                  <Badge>{market.need_assessment.decision.replace(/_/g, " ")}</Badge>
+                </div>
+                <p className="text-sm">{market.need_assessment.problem}</p>
+                {market.need_assessment.validation_experiments.length > 0 && (
+                  <div>
+                    <div className="text-xs font-mono text-muted-foreground mb-1">Cheapest validation</div>
+                    <ul className="space-y-1 text-xs">
+                      {market.need_assessment.validation_experiments.slice(0, 3).map((experiment, index) => (
+                        <li key={index}>
+                          <span className="font-medium">{experiment.experiment}</span>{" "}
+                          <span className="text-muted-foreground">— pass when {experiment.success_metric} ({experiment.effort})</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>}
               {market.competitors.length > 0 && (
                 <div>
                   <div className="text-xs font-mono text-muted-foreground mb-1">Competitors</div>
                   <ul className="space-y-1 text-sm">
                     {market.competitors.slice(0, 5).map((c, i) => (
                       <li key={i} className="flex gap-2">
-                        <a
-                          href={c.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="font-medium text-blue-500 hover:underline"
-                        >
-                          {c.name}
-                        </a>
+                        {c.url ? (
+                          <a
+                            href={c.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-medium text-blue-500 hover:underline"
+                          >
+                            {c.name}
+                          </a>
+                        ) : (
+                          <span className="font-medium">{c.name}</span>
+                        )}
                         <span className="text-muted-foreground">— {c.differentiator}</span>
                       </li>
                     ))}
@@ -246,7 +286,27 @@ export function VibeToolsPanel({ analysisId, itemRank, kind, repos, existing }: 
                 </div>
               )}
               {valuation && (
-                <p className="text-xs text-muted-foreground italic">{valuation.reasoning}</p>
+                <div className="space-y-2 text-xs text-muted-foreground">
+                  <p className="italic">{valuation.reasoning}</p>
+                  {valuation.basis && <p>Basis: {valuation.basis.replace(/_/g, " ")}</p>}
+                  {valuation.missing_information?.length > 0 && (
+                    <p>Missing evidence: {valuation.missing_information.slice(0, 4).join("; ")}</p>
+                  )}
+                </div>
+              )}
+              {market.next_best_actions?.length > 0 && (
+                <div>
+                  <div className="text-xs font-mono text-muted-foreground mb-1">Best next actions</div>
+                  <ol className="list-decimal list-inside space-y-1 text-sm">
+                    {market.next_best_actions.map((action, index) => (
+                      <li key={index}>
+                        <span className="font-medium">{action.title}</span>{" "}
+                        <span className="text-muted-foreground">— {action.why} ({action.impact} impact, {action.effort})</span>
+                        <div className="ml-5 text-xs text-muted-foreground">Done when: {action.acceptance_check}</div>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
               )}
             </>
           )}

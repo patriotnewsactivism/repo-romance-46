@@ -57,7 +57,148 @@ async function gh(token: string, path: string, init?: RequestInit): Promise<Resp
   });
 }
 
+interface RepositoryEvidence {
+  repo: string;
+  description: string | null;
+  stars: number;
+  forks: number;
+  open_issues: number;
+  topics: string[];
+  created_at: string;
+  pushed_at: string;
+  size_kb: number;
+  archived: boolean;
+  is_fork: boolean;
+  homepage: string | null;
+  license: string | null;
+  default_branch: string;
+  file_count: number | null;
+  tree_truncated: boolean | null;
+  has_readme: boolean | null;
+  has_tests: boolean | null;
+  has_ci: boolean | null;
+  has_deployment_config: boolean | null;
+  has_migrations: boolean | null;
+}
+
+async function loadRepositoryEvidence(token: string, repo: string): Promise<RepositoryEvidence> {
+  const metadataResponse = await gh(token, `/repos/${repo}`);
+  if (!metadataResponse.ok) throw new Error(`GitHub metadata unavailable for ${repo} (${metadataResponse.status})`);
+  const metadata = (await metadataResponse.json()) as Record<string, unknown>;
+  const defaultBranch = typeof metadata.default_branch === "string" ? metadata.default_branch : "main";
+
+  let paths: string[] | null = null;
+  let treeTruncated: boolean | null = null;
+  const treeResponse = await gh(token, `/repos/${repo}/git/trees/${encodeURIComponent(defaultBranch)}?recursive=1`);
+  if (treeResponse.ok) {
+    const tree = (await treeResponse.json()) as {
+      truncated?: boolean;
+      tree?: Array<{ path?: string; type?: string }>;
+    };
+    treeTruncated = Boolean(tree.truncated);
+    paths = (tree.tree ?? [])
+      .filter((entry) => entry.type === "blob" && typeof entry.path === "string")
+      .map((entry) => entry.path as string);
+  }
+
+  const has = (pattern: RegExp): boolean | null => (paths ? paths.some((path) => pattern.test(path)) : null);
+  const license = metadata.license as { spdx_id?: unknown } | null | undefined;
+
+  return {
+    repo,
+    description: typeof metadata.description === "string" ? metadata.description : null,
+    stars: Number(metadata.stargazers_count) || 0,
+    forks: Number(metadata.forks_count) || 0,
+    open_issues: Number(metadata.open_issues_count) || 0,
+    topics: Array.isArray(metadata.topics) ? metadata.topics.filter((topic): topic is string => typeof topic === "string").slice(0, 20) : [],
+    created_at: typeof metadata.created_at === "string" ? metadata.created_at : "unknown",
+    pushed_at: typeof metadata.pushed_at === "string" ? metadata.pushed_at : "unknown",
+    size_kb: Number(metadata.size) || 0,
+    archived: Boolean(metadata.archived),
+    is_fork: Boolean(metadata.fork),
+    homepage: typeof metadata.homepage === "string" && metadata.homepage ? metadata.homepage : null,
+    license: license && typeof license.spdx_id === "string" ? license.spdx_id : null,
+    default_branch: defaultBranch,
+    file_count: paths?.length ?? null,
+    tree_truncated: treeTruncated,
+    has_readme: has(/(^|\/)readme(?:\.|$)/i),
+    has_tests: has(/(^|\/)(__tests__|tests?|specs?)(\/|$)|\.(test|spec)\.[cm]?[jt]sx?$/i),
+    has_ci: has(/^\.github\/workflows\//),
+    has_deployment_config: has(/(^|\/)(vercel\.json|netlify\.toml|render\.yaml|firebase\.json|Dockerfile|fly\.toml)$/i),
+    has_migrations: has(/(^|\/)(migrations?|supabase\/migrations)(\/|$)/i),
+  };
+}
+
 const idInput = z.object({ analysisId: z.string().uuid(), itemRank: z.number().int() });
+
+const evidenceStrengths = ["assumption", "weak", "moderate", "strong"] as const;
+const valuationConfidence = ["low", "medium", "high"] as const;
+
+const marketResultSchema = z
+  .object({
+    tam_summary: z.string().min(1),
+    target_users: z.array(z.string().min(1)).min(1).max(8),
+    competitors: z.array(
+      z.object({
+        name: z.string().min(1),
+        url: z.string(),
+        differentiator: z.string().min(1),
+        evidence_basis: z.string().min(1),
+      }),
+    ).max(8),
+    monetization: z.array(z.string().min(1)).min(1).max(8),
+    demand_score: z.number().int().min(0).max(100),
+    ship_readiness_score: z.number().int().min(0).max(100),
+    risks: z.array(z.string().min(1)).min(1).max(8),
+    verdict: z.enum(["ship_now", "finish_first", "combine_first", "shelve"]),
+    need_assessment: z.object({
+      score: z.number().int().min(0).max(100),
+      problem: z.string().min(1),
+      urgency: z.enum(["low", "medium", "high", "critical"]),
+      evidence_confidence: z.enum(valuationConfidence),
+      supporting_evidence: z.array(
+        z.object({ claim: z.string().min(1), source: z.string().min(1), strength: z.enum(evidenceStrengths) }),
+      ).max(12),
+      counter_evidence: z.array(z.string().min(1)).max(8),
+      validation_experiments: z.array(
+        z.object({ experiment: z.string().min(1), success_metric: z.string().min(1), effort: z.enum(["hours", "days", "weeks"]) }),
+      ).min(1).max(6),
+      decision: z.enum(["build_now", "validate_first", "deprioritize"]),
+    }),
+    next_best_actions: z.array(
+      z.object({
+        title: z.string().min(1),
+        why: z.string().min(1),
+        impact: z.enum(["low", "medium", "high"]),
+        effort: z.enum(["hours", "days", "weeks"]),
+        acceptance_check: z.string().min(1),
+      }),
+    ).min(1).max(6),
+    valuation: z.object({
+      low_usd: z.number().int().nonnegative(),
+      mid_usd: z.number().int().nonnegative(),
+      high_usd: z.number().int().nonnegative(),
+      reasoning: z.string().min(1),
+      basis: z.enum(["replacement_cost", "revenue_multiple", "market_comparables", "scenario_only"]),
+      confidence: z.enum(valuationConfidence),
+      evidence: z.array(z.string().min(1)).max(12),
+      missing_information: z.array(z.string().min(1)).max(12),
+      potential_low_usd: z.number().int().nonnegative(),
+      potential_mid_usd: z.number().int().nonnegative(),
+      potential_high_usd: z.number().int().nonnegative(),
+      potential_assumptions: z.array(z.string().min(1)).min(1).max(12),
+      what_changes_value: z.array(z.string().min(1)).min(1).max(12),
+    }),
+  })
+  .superRefine((value, ctx) => {
+    const current = value.valuation;
+    if (!(current.low_usd <= current.mid_usd && current.mid_usd <= current.high_usd)) {
+      ctx.addIssue({ code: "custom", path: ["valuation"], message: "Current valuation range must be ordered low to high" });
+    }
+    if (!(current.potential_low_usd <= current.potential_mid_usd && current.potential_mid_usd <= current.potential_high_usd)) {
+      ctx.addIssue({ code: "custom", path: ["valuation"], message: "Potential valuation range must be ordered low to high" });
+    }
+  });
 
 const marketSchema = {
   type: "object",
@@ -70,8 +211,13 @@ const marketSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        properties: { name: { type: "string" }, url: { type: "string" }, differentiator: { type: "string" } },
-        required: ["name", "url", "differentiator"],
+        properties: {
+          name: { type: "string" },
+          url: { type: "string" },
+          differentiator: { type: "string" },
+          evidence_basis: { type: "string" },
+        },
+        required: ["name", "url", "differentiator", "evidence_basis"],
       },
     },
     monetization: { type: "array", items: { type: "string" } },
@@ -79,6 +225,63 @@ const marketSchema = {
     ship_readiness_score: { type: "integer" },
     risks: { type: "array", items: { type: "string" } },
     verdict: { type: "string", enum: ["ship_now", "finish_first", "combine_first", "shelve"] },
+    need_assessment: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        score: { type: "integer", minimum: 0, maximum: 100 },
+        problem: { type: "string" },
+        urgency: { type: "string", enum: ["low", "medium", "high", "critical"] },
+        evidence_confidence: { type: "string", enum: ["low", "medium", "high"] },
+        supporting_evidence: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              claim: { type: "string" },
+              source: { type: "string" },
+              strength: { type: "string", enum: ["assumption", "weak", "moderate", "strong"] },
+            },
+            required: ["claim", "source", "strength"],
+          },
+        },
+        counter_evidence: { type: "array", items: { type: "string" } },
+        validation_experiments: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              experiment: { type: "string" },
+              success_metric: { type: "string" },
+              effort: { type: "string", enum: ["hours", "days", "weeks"] },
+            },
+            required: ["experiment", "success_metric", "effort"],
+          },
+        },
+        decision: { type: "string", enum: ["build_now", "validate_first", "deprioritize"] },
+      },
+      required: [
+        "score", "problem", "urgency", "evidence_confidence", "supporting_evidence",
+        "counter_evidence", "validation_experiments", "decision",
+      ],
+    },
+    next_best_actions: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          title: { type: "string" },
+          why: { type: "string" },
+          impact: { type: "string", enum: ["low", "medium", "high"] },
+          effort: { type: "string", enum: ["hours", "days", "weeks"] },
+          acceptance_check: { type: "string" },
+        },
+        required: ["title", "why", "impact", "effort", "acceptance_check"],
+      },
+    },
     valuation: {
       type: "object",
       additionalProperties: false,
@@ -87,13 +290,26 @@ const marketSchema = {
         mid_usd: { type: "integer" },
         high_usd: { type: "integer" },
         reasoning: { type: "string" },
+        basis: { type: "string", enum: ["replacement_cost", "revenue_multiple", "market_comparables", "scenario_only"] },
+        confidence: { type: "string", enum: ["low", "medium", "high"] },
+        evidence: { type: "array", items: { type: "string" } },
+        missing_information: { type: "array", items: { type: "string" } },
+        potential_low_usd: { type: "integer" },
+        potential_mid_usd: { type: "integer" },
+        potential_high_usd: { type: "integer" },
+        potential_assumptions: { type: "array", items: { type: "string" } },
+        what_changes_value: { type: "array", items: { type: "string" } },
       },
-      required: ["low_usd", "mid_usd", "high_usd", "reasoning"],
+      required: [
+        "low_usd", "mid_usd", "high_usd", "reasoning", "basis", "confidence", "evidence",
+        "missing_information", "potential_low_usd", "potential_mid_usd", "potential_high_usd",
+        "potential_assumptions", "what_changes_value",
+      ],
     },
   },
   required: [
     "tam_summary", "target_users", "competitors", "monetization",
-    "demand_score", "ship_readiness_score", "risks", "verdict", "valuation",
+    "demand_score", "ship_readiness_score", "risks", "verdict", "need_assessment", "next_best_actions", "valuation",
   ],
 };
 
@@ -104,18 +320,34 @@ router.post(
     const data = idInput.parse(req.body);
     const item = await loadItem(req.supabase!, data.analysisId, data.itemRank);
     const prefs = await loadPrefs(req.supabase!, req.userId!);
+    const githubToken = await loadGhToken(req.supabase!, req.userId!);
+    const evidenceResults = await Promise.allSettled(
+      item.repos.slice(0, 5).map((repo) => loadRepositoryEvidence(githubToken, repo)),
+    );
+    const repositoryEvidence = evidenceResults
+      .filter((result): result is PromiseFulfilledResult<RepositoryEvidence> => result.status === "fulfilled")
+      .map((result) => result.value);
+    const unavailableRepositories = evidenceResults
+      .map((result, index) => (result.status === "rejected" ? item.repos[index] : null))
+      .filter((repo): repo is string => Boolean(repo));
 
-    const sys = `You are a market analyst and startup valuator. Given a software project idea derived from GitHub repos, produce:
-- a realistic TAM summary (1-2 sentences)
-- target users (3-5 concrete personas)
-- 3-5 direct competitors with URL + one-line differentiator
-- 2-4 monetization paths ranked by fit
-- demand_score 0-100 (real current market pull)
-- ship_readiness_score 0-100 (how close to launchable)
-- top risks (3-5 items)
-- verdict (ship_now | finish_first | combine_first | shelve)
-- USD valuation range as an indie/bootstrapped micro-SaaS acquisition target (low/mid/high) with reasoning
-Be blunt and specific. No fluff.`;
+    const sys = `You are an evidence-disciplined product strategist, market analyst, and software valuator.
+
+Separate facts, inferences, and assumptions. You do not have live web research in this request. Repository metadata is evidence about the asset, not proof of market demand. Never invent revenue, customers, traffic, search volume, acquisition comparables, competitor facts, or verified URLs. A competitor URL may be empty when it cannot be supported; explain the evidence basis either way.
+
+Produce:
+- a TAM framing that is explicitly labeled as a directional hypothesis when external sources are absent
+- 3-5 concrete target-user personas and 2-4 monetization paths ranked by fit
+- direct competitors or substitute workflows, each with an evidence_basis
+- demand_score 0-100 and ship_readiness_score 0-100, calibrated to the supplied evidence
+- need_assessment: the exact user problem, urgency, 0-100 need score, evidence confidence, supporting and counter-evidence, cheap validation experiments with measurable pass/fail thresholds, and a build/validate/deprioritize decision
+- 3-6 next_best_actions ordered by impact, with effort and an objective acceptance check
+- risks and a verdict (ship_now | finish_first | combine_first | shelve)
+- CURRENT valuation low/mid/high based only on what exists today; use replacement cost when no traction or revenue evidence exists
+- POTENTIAL valuation low/mid/high as a separate scenario, with explicit assumptions required to reach it
+- valuation basis, confidence, evidence, missing information, and the facts that would materially change value
+
+Ranges must be ordered low <= mid <= high and non-negative. Most unfinished, pre-revenue side projects have modest current value. Be blunt, specific, and conservative.`;
 
     const usr = `Project: ${item.title}
 Pitch: ${item.pitch}
@@ -126,18 +358,24 @@ Effort remaining (0-10): ${item.effort}
 Estimated hours: ${item.estimated_hours ?? "unknown"}
 Existing next steps: ${item.next_steps.slice(0, 5).join(" | ")}`;
 
+    const evidencePacket = `Repository evidence (GitHub API, current at assessment time):
+${JSON.stringify(repositoryEvidence, null, 2)}
+Repositories whose evidence was unavailable: ${unavailableRepositories.join(", ") || "none"}
+
+Treat missing evidence as missing. Do not convert it into a positive claim.`;
+
     const resp = await callAI(
       {
         messages: [
           { role: "system", content: sys },
-          { role: "user", content: usr },
+          { role: "user", content: `${usr}\n\n${evidencePacket}` },
         ],
         responseFormat: { type: "json_schema", json_schema: { name: "market_and_value", strict: true, schema: marketSchema } },
       },
       { provider: prefs?.custom_ai_provider || "openai", apiKey: prefs?.custom_ai_key || null },
     );
 
-    const parsed = JSON.parse(resp.content || "{}");
+    const parsed = marketResultSchema.parse(JSON.parse(resp.content || "{}"));
     const { valuation, ...market } = parsed;
 
     await updateItem(req.supabase!, item.id, { market_analysis: market, valuation });

@@ -1,10 +1,11 @@
 import { useEffect } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster as SonnerToaster } from 'sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { Route, Switch, Router as WouterRouter } from 'wouter';
+import { Route, Switch, Router as WouterRouter, useLocation } from 'wouter';
 import { setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react';
 import { supabase } from '@/integrations/supabase/client';
+import { captureOperationalError, setSentryRoute, setSentryUser } from '@/lib/observability';
 
 import Landing from '@/pages/landing';
 import Auth from '@/pages/auth';
@@ -30,6 +31,13 @@ setAuthTokenGetter(async () => {
 });
 
 const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (error, query) => captureOperationalError(error, `query:${String(query.queryKey[0] ?? 'unknown')}`),
+  }),
+  mutationCache: new MutationCache({
+    onError: (error, _variables, _context, mutation) =>
+      captureOperationalError(error, `mutation:${String(mutation.options.mutationKey?.[0] ?? 'unknown')}`),
+  }),
   defaultOptions: {
     queries: {
       staleTime: 1000 * 60,
@@ -37,6 +45,24 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+function ObservabilityContext() {
+  const [location] = useLocation();
+
+  useEffect(() => {
+    setSentryRoute(location);
+  }, [location]);
+
+  useEffect(() => {
+    void supabase.auth.getSession().then(({ data }) => setSentryUser(data.session?.user.id ?? null));
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSentryUser(session?.user.id ?? null);
+    });
+    return () => data.subscription.unsubscribe();
+  }, []);
+
+  return null;
+}
 
 function Router() {
   return (
@@ -62,6 +88,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
+          <ObservabilityContext />
           <Router />
         </WouterRouter>
         <SonnerToaster position="top-right" theme="dark" />
