@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { callAI } from "./ai-provider";
 import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "./credentials";
+import { reasonAboutRepositoryPlan, type ReasonedPlanningResult } from "./reasoning-orchestrator";
 import { verifyDeploymentSandbox, type SandboxVerificationResult } from "./sandbox-verification";
 
 const MAX_CHANGES = 25;
@@ -36,6 +37,17 @@ export interface PreparedFinishPlan {
   summary: string;
   nextSteps: string[];
   changes: ValidatedFileChange[];
+  reasoning?: {
+    traceId: string | null;
+    version: string;
+    promptVersion: string;
+    strategyArm: "incumbent" | "challenger";
+    specialists: string[];
+    confidence: number;
+    risks: string[];
+    validation: string[];
+    stopConditions: string[];
+  };
 }
 
 export interface FinishResult {
@@ -99,10 +111,17 @@ function ghHeaders(token: string) {
 }
 
 async function ghFetch(token: string, path: string, opts?: RequestInit) {
-  return fetch(`https://api.github.com${path}`, {
-    ...opts,
-    headers: { ...ghHeaders(token), ...(opts?.headers || {}) },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
+  try {
+    return await fetch(`https://api.github.com${path}`, {
+      ...opts,
+      headers: { ...ghHeaders(token), ...(opts?.headers || {}) },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function encodeRepoPath(path: string) {
@@ -359,10 +378,11 @@ async function resolveNextSteps(
   return nextSteps.length > 0
     ? nextSteps
     : [
-        "Add a comprehensive README with installation and usage instructions",
-        "Set up basic CI/CD",
-        "Add basic tests",
-        "Fix obvious bugs or incomplete implementations that are supported by the inspected source",
+        "Fix verified user-visible blockers before adding speculative features",
+        "Make the core user flow complete and error-tolerant",
+        "Add or repair automated tests for the core behavior",
+        "Make CI, build, and deployment-preview verification pass without weakening acceptance criteria",
+        "Close security, configuration, documentation, and production-readiness gaps supported by repository evidence",
       ];
 }
 
@@ -373,44 +393,19 @@ async function generateFinishPlan(
   nextSteps: string[],
   aiProvider: string,
   aiKey: string | null,
+  reasoning?: ReasonedPlanningResult | null,
 ): Promise<AIFinishPlan> {
   const fileSummaries = files
-    .map((file) => `--- FILE: ${file.path} ---\n${file.content.slice(0, 3000)}`)
+    .map((file) => `--- FILE: ${file.path} ---\n${file.content.slice(0, 4000)}`)
     .join("\n\n");
 
-  const system = `You are a senior software engineer finishing an incomplete codebase.
-Generate the smallest concrete set of file changes that directly addresses verified gaps in the inspected repository.
+  const system = `You are RepoFinisher's senior coding agent. You receive a repository, inspected source, and an upstream multi-stage diagnosis. Generate the smallest concrete set of file changes that resolves accepted root causes and has the highest probability of passing the stated validation.\n\nBefore writing changes:\n1. Tie each code change to a verified blocker or accepted reasoning step.\n2. Preserve working interfaces unless the evidence proves the interface itself is the blocker.\n3. Consider edge cases, security, backwards compatibility, deployment behavior, and database migration safety.\n4. Prefer fixing root cause over symptoms.\n5. If the upstream reasoning identifies uncertainty, do not invent an API or dependency to fill the gap.\n\nRules:\n- Return complete final contents for created or modified files, not diffs.\n- For deleted files return an empty content string.\n- Never create or modify secrets, private keys, production .env files, credential files, package-manager auth files, or cloud credentials.\n- Never replace, edit, or delete an existing license.\n- Never weaken tests, CI/security controls, permissions, approval gates, or acceptance criteria merely to make a run pass.\n- Never delete workflows, SECURITY.md, or CODEOWNERS.\n- Generated GitHub Actions must not use pull_request_target, write-all permissions, or repository secrets.\n- Do not rewrite entire files unless necessary; preserve working behavior.\n- Add a license only if explicitly requested and the repository has no license.\n- Keep the plan to ${MAX_CHANGES} files or fewer.\n\nReturn JSON with analysis and changes[]. Each change has path, status (created|modified|deleted), content, and description.`;
 
-Before writing changes:
-1. Identify the specific blocking or incomplete behavior visible in the provided source and health data.
-2. Consider edge cases, security risk, backwards compatibility, and whether a change is actually supported by evidence.
-3. Form a minimal execution plan. Do not add speculative features just to make the change list longer.
+  const reasoningText = reasoning
+    ? `\nReasoning version: ${reasoning.version}\nPrompt strategy: ${reasoning.promptVersion} (${reasoning.strategyArm})\nReasoning confidence: ${reasoning.confidence}/100\nSpecialists: ${reasoning.specialists.join(", ") || "none"}\nReasoning summary: ${reasoning.summary}\nRisks:\n${reasoning.risks.map((risk) => `- ${risk}`).join("\n")}\nValidation expectations:\n${reasoning.validation.map((step) => `- ${step}`).join("\n")}\nStop conditions:\n${reasoning.stopConditions.map((step) => `- ${step}`).join("\n")}\n`
+    : "";
 
-Rules:
-- Return complete final contents for created or modified files, not diffs.
-- For deleted files return an empty content string.
-- Never create or modify secrets, private keys, production .env files, credential files, package-manager auth files, or cloud credentials.
-- Never replace, edit, or delete an existing license.
-- Never weaken CI/security controls or delete workflows, SECURITY.md, or CODEOWNERS.
-- Generated GitHub Actions must not use pull_request_target, write-all permissions, or repository secrets.
-- Do not rewrite entire files unless necessary; preserve working interfaces and behavior.
-- Add a license only if the recommended next steps explicitly request one and the repository has no license.
-- Keep the plan to ${MAX_CHANGES} files or fewer.
-
-Return JSON with analysis and changes[]. Each change has path, status (created|modified|deleted), content, and description.`;
-
-  const user = `Repo: ${repo}
-Description: ${repoData.description || "none"}
-Language: ${repoData.language || "unknown"}
-Topics: ${repoData.topics.join(", ") || "none"}
-Stars: ${repoData.stars} | Open Issues: ${repoData.open_issues}
-Health: CI=${repoData.has_ci}, Tests=${repoData.has_tests}, License=${repoData.has_license}, README=${repoData.has_readme}, Homepage=${repoData.has_homepage}
-
-Recommended next steps:
-${nextSteps.map((step) => `- ${step}`).join("\n")}
-
-Inspected source files:
-${fileSummaries}`;
+  const user = `Repo: ${repo}\nDescription: ${repoData.description || "none"}\nLanguage: ${repoData.language || "unknown"}\nTopics: ${repoData.topics.join(", ") || "none"}\nStars: ${repoData.stars} | Open Issues: ${repoData.open_issues}\nHealth: CI=${repoData.has_ci}, Tests=${repoData.has_tests}, License=${repoData.has_license}, README=${repoData.has_readme}, Homepage=${repoData.has_homepage}\n${reasoningText}\nOrdered completion plan:\n${nextSteps.map((step) => `- ${step}`).join("\n")}\n\nInspected source files:\n${fileSummaries}`;
 
   const result = await callAI(
     {
@@ -449,6 +444,8 @@ ${fileSummaries}`;
           },
         },
       },
+      thinkingLevel: reasoning ? "high" : "medium",
+      timeoutMs: 75_000,
     },
     { provider: aiProvider, apiKey: aiKey },
   );
@@ -473,12 +470,37 @@ export function hashPreparedPlan(plan: PreparedFinishPlan) {
 export async function prepareFinishPlan(
   supabase: SupabaseClient,
   userId: string,
-  data: { repo: string; nextSteps?: string[]; analysisId?: string; itemRank?: number },
+  data: {
+    repo: string;
+    nextSteps?: string[];
+    analysisId?: string;
+    itemRank?: number;
+    completionRunId?: string;
+    portfolioRunId?: string;
+    reasoning?: boolean;
+    mode?: "plan" | "replan";
+  },
 ) {
+  const requestedNextSteps = await resolveNextSteps(supabase, data);
+  let reasoning: ReasonedPlanningResult | null = null;
+  if (data.reasoning !== false) {
+    try {
+      reasoning = await reasonAboutRepositoryPlan(supabase, userId, {
+        repo: data.repo,
+        requestedNextSteps,
+        analysisId: data.analysisId,
+        itemRank: data.itemRank,
+        completionRunId: data.completionRunId,
+        portfolioRunId: data.portfolioRunId,
+        mode: data.mode ?? "plan",
+      });
+    } catch (error) {
+      console.warn(`[repo-finisher] deep reasoning failed for ${data.repo}; falling back to evidence-aware direct planning:`, error instanceof Error ? error.message : error);
+    }
+  }
+  const nextSteps = reasoning?.nextSteps?.length ? reasoning.nextSteps : requestedNextSteps;
   const context = await loadRepoContext(supabase, userId, data.repo);
-  const nextSteps = await resolveNextSteps(supabase, data);
   const files = await fetchKeyFiles(context.token, data.repo, context.baseSha, context.tree);
-
   const aiCredential = await loadAiCredential(supabase, userId, context.token);
 
   const generated = await generateFinishPlan(
@@ -488,6 +510,7 @@ export async function prepareFinishPlan(
     nextSteps,
     aiCredential.provider,
     aiCredential.apiKey,
+    reasoning,
   );
   const changes = validatePlanChanges(generated.changes, context.tree);
 
@@ -497,12 +520,25 @@ export async function prepareFinishPlan(
     repo: data.repo,
     defaultBranch: context.defaultBranch,
     baseSha: context.baseSha,
-    summary: generated.analysis,
+    summary: reasoning ? `${reasoning.summary}\n\nCoding plan: ${generated.analysis}` : generated.analysis,
     nextSteps,
     changes,
+    reasoning: reasoning
+      ? {
+          traceId: reasoning.traceId,
+          version: reasoning.version,
+          promptVersion: reasoning.promptVersion,
+          strategyArm: reasoning.strategyArm,
+          specialists: reasoning.specialists,
+          confidence: reasoning.confidence,
+          risks: reasoning.risks,
+          validation: reasoning.validation,
+          stopConditions: reasoning.stopConditions,
+        }
+      : undefined,
   };
 
-  return { plan, planHash: hashPreparedPlan(plan) };
+  return { plan, planHash: hashPreparedPlan(plan), reasoning };
 }
 
 async function createBlob(token: string, repo: string, content: string) {
@@ -624,10 +660,13 @@ export async function executePreparedPlan(
     status: change.status,
     description: change.description,
   }));
+  const reasoningSection = plan.reasoning
+    ? `\n### Reasoning and learning\n\n- Strategy: \`${plan.reasoning.promptVersion}\` (${plan.reasoning.strategyArm})\n- Confidence: ${plan.reasoning.confidence}/100\n- Specialists: ${plan.reasoning.specialists.join(", ") || "none"}\n- Reasoning trace: ${plan.reasoning.traceId || "not persisted"}\n`
+    : "";
   const prTitle = `🤖 RepoFinisher: ${changes.length} approved improvement${changes.length === 1 ? "" : "s"}`;
   const prBody = `## Approved RepoFinisher run\n\n${plan.summary}\n\n### Changes (${changes.length})\n\n${changeLog
     .map((change) => `- [${change.status === "created" ? "+" : change.status === "modified" ? "~" : "-"}] \`${change.file}\` — ${change.description}`)
-    .join("\n")}\n\n### Approval binding\n\n- Base commit: \`${plan.baseSha}\`\n- Plan hash: \`${expectedPlanHash}\`\n- Generated commit: \`${commit.sha}\`\n\nThis pull request is intentionally **draft**. Required checks and review should pass before merge.\n\n---\n\n*Generated by RepoFinisher.*`;
+    .join("\n")}${reasoningSection}\n### Approval binding\n\n- Base commit: \`${plan.baseSha}\`\n- Plan hash: \`${expectedPlanHash}\`\n- Generated commit: \`${commit.sha}\`\n\nThis pull request is intentionally **draft**. Required checks and review should pass before merge.\n\n---\n\n*Generated by RepoFinisher.*`;
   const pr = await createDraftPR(token, plan.repo, branchName, plan.defaultBranch, prTitle, prBody);
 
   const result: FinishResult = {
