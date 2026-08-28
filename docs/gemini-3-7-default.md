@@ -1,15 +1,11 @@
-# Gemini 3.7 Flash default
+# Historical Gemini default note
 
-Repo Romance now treats Google Gemini as the platform-default AI provider.
+This file is retained only to prevent old links from becoming misleading.
 
-- Default provider: `google`
-- Default model: `gemini-3.7-flash`
-- Server environment fallback: `GEMINI_API_KEY` or `GOOGLE_API_KEY`
-- User BYOK credentials still override the platform credential.
-- Historical `github_models` preferences are redirected to Google by the credential loader.
+The previous note in this location described Gemini as a fixed platform default and referenced a Vercel-hosted API. That architecture is obsolete.
 
-## Supabase Edge Function Secrets
+Current provider/model behavior is documented in [`AI_PROVIDERS.md`](AI_PROVIDERS.md).
 
-If the Gemini key is stored as a Supabase Edge Function secret, it is available only inside Supabase Edge Functions. The current Vercel-hosted API cannot read that value directly. To consume that secret without duplicating it into Vercel, route Gemini calls through an authenticated Supabase Edge Function.
+Current repository-wide operating rules are in [`../AGENTS.md`](../AGENTS.md).
 
-Never expose the Gemini key to frontend code or return it through API responses.
+Current production hosting is Netlify frontend + Render persistent API + Supabase auth/database/Vault. Vercel is not an approved RepoFinisher deployment target.
