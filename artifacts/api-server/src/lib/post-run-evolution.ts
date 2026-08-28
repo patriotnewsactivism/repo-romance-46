@@ -15,6 +15,7 @@ import {
 } from "@workspace/repo-os";
 import { loadGithubCredential, requireGithubCredential } from "./credentials";
 import { recordRepoLearning } from "./adaptive-learning";
+import { recordRunOutcomeMemories } from "./learning-memory";
 import {
   normalizeInvestmentMetrics,
   scoreRunOutcome,
@@ -90,12 +91,18 @@ function ghHeaders(token: string) {
 }
 
 async function ghJson<T>(token: string, path: string): Promise<T> {
-  const response = await fetch(`${GH_API}${path}`, { headers: ghHeaders(token) });
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`GitHub ${path} returned ${response.status}: ${body.slice(0, 180)}`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
+  try {
+    const response = await fetch(`${GH_API}${path}`, { headers: ghHeaders(token), signal: controller.signal });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`GitHub ${path} returned ${response.status}: ${body.slice(0, 180)}`);
+    }
+    return (await response.json()) as T;
+  } finally {
+    clearTimeout(timer);
   }
-  return (await response.json()) as T;
 }
 
 function encodePath(path: string) {
@@ -103,13 +110,19 @@ function encodePath(path: string) {
 }
 
 async function ghRaw(token: string, repo: string, path: string, ref: string): Promise<string | null> {
-  const response = await fetch(
-    `${GH_API}/repos/${repo}/contents/${encodePath(path)}?ref=${encodeURIComponent(ref)}`,
-    { headers: { ...ghHeaders(token), Accept: "application/vnd.github.raw" } },
-  );
-  if (!response.ok) return null;
-  const text = await response.text();
-  return text.length <= 220_000 ? text : null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
+  try {
+    const response = await fetch(
+      `${GH_API}/repos/${repo}/contents/${encodePath(path)}?ref=${encodeURIComponent(ref)}`,
+      { headers: { ...ghHeaders(token), Accept: "application/vnd.github.raw" }, signal: controller.signal },
+    );
+    if (!response.ok) return null;
+    const text = await response.text();
+    return text.length <= 220_000 ? text : null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function priority(path: string): number {
@@ -382,6 +395,11 @@ function portfolioSummary(ranking: Array<InvestmentOpportunityInput & { rank: nu
   };
 }
 
+function effectivePromptVersion(run: EvolvableCompletionRun) {
+  const planVersion = run.plan?.reasoning?.promptVersion;
+  return planVersion || run.prompt_version || "unknown";
+}
+
 async function rescorePortfolio(
   supabase: SupabaseClient,
   userId: string,
@@ -465,6 +483,7 @@ async function rescorePortfolio(
   const target = ranking.find((item) => item.repo === run.repo);
   const after = normalizeInvestmentMetrics(target);
   const generatedAt = new Date().toISOString();
+  const promptVersion = effectivePromptVersion(run);
   const updatedIntelligence = {
     ...intelligenceRecord,
     generatedAt,
@@ -477,7 +496,7 @@ async function rescorePortfolio(
       runId: run.id,
       repo: run.repo,
       commit: run.head_sha,
-      promptVersion: run.prompt_version ?? "unknown",
+      promptVersion,
       generatedAt,
     },
   };
@@ -535,6 +554,7 @@ export async function finalizeRunEvolution(
     filesChanged: filesAffected(run).length,
   });
   const evaluatedAt = new Date().toISOString();
+  const promptVersion = effectivePromptVersion(run);
   const outcomeMetrics = {
     baseline,
     after,
@@ -542,7 +562,8 @@ export async function finalizeRunEvolution(
     summary: outcome.summary,
     intelligenceUpdated,
     rescoreError,
-    promptVersion: run.prompt_version ?? "unknown",
+    promptVersion,
+    reasoning: run.plan?.reasoning ?? null,
     evaluatedAt,
   };
 
@@ -552,6 +573,7 @@ export async function finalizeRunEvolution(
       outcome_metrics: outcomeMetrics,
       outcome_score: outcome.outcomeScore,
       evaluated_at: evaluatedAt,
+      prompt_version: promptVersion,
     })
     .eq("id", run.id)
     .eq("user_id", userId)
@@ -560,7 +582,7 @@ export async function finalizeRunEvolution(
     .maybeSingle();
   if (updateError || !claimed) return null;
 
-  const strategy = `prompt:${run.prompt_version ?? "unknown"}`;
+  const strategy = `prompt:${promptVersion}`;
   await recordRepoLearning(supabase, userId, run.repo, {
     action: "completion_run_evaluated",
     outcome: run.status === "succeeded" ? "success" : run.status === "stale" ? "partial" : "failure",
@@ -569,7 +591,7 @@ export async function finalizeRunEvolution(
     files_affected: filesAffected(run),
     error_message: run.error ?? rescoreError ?? undefined,
     fix_pattern: strategy,
-    prompt_version: run.prompt_version ?? "unknown",
+    prompt_version: promptVersion,
     metadata: {
       outcome_score: outcome.outcomeScore,
       completion_delta: outcome.deltas.completionPct,
@@ -581,11 +603,25 @@ export async function finalizeRunEvolution(
       analysis_id: run.analysis_id ?? null,
       item_rank: run.item_rank ?? null,
       intelligence_updated: intelligenceUpdated,
+      reasoning_trace_id: run.plan?.reasoning?.traceId ?? null,
+      reasoning_confidence: run.plan?.reasoning?.confidence ?? null,
+      specialists: run.plan?.reasoning?.specialists ?? [],
       run_id: run.id,
       head_sha: run.head_sha,
     },
     timestamp: evaluatedAt,
   });
+
+  await recordRunOutcomeMemories(supabase, userId, {
+    repo: run.repo,
+    promptVersion,
+    status: run.status as "succeeded" | "failed" | "stale",
+    outcomeScore: outcome.outcomeScore,
+    completionDelta: outcome.deltas.completionPct,
+    readinessDelta: outcome.deltas.productionReadinessPct,
+    error: run.error ?? rescoreError,
+    filesAffected: filesAffected(run),
+  }).catch(() => undefined);
 
   await supabase.from("completion_events").insert({
     run_id: run.id,
