@@ -10,11 +10,12 @@ import {
 } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { getSession, signInWithGitHub } from '@/lib/auth';
+import { AppHeader } from '@/components/app-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
-import { GitBranch, Plus, Star, Code, Clock, AlertCircle, CheckCircle, Loader2, Settings, Trash2 } from 'lucide-react';
+import { Plus, Code, AlertCircle, CheckCircle, Loader2, Trash2 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -48,9 +49,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     getSession().then(session => {
-      if (!session) {
-        setLocation('/auth');
-      }
+      if (!session) setLocation('/auth');
     });
   }, [setLocation]);
 
@@ -61,9 +60,7 @@ export default function Dashboard() {
         setLocation(`/analysis/${data.id}`);
       },
       onError: (error) => {
-        toast.error('Failed to start analysis', {
-          description: error.message
-        });
+        toast.error('Failed to start analysis', { description: error.message });
       }
     });
   };
@@ -84,12 +81,6 @@ export default function Dashboard() {
   }
 
   if (!githubStatus?.connected) {
-    // Note: this deliberately calls signInWithGitHub() directly rather than
-    // linking to /auth — the user already has a Supabase session at this
-    // point, and /auth's own redirect guard would bounce straight back to
-    // /dashboard without ever re-prompting GitHub OAuth, trapping the user
-    // in a loop. A fresh GitHub OAuth round-trip is what's actually needed
-    // to obtain a new provider_token for auth-callback.tsx to persist.
     return (
       <div className="min-h-screen bg-background dark flex items-center justify-center p-4">
         <Card className="max-w-md">
@@ -109,36 +100,17 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-background dark">
-      {/* Header */}
-      <div className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center gap-6">
-              <Link href="/dashboard" className="flex items-center gap-2">
-                <GitBranch className="w-6 h-6 text-primary" />
-                <span className="font-bold text-xl">RepoFinisher</span>
-              </Link>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <img 
-                  src={githubStatus.avatarUrl || ''} 
-                  alt={githubStatus.login || ''} 
-                  className="w-6 h-6 rounded-full"
-                />
-                <span>{githubStatus.displayName || githubStatus.login}</span>
-              </div>
-            </div>
-            <Link href="/settings">
-              <Button variant="ghost" size="sm" data-testid="button-settings">
-                <Settings className="w-4 h-4" />
-              </Button>
-            </Link>
-          </div>
-        </div>
-      </div>
+      <AppHeader
+        section="Portfolio"
+        user={{
+          login: githubStatus.login,
+          displayName: githubStatus.displayName,
+          avatarUrl: githubStatus.avatarUrl,
+        }}
+      />
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        {/* Stats */}
-        <div className="grid gap-4 md:grid-cols-4">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-8">
+        <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader className="pb-3">
               <CardDescription className="text-xs uppercase tracking-wide">Repositories</CardDescription>
@@ -176,7 +148,6 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        {/* Top languages */}
         {!portfolioLoading && portfolio && portfolio.languages.length > 0 && (
           <Card>
             <CardHeader>
@@ -194,17 +165,16 @@ export default function Dashboard() {
           </Card>
         )}
 
-        {/* Run Analysis CTA */}
         <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
           <CardHeader>
             <CardTitle>Run New Analysis</CardTitle>
             <CardDescription>
-              AI maps each viable repo to a production-ready completion path, then critiques and refines the plan before execution
+              Analyze the portfolio, rank completion and value, then finish individual repositories with one autonomous action.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Button 
-              onClick={handleRunAnalysis} 
+            <Button
+              onClick={handleRunAnalysis}
               disabled={runAnalysis.isPending}
               size="lg"
               data-testid="button-run-analysis"
@@ -224,14 +194,11 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* Analysis History */}
         <div>
           <h2 className="text-2xl font-bold mb-4">Analysis History</h2>
           {analysesLoading ? (
             <div className="space-y-4">
-              {[1, 2, 3].map(i => (
-                <Skeleton key={i} className="h-24" />
-              ))}
+              {[1, 2, 3].map(i => <Skeleton key={i} className="h-24" />)}
             </div>
           ) : analyses && analyses.length > 0 ? (
             <div className="grid gap-4">
@@ -239,9 +206,9 @@ export default function Dashboard() {
                 <Link key={analysis.id} href={`/analysis/${analysis.id}`}>
                   <Card className="hover:border-primary/40 transition-colors cursor-pointer" data-testid={`card-analysis-${analysis.id}`}>
                     <CardContent className="pt-6">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1 space-y-2">
-                          <div className="flex items-center gap-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0 space-y-2">
+                          <div className="flex items-center gap-3 flex-wrap">
                             {analysis.status === 'running' && (
                               <Badge variant="secondary" className="bg-primary/10 text-primary border-primary/20">
                                 <Loader2 className="w-3 h-3 mr-1 animate-spin" />
@@ -264,28 +231,20 @@ export default function Dashboard() {
                               {formatDistanceToNow(new Date(analysis.created_at), { addSuffix: true })}
                             </span>
                           </div>
-                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                          <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
                             {analysis.repo_count && (
                               <div className="flex items-center gap-1">
                                 <Code className="w-4 h-4" />
                                 {analysis.repo_count} repos
                               </div>
                             )}
-                            {analysis.ai_provider && (
-                              <div className="font-mono text-xs">
-                                {analysis.ai_provider}
-                              </div>
-                            )}
+                            {analysis.ai_provider && <div className="font-mono text-xs">{analysis.ai_provider}</div>}
                           </div>
                           {analysis.error && analysis.status === 'running' && (
-                            <p className="text-sm text-muted-foreground italic">
-                              {analysis.error}
-                            </p>
+                            <p className="text-sm text-muted-foreground italic break-words">{analysis.error}</p>
                           )}
                           {analysis.error && analysis.status === 'failed' && (
-                            <p className="text-sm text-destructive">
-                              {analysis.error}
-                            </p>
+                            <p className="text-sm text-destructive break-words">{analysis.error}</p>
                           )}
                         </div>
                         <Button
