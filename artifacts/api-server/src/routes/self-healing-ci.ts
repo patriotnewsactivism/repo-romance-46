@@ -78,7 +78,7 @@ router.post(
       .eq("id", runId)
       .eq("user_id", req.userId!);
     if (error) throw new Error(`Failed to save CI repair policy: ${error.message}`);
-    res.json({ runId, enabled: body.enabled, maxAttempts: body.maxAttempts });
+    return res.json({ runId, enabled: body.enabled, maxAttempts: body.maxAttempts });
   }),
 );
 
@@ -105,7 +105,7 @@ router.post(
     }
     const scheduled = await tryScheduleCiRepair(req.supabase!, req.userId!, run, verification);
     const latest = await loadRun(req, runId);
-    res.json({
+    return res.json({
       runId,
       scheduled,
       status: latest.status,
@@ -177,7 +177,7 @@ router.post(
         .eq("id", runId)
         .eq("user_id", req.userId!);
     }
-    res.json({ runId, scheduled, status: scheduled > 0 ? "verifying" : (portfolioRun as Record<string, unknown>).status });
+    return res.json({ runId, scheduled, status: scheduled > 0 ? "verifying" : (portfolioRun as Record<string, unknown>).status });
   }),
 );
 
