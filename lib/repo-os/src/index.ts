@@ -15,6 +15,7 @@ export * from "./classification";
 export * from "./scoring";
 export * from "./valuation";
 export * from "./investment-intelligence";
+export * from "./portfolio-valuation";
 export * from "./portfolio";
 export * from "./run-state";
 export * from "./approvals";
