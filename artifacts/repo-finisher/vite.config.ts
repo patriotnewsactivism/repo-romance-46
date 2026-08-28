@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
+import { sentryVitePlugin } from "@sentry/vite-plugin";
 
 const rawPort = process.env.PORT ?? "3000";
 const port = Number(rawPort);
@@ -12,6 +13,10 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 const basePath = process.env.BASE_PATH ?? "/";
+const sentryRelease = process.env.SENTRY_RELEASE ?? process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA ?? "";
+const uploadSentrySourceMaps = Boolean(
+  process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT && sentryRelease,
+);
 
 export default defineConfig({
   base: basePath,
@@ -32,7 +37,25 @@ export default defineConfig({
           ),
         ]
       : []),
+    ...(uploadSentrySourceMaps
+      ? [
+          sentryVitePlugin({
+            authToken: process.env.SENTRY_AUTH_TOKEN,
+            org: process.env.SENTRY_ORG,
+            project: process.env.SENTRY_PROJECT,
+            release: { name: sentryRelease },
+            sourcemaps: {
+              assets: "./dist/public/**",
+              filesToDeleteAfterUpload: ["./dist/public/**/*.map"],
+            },
+            telemetry: false,
+          }),
+        ]
+      : []),
   ],
+  define: {
+    __SENTRY_RELEASE__: JSON.stringify(sentryRelease),
+  },
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "src"),
@@ -44,6 +67,7 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    sourcemap: uploadSentrySourceMaps ? "hidden" : false,
   },
   server: {
     port,

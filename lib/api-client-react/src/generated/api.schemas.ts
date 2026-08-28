@@ -5,8 +5,21 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export type HealthStatusObservabilitySentry = {
+  enabled: boolean;
+  environment: string;
+  /** @nullable */
+  release: string | null;
+  traces_sample_rate: number;
+};
+
+export type HealthStatusObservability = {
+  sentry: HealthStatusObservabilitySentry;
+};
+
 export interface HealthStatus {
   status: string;
+  observability: HealthStatusObservability;
 }
 
 export interface GithubStatus {
@@ -123,6 +136,7 @@ export interface MarketCompetitor {
   name: string;
   url: string;
   differentiator: string;
+  evidence_basis: string;
 }
 
 export type MarketAnalysisVerdict = typeof MarketAnalysisVerdict[keyof typeof MarketAnalysisVerdict];
@@ -135,6 +149,106 @@ export const MarketAnalysisVerdict = {
   shelve: 'shelve',
 } as const;
 
+export type NeedAssessmentUrgency = typeof NeedAssessmentUrgency[keyof typeof NeedAssessmentUrgency];
+
+
+export const NeedAssessmentUrgency = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  critical: 'critical',
+} as const;
+
+export type NeedAssessmentEvidenceConfidence = typeof NeedAssessmentEvidenceConfidence[keyof typeof NeedAssessmentEvidenceConfidence];
+
+
+export const NeedAssessmentEvidenceConfidence = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
+
+export type MarketEvidenceStrength = typeof MarketEvidenceStrength[keyof typeof MarketEvidenceStrength];
+
+
+export const MarketEvidenceStrength = {
+  assumption: 'assumption',
+  weak: 'weak',
+  moderate: 'moderate',
+  strong: 'strong',
+} as const;
+
+export interface MarketEvidence {
+  claim: string;
+  source: string;
+  strength: MarketEvidenceStrength;
+}
+
+export type NeedValidationExperimentEffort = typeof NeedValidationExperimentEffort[keyof typeof NeedValidationExperimentEffort];
+
+
+export const NeedValidationExperimentEffort = {
+  hours: 'hours',
+  days: 'days',
+  weeks: 'weeks',
+} as const;
+
+export interface NeedValidationExperiment {
+  experiment: string;
+  success_metric: string;
+  effort: NeedValidationExperimentEffort;
+}
+
+export type NeedAssessmentDecision = typeof NeedAssessmentDecision[keyof typeof NeedAssessmentDecision];
+
+
+export const NeedAssessmentDecision = {
+  build_now: 'build_now',
+  validate_first: 'validate_first',
+  deprioritize: 'deprioritize',
+} as const;
+
+export interface NeedAssessment {
+  /**
+     * @minimum 0
+     * @maximum 100
+     */
+  score: number;
+  problem: string;
+  urgency: NeedAssessmentUrgency;
+  evidence_confidence: NeedAssessmentEvidenceConfidence;
+  supporting_evidence: MarketEvidence[];
+  counter_evidence: string[];
+  validation_experiments: NeedValidationExperiment[];
+  decision: NeedAssessmentDecision;
+}
+
+export type MarketNextActionImpact = typeof MarketNextActionImpact[keyof typeof MarketNextActionImpact];
+
+
+export const MarketNextActionImpact = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
+
+export type MarketNextActionEffort = typeof MarketNextActionEffort[keyof typeof MarketNextActionEffort];
+
+
+export const MarketNextActionEffort = {
+  hours: 'hours',
+  days: 'days',
+  weeks: 'weeks',
+} as const;
+
+export interface MarketNextAction {
+  title: string;
+  why: string;
+  impact: MarketNextActionImpact;
+  effort: MarketNextActionEffort;
+  acceptance_check: string;
+}
+
 export interface MarketAnalysis {
   tam_summary: string;
   target_users: string[];
@@ -144,13 +258,43 @@ export interface MarketAnalysis {
   ship_readiness_score: number;
   risks: string[];
   verdict: MarketAnalysisVerdict;
+  need_assessment: NeedAssessment;
+  next_best_actions: MarketNextAction[];
 }
+
+export type MarketValuationBasis = typeof MarketValuationBasis[keyof typeof MarketValuationBasis];
+
+
+export const MarketValuationBasis = {
+  replacement_cost: 'replacement_cost',
+  revenue_multiple: 'revenue_multiple',
+  market_comparables: 'market_comparables',
+  scenario_only: 'scenario_only',
+} as const;
+
+export type MarketValuationConfidence = typeof MarketValuationConfidence[keyof typeof MarketValuationConfidence];
+
+
+export const MarketValuationConfidence = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
 
 export interface MarketValuation {
   low_usd: number;
   mid_usd: number;
   high_usd: number;
   reasoning: string;
+  basis: MarketValuationBasis;
+  confidence: MarketValuationConfidence;
+  evidence: string[];
+  missing_information: string[];
+  potential_low_usd: number;
+  potential_mid_usd: number;
+  potential_high_usd: number;
+  potential_assumptions: string[];
+  what_changes_value: string[];
 }
 
 export interface VibeSpec {

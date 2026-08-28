@@ -5,10 +5,21 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { MarketValuationBasis } from './marketValuationBasis';
+import type { MarketValuationConfidence } from './marketValuationConfidence';
 
 export interface MarketValuation {
   low_usd: number;
   mid_usd: number;
   high_usd: number;
   reasoning: string;
+  basis: MarketValuationBasis;
+  confidence: MarketValuationConfidence;
+  evidence: string[];
+  missing_information: string[];
+  potential_low_usd: number;
+  potential_mid_usd: number;
+  potential_high_usd: number;
+  potential_assumptions: string[];
+  what_changes_value: string[];
 }

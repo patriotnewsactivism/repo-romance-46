@@ -7,6 +7,8 @@
  */
 import type { MarketAnalysisVerdict } from './marketAnalysisVerdict';
 import type { MarketCompetitor } from './marketCompetitor';
+import type { MarketNextAction } from './marketNextAction';
+import type { NeedAssessment } from './needAssessment';
 
 export interface MarketAnalysis {
   tam_summary: string;
@@ -17,4 +19,6 @@ export interface MarketAnalysis {
   ship_readiness_score: number;
   risks: string[];
   verdict: MarketAnalysisVerdict;
+  need_assessment: NeedAssessment;
+  next_best_actions: MarketNextAction[];
 }

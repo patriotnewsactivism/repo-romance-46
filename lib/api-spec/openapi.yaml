@@ -536,10 +536,26 @@ components:
   schemas:
     HealthStatus:
       type: object
-      required: [status]
+      required: [status, observability]
       properties:
         status:
           type: string
+        observability:
+          type: object
+          required: [sentry]
+          properties:
+            sentry:
+              type: object
+              required: [enabled, environment, release, traces_sample_rate]
+              properties:
+                enabled:
+                  type: boolean
+                environment:
+                  type: string
+                release:
+                  type: ["string", "null"]
+                traces_sample_rate:
+                  type: number
 
     GithubStatus:
       type: object
@@ -1177,7 +1193,7 @@ components:
 
     MarketCompetitor:
       type: object
-      required: [name, url, differentiator]
+      required: [name, url, differentiator, evidence_basis]
       properties:
         name:
           type: string
@@ -1185,11 +1201,87 @@ components:
           type: string
         differentiator:
           type: string
+        evidence_basis:
+          type: string
+
+    MarketEvidence:
+      type: object
+      required: [claim, source, strength]
+      properties:
+        claim:
+          type: string
+        source:
+          type: string
+        strength:
+          type: string
+          enum: [assumption, weak, moderate, strong]
+
+    NeedValidationExperiment:
+      type: object
+      required: [experiment, success_metric, effort]
+      properties:
+        experiment:
+          type: string
+        success_metric:
+          type: string
+        effort:
+          type: string
+          enum: [hours, days, weeks]
+
+    NeedAssessment:
+      type: object
+      required:
+        [score, problem, urgency, evidence_confidence, supporting_evidence, counter_evidence, validation_experiments, decision]
+      properties:
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        problem:
+          type: string
+        urgency:
+          type: string
+          enum: [low, medium, high, critical]
+        evidence_confidence:
+          type: string
+          enum: [low, medium, high]
+        supporting_evidence:
+          type: array
+          items:
+            $ref: "#/components/schemas/MarketEvidence"
+        counter_evidence:
+          type: array
+          items:
+            type: string
+        validation_experiments:
+          type: array
+          items:
+            $ref: "#/components/schemas/NeedValidationExperiment"
+        decision:
+          type: string
+          enum: [build_now, validate_first, deprioritize]
+
+    MarketNextAction:
+      type: object
+      required: [title, why, impact, effort, acceptance_check]
+      properties:
+        title:
+          type: string
+        why:
+          type: string
+        impact:
+          type: string
+          enum: [low, medium, high]
+        effort:
+          type: string
+          enum: [hours, days, weeks]
+        acceptance_check:
+          type: string
 
     MarketAnalysis:
       type: object
       required:
-        [tam_summary, target_users, competitors, monetization, demand_score, ship_readiness_score, risks, verdict]
+        [tam_summary, target_users, competitors, monetization, demand_score, ship_readiness_score, risks, verdict, need_assessment, next_best_actions]
       properties:
         tam_summary:
           type: string
@@ -1216,10 +1308,17 @@ components:
         verdict:
           type: string
           enum: [ship_now, finish_first, combine_first, shelve]
+        need_assessment:
+          $ref: "#/components/schemas/NeedAssessment"
+        next_best_actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/MarketNextAction"
 
     MarketValuation:
       type: object
-      required: [low_usd, mid_usd, high_usd, reasoning]
+      required:
+        [low_usd, mid_usd, high_usd, reasoning, basis, confidence, evidence, missing_information, potential_low_usd, potential_mid_usd, potential_high_usd, potential_assumptions, what_changes_value]
       properties:
         low_usd:
           type: integer
@@ -1229,6 +1328,34 @@ components:
           type: integer
         reasoning:
           type: string
+        basis:
+          type: string
+          enum: [replacement_cost, revenue_multiple, market_comparables, scenario_only]
+        confidence:
+          type: string
+          enum: [low, medium, high]
+        evidence:
+          type: array
+          items:
+            type: string
+        missing_information:
+          type: array
+          items:
+            type: string
+        potential_low_usd:
+          type: integer
+        potential_mid_usd:
+          type: integer
+        potential_high_usd:
+          type: integer
+        potential_assumptions:
+          type: array
+          items:
+            type: string
+        what_changes_value:
+          type: array
+          items:
+            type: string
 
     MarketAndValueResult:
       type: object

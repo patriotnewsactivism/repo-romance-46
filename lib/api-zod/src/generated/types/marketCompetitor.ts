@@ -10,4 +10,5 @@ export interface MarketCompetitor {
   name: string;
   url: string;
   differentiator: string;
+  evidence_basis: string;
 }

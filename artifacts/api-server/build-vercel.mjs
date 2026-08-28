@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
+import { sentryBuildPlugins } from "./sentry-build.mjs";
 
 // pino's build plugin resolves helper modules through require().
 globalThis.require = createRequire(import.meta.url);
@@ -18,8 +19,8 @@ await esbuild({
   outdir: path.resolve(artifactDir, "dist/vercel-function"),
   outExtension: { ".js": ".mjs" },
   logLevel: "info",
-  sourcemap: false,
-  plugins: [esbuildPluginPino({ transports: ["pino-pretty"] })],
+  sourcemap: "external",
+  plugins: [esbuildPluginPino({ transports: ["pino-pretty"] }), ...sentryBuildPlugins(artifactDir)],
   external: [
     "*.node",
     "sharp",

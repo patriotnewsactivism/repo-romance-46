@@ -6,7 +6,7 @@ import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { config } from "./lib/config";
-import { captureException, flushSentry } from "./instrument";
+import { flushSentry, installExpressErrorHandler } from "./instrument";
 import { waitUntil } from "@vercel/functions";
 
 const app: Express = express();
@@ -93,15 +93,17 @@ app.use(
 
 app.use("/api", router);
 
+// Sentry's Express handler must sit after routes and before our final handler.
+// It records unexpected failures and then forwards them so the API still owns
+// the public, non-sensitive error response.
+installExpressErrorHandler(app);
+
 // Centralized error handler — thrown errors (via asyncHandler) land here.
 // Attach `.status` to an Error to control the HTTP status code.
 app.use((err: Error & { status?: number }, req: Request, res: Response, _next: NextFunction) => {
   const status = err.status ?? 500;
   if (status >= 500) {
     req.log?.error({ err }, "Unhandled error");
-    captureException(err, {
-      tags: { route: req.path, method: req.method, status },
-    });
     if (process.env["VERCEL"]) waitUntil(flushSentry());
   }
   // Internal failures must not leak stack details or upstream messages.
