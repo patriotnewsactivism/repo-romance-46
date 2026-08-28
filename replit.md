@@ -1,45 +1,18 @@
-# [Project name]
+# RepoFinisher — Replit context
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+This repository is no longer governed by the old generated Replit template that previously occupied this file.
 
-## Run & Operate
+Canonical documentation:
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+1. [`AGENTS.md`](AGENTS.md) — coding-agent operating contract.
+2. [`README.md`](README.md) — product and repository overview.
+3. [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md) — current operational checkpoint and open priorities.
+4. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system architecture.
+5. [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — production/deployment runbook.
+6. [`SECURITY.md`](SECURITY.md) — security and secret handling.
 
-## Stack
+Current production architecture is Netlify frontend + Render persistent API + Supabase auth/database/Vault + GitHub source/CI. Vercel is not an approved deployment target.
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+Use pnpm. Before merging code, obtain green repository CI (`pnpm test` and `pnpm build` are the core local equivalents).
 
-## Where things live
-
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
-
-## Architecture decisions
-
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
-
-## Product
-
-_Describe the high-level user-facing capabilities of this app once they exist._
-
-## User preferences
-
-_Populate as you build — explicit user instructions worth remembering across sessions._
-
-## Gotchas
-
-_Populate as you build — sharp edges, "always run X before Y" rules._
-
-## Pointers
-
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+Do not maintain a second Replit-only architecture or policy in this file. Update the canonical docs instead.
