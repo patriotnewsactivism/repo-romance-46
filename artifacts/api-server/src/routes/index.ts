@@ -8,6 +8,7 @@ import repoFinisherRunsRouter from "./repo-finisher-runs";
 import agenticFinisherRouter from "./agentic-finisher";
 import valuationRouter from "./valuation";
 import investmentIntelligenceRouter from "./investment-intelligence";
+import portfolioIntelligenceRouter from "./portfolio-intelligence";
 import vibeToolsRouter from "./vibe-tools";
 import observabilityRouter from "./observability";
 
@@ -21,6 +22,7 @@ router.use(publicRouter);
 router.use(repoFinisherRunsRouter);
 router.use(agenticFinisherRouter);
 router.use(valuationRouter);
+router.use(portfolioIntelligenceRouter);
 router.use(investmentIntelligenceRouter);
 router.use(vibeToolsRouter);
 router.use(observabilityRouter);
