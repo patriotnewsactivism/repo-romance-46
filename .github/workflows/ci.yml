@@ -21,6 +21,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Enforce non-Vercel hosting policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          forbidden=(
+            "vercel.json"
+            "api/[...path].mjs"
+            "artifacts/api-server/build-vercel.mjs"
+            "artifacts/api-server/src/vercel.ts"
+          )
+          for path in "${forbidden[@]}"; do
+            if [[ -e "$path" ]]; then
+              echo "Forbidden Vercel hosting artifact reintroduced: $path" >&2
+              exit 1
+            fi
+          done
+
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
