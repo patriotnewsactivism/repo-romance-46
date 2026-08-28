@@ -111,6 +111,8 @@ Important rules:
 4. User-supplied AI provider keys are stored through **Supabase Vault**. The browser never receives the decrypted credential.
 5. `SECRET_ENCRYPTION_KEY` remains relevant to legacy/server-sealed credentials such as stored GitHub connections. It is not the primary storage mechanism for new AI BYOK credentials.
 
+See [`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md) for provider/model behavior.
+
 ## Autonomous completion contract
 
 Repository-writing behavior must preserve these boundaries:
@@ -164,6 +166,7 @@ Do not merge a feature merely because local code looks correct. A normal release
 
 ## Documentation map
 
+- [`docs/README.md`](docs/README.md) — documentation index.
 - [`AGENTS.md`](AGENTS.md) — canonical instructions for AI/coding agents.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — contribution and PR workflow.
 - [`SECURITY.md`](SECURITY.md) — security and secret-handling requirements.
@@ -171,6 +174,8 @@ Do not merge a feature merely because local code looks correct. A normal release
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — deployment, environment, smoke, incident, and rollback procedures.
 - [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md) — current operational checkpoint and known remaining work.
 - [`docs/REASONING_AND_LEARNING.md`](docs/REASONING_AND_LEARNING.md) — reasoning, memory, experiments, and self-healing behavior.
+- [`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md) — provider/model/BYOK behavior.
+- [`docs/DECISIONS.md`](docs/DECISIONS.md) — durable architecture/product decisions.
 - [`docs/sentry-observability.md`](docs/sentry-observability.md) — Sentry-specific notes.
 
 ## Source of truth
@@ -179,8 +184,9 @@ The hierarchy for decisions is:
 
 1. Current code and migrations on `main`.
 2. `AGENTS.md` for repository-working rules.
-3. `README.md` and the architecture/operations documentation.
+3. `README.md`, `docs/DECISIONS.md`, and the architecture/operations documentation.
 4. `docs/PROJECT_STATE.md` for time-sensitive operational status.
-5. Old experiment notes, Replit metadata, empty model-specific files, and archived branches are historical only unless explicitly promoted back into the canonical docs.
+5. Model-specific instruction files are compatibility entrypoints only and must defer to `AGENTS.md`.
+6. Old experiment notes, backup metadata, and archived branches are historical only unless explicitly promoted back into the canonical docs.
 
 When code and documentation disagree, do not guess. Verify the implementation, fix the discrepancy, and update the documentation in the same PR.
