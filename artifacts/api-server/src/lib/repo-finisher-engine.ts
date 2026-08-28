@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { callAI } from "./ai-provider";
 import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "./credentials";
+import { verifyDeploymentSandbox, type SandboxVerificationResult } from "./sandbox-verification";
 
 const MAX_CHANGES = 25;
 const MAX_FILE_BYTES = 750_000;
@@ -59,6 +60,7 @@ export interface VerificationResult {
   failedChecks: string[];
   pendingChecks: string[];
   message: string;
+  sandbox?: SandboxVerificationResult;
 }
 
 interface AIFinishPlan {
@@ -657,9 +659,11 @@ export async function verifyCommitChecks(
   const connection = requireGithubCredential(await loadGithubCredential(supabase, userId));
   const token = connection.token;
 
-  const [checksRes, statusRes] = await Promise.all([
+  const sandboxPromise = verifyDeploymentSandbox(token, repo, headSha);
+  const [checksRes, statusRes, sandbox] = await Promise.all([
     ghFetch(token, `/repos/${repo}/commits/${headSha}/check-runs?per_page=100`),
     ghFetch(token, `/repos/${repo}/commits/${headSha}/status`),
+    sandboxPromise,
   ]);
 
   const checks = checksRes.ok
@@ -678,28 +682,42 @@ export async function verifyCommitChecks(
     ...checks.filter((check) => check.status !== "completed").map((check) => check.name),
     ...statuses.filter((status) => status.state === "pending").map((status) => status.context),
   ];
-  const totalChecks = checks.length + statuses.length;
-  const completedChecks = totalChecks - pendingChecks.length;
 
-  if (failedChecks.length > 0) {
+  const sandboxCounted = sandbox.state !== "skipped";
+  if (sandbox.state === "failed") failedChecks.push(`deployment-preview-sandbox: ${sandbox.message}`);
+  if (sandbox.state === "pending") pendingChecks.push("deployment-preview-sandbox");
+
+  const totalChecks = checks.length + statuses.length + (sandboxCounted ? 1 : 0);
+  const completedChecks = totalChecks - pendingChecks.length;
+  const uniqueFailed = [...new Set(failedChecks)];
+  const uniquePending = [...new Set(pendingChecks)];
+
+  if (uniqueFailed.length > 0) {
     return {
       state: "failed",
       totalChecks,
       completedChecks,
-      failedChecks: [...new Set(failedChecks)],
-      pendingChecks: [...new Set(pendingChecks)],
-      message: `${failedChecks.length} required check signal${failedChecks.length === 1 ? "" : "s"} failed.`,
+      failedChecks: uniqueFailed,
+      pendingChecks: uniquePending,
+      message: `${uniqueFailed.length} required verification signal${uniqueFailed.length === 1 ? "" : "s"} failed. ${sandbox.state === "failed" ? sandbox.message : ""}`.trim(),
+      sandbox,
     };
   }
 
-  if (totalChecks === 0 || pendingChecks.length > 0) {
+  if (totalChecks === 0 || uniquePending.length > 0) {
     return {
       state: "pending",
       totalChecks,
       completedChecks,
       failedChecks: [],
-      pendingChecks: [...new Set(pendingChecks)],
-      message: totalChecks === 0 ? "No check results are available yet; verification remains pending." : "Checks are still running.",
+      pendingChecks: uniquePending,
+      message:
+        totalChecks === 0
+          ? "No CI, commit-status, or isolated deployment-preview results are available yet; verification remains pending."
+          : sandbox.state === "pending"
+            ? `Code checks are not failing; ${sandbox.message}`
+            : "Checks are still running.",
+      sandbox,
     };
   }
 
@@ -709,6 +727,10 @@ export async function verifyCommitChecks(
     completedChecks,
     failedChecks: [],
     pendingChecks: [],
-    message: "All reported GitHub checks and commit statuses passed.",
+    message:
+      sandbox.state === "passed"
+        ? `All reported GitHub checks and commit statuses passed. ${sandbox.message}`
+        : "All reported GitHub checks and commit statuses passed. No isolated preview deployment was exposed for additional smoke validation.",
+    sandbox,
   };
 }
