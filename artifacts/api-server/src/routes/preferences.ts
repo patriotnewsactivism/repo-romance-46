@@ -2,25 +2,20 @@ import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
-import { encryptSecret, secretsConfigured } from "../lib/secrets";
 import {
   loadAiCredential,
-  normalizeAiProvider,
   platformAiStatus,
-  platformAiProvider,
 } from "../lib/credentials";
+import {
+  deleteAiVaultSecret,
+  storeAiVaultSecret,
+} from "../lib/ai-secret-store";
 import { callAI } from "../lib/ai-provider";
 import { captureException } from "../instrument";
 
 const router: IRouter = Router();
 const AI_PROVIDERS = ["google", "openai", "anthropic", "openrouter"] as const;
 
-/**
- * Columns that may be read back by a client.
- *
- * `custom_ai_key` is deliberately absent: a user's provider key is write-only.
- * The client receives only whether one is stored and safe readiness metadata.
- */
 const READABLE_COLUMNS = [
   "user_id",
   "email_notifications",
@@ -50,7 +45,7 @@ const updateSchema = z.object({
   schedule_frequency: z.enum(["weekly", "monthly"]).optional(),
   custom_ai_provider: z.enum(AI_PROVIDERS).optional(),
   custom_ai_model: modelSchema.nullable().optional(),
-  /** Write-only. `null` clears the stored key. */
+  /** Write-only compatibility field. Values are moved into Supabase Vault. */
   custom_ai_key: z.string().trim().max(1000).nullable().optional(),
   filter_languages: z.array(z.string().max(60)).max(50).optional(),
   filter_exclude_archived: z.boolean().optional(),
@@ -67,22 +62,30 @@ const aiSettingsSchema = z.object({
 });
 
 type PreferenceRow = Record<string, unknown>;
+type ExistingAiRow = {
+  user_id: string;
+  custom_ai_provider: string | null;
+  custom_ai_key: string | null;
+  custom_ai_vault_secret_id: string | null;
+};
 
 async function readPreferences(req: Parameters<typeof requireAuth>[0]): Promise<PreferenceRow | null> {
   const { data, error } = await req.supabase!
     .from("user_preferences")
-    .select(`${READABLE_COLUMNS}, custom_ai_key`)
+    .select(`${READABLE_COLUMNS}, custom_ai_key, custom_ai_vault_secret_id`)
     .eq("user_id", req.userId!)
     .maybeSingle();
   if (error) throw new Error(error.message);
   return (data ?? null) as PreferenceRow | null;
 }
 
-/** Strip the secret and replace it with the only fact a client needs. */
 function toClientShape(row: PreferenceRow | null): PreferenceRow {
   if (!row) return { custom_ai_key_set: false };
-  const { custom_ai_key, ...rest } = row;
-  return { ...rest, custom_ai_key_set: Boolean(custom_ai_key) };
+  const { custom_ai_key, custom_ai_vault_secret_id, ...rest } = row;
+  return {
+    ...rest,
+    custom_ai_key_set: Boolean(custom_ai_vault_secret_id || custom_ai_key),
+  };
 }
 
 function providerTestMessage(error: unknown): string {
@@ -113,16 +116,21 @@ async function aiStatus(supabase: NonNullable<Parameters<typeof loadAiCredential
   const platform = platformAiStatus();
   const { data: row } = await supabase
     .from("user_preferences")
-    .select("custom_ai_provider, custom_ai_model, custom_ai_key")
+    .select("custom_ai_provider, custom_ai_model, custom_ai_key, custom_ai_vault_secret_id")
     .eq("user_id", userId)
     .maybeSingle();
-  const raw = row as { custom_ai_provider?: string | null; custom_ai_model?: string | null; custom_ai_key?: string | null } | null;
+  const raw = row as {
+    custom_ai_provider?: string | null;
+    custom_ai_model?: string | null;
+    custom_ai_key?: string | null;
+    custom_ai_vault_secret_id?: string | null;
+  } | null;
   return {
     active_provider: credential.provider,
     active_model: credential.model,
     configured: Boolean(credential.apiKey),
     credential_source: credential.source,
-    stored_key_set: Boolean(raw?.custom_ai_key),
+    stored_key_set: Boolean(raw?.custom_ai_vault_secret_id || raw?.custom_ai_key),
     requested_provider: raw?.custom_ai_provider ?? platform.defaultProvider,
     requested_model: raw?.custom_ai_model ?? null,
     platform_default: platform.defaultProvider,
@@ -152,44 +160,56 @@ router.patch(
   asyncHandler(async (req, res) => {
     const input = aiSettingsSchema.parse(req.body);
     const userId = req.userId!;
-    const { data: existing, error: readError } = await req.supabase!
+    const { data: existingData, error: readError } = await req.supabase!
       .from("user_preferences")
-      .select("user_id, custom_ai_provider, custom_ai_key")
+      .select("user_id, custom_ai_provider, custom_ai_key, custom_ai_vault_secret_id")
       .eq("user_id", userId)
       .maybeSingle();
     if (readError) throw new Error(`Failed to read existing AI settings: ${readError.message}`);
 
-    const existingProvider = normalizeAiProvider(
-      (existing as { custom_ai_provider?: string | null } | null)?.custom_ai_provider,
-      platformAiProvider(),
-    );
-    const providerChanged = Boolean(existing && existingProvider !== input.provider);
+    const existing = existingData as ExistingAiRow | null;
+    const rawExistingProvider = existing?.custom_ai_provider?.trim().toLowerCase() || null;
+    const providerChanged = Boolean(existing && rawExistingProvider !== input.provider);
+    const existingVaultId = existing?.custom_ai_vault_secret_id || null;
     const update: Record<string, unknown> = {
       custom_ai_provider: input.provider,
       custom_ai_model: input.model?.trim() || null,
       updated_at: new Date().toISOString(),
     };
 
+    let deleteAfterSave: string | null = null;
+    let newlyCreatedVaultId: string | null = null;
+
     if (input.clear_key || (providerChanged && !input.api_key)) {
-      // A stored key belongs to the provider under which it was saved. Never
-      // silently reuse a Google/OpenAI/etc key after switching providers.
       update.custom_ai_key = null;
+      update.custom_ai_vault_secret_id = null;
+      deleteAfterSave = existingVaultId;
     } else if (input.api_key) {
-      if (!secretsConfigured()) {
-        throw Object.assign(
-          new Error("Cannot store an AI provider key because server-side secret encryption is not configured. Set SECRET_ENCRYPTION_KEY on the Render API and retry."),
-          { status: 503 },
-        );
-      }
-      update.custom_ai_key = encryptSecret(input.api_key);
+      const vaultId = await storeAiVaultSecret(userId, input.api_key, existingVaultId);
+      update.custom_ai_key = null;
+      update.custom_ai_vault_secret_id = vaultId;
+      if (!existingVaultId) newlyCreatedVaultId = vaultId;
     }
 
-    if (existing) {
-      const { error } = await req.supabase!.from("user_preferences").update(update).eq("user_id", userId);
-      if (error) throw new Error(`Failed to save AI settings: ${error.message}`);
-    } else {
-      const { error } = await req.supabase!.from("user_preferences").insert({ user_id: userId, ...update });
-      if (error) throw new Error(`Failed to create AI settings: ${error.message}`);
+    try {
+      if (existing) {
+        const { error } = await req.supabase!.from("user_preferences").update(update).eq("user_id", userId);
+        if (error) throw new Error(`Failed to save AI settings: ${error.message}`);
+      } else {
+        const { error } = await req.supabase!.from("user_preferences").insert({ user_id: userId, ...update });
+        if (error) throw new Error(`Failed to create AI settings: ${error.message}`);
+      }
+    } catch (error) {
+      if (newlyCreatedVaultId) {
+        await deleteAiVaultSecret(userId, newlyCreatedVaultId).catch(() => undefined);
+      }
+      throw error;
+    }
+
+    if (deleteAfterSave) {
+      await deleteAiVaultSecret(userId, deleteAfterSave).catch((error) => {
+        captureException(error, { tags: { subsystem: "ai-vault-cleanup" } });
+      });
     }
 
     res.json({
@@ -253,42 +273,64 @@ router.patch(
     const input = updateSchema.parse(req.body);
     const userId = req.userId!;
 
-    const { data: existing, error: readError } = await req.supabase!
+    const { data: existingData, error: readError } = await req.supabase!
       .from("user_preferences")
-      .select("user_id, custom_ai_provider")
+      .select("user_id, custom_ai_provider, custom_ai_key, custom_ai_vault_secret_id")
       .eq("user_id", userId)
       .maybeSingle();
     if (readError) throw new Error(readError.message);
 
-    const update: Record<string, unknown> = { ...input, updated_at: new Date().toISOString() };
+    const existing = existingData as ExistingAiRow | null;
+    const { custom_ai_key: incomingKey, ...nonSecretInput } = input;
+    const update: Record<string, unknown> = {
+      ...nonSecretInput,
+      updated_at: new Date().toISOString(),
+    };
+    const existingVaultId = existing?.custom_ai_vault_secret_id || null;
+    const rawExistingProvider = existing?.custom_ai_provider?.trim().toLowerCase() || null;
+    const providerChanged = Boolean(
+      input.custom_ai_provider && existing && rawExistingProvider !== input.custom_ai_provider,
+    );
+
+    let deleteAfterSave: string | null = null;
+    let newlyCreatedVaultId: string | null = null;
+
     if ("custom_ai_key" in input) {
-      const key = input.custom_ai_key;
-      if (key === null || key === "") {
+      if (incomingKey === null || incomingKey === "") {
         update.custom_ai_key = null;
-      } else if (key !== undefined) {
-        if (!secretsConfigured()) {
-          throw Object.assign(
-            new Error("Cannot store an AI provider key because server-side secret encryption is not configured. Set SECRET_ENCRYPTION_KEY on the Render API and retry."),
-            { status: 503 },
-          );
-        }
-        update.custom_ai_key = encryptSecret(key);
+        update.custom_ai_vault_secret_id = null;
+        deleteAfterSave = existingVaultId;
+      } else if (incomingKey !== undefined) {
+        const vaultId = await storeAiVaultSecret(userId, incomingKey, existingVaultId);
+        update.custom_ai_key = null;
+        update.custom_ai_vault_secret_id = vaultId;
+        if (!existingVaultId) newlyCreatedVaultId = vaultId;
       }
-    } else if (
-      input.custom_ai_provider &&
-      existing &&
-      normalizeAiProvider((existing as { custom_ai_provider?: string | null }).custom_ai_provider, platformAiProvider()) !== input.custom_ai_provider
-    ) {
-      // Do not accidentally bind a prior provider's BYOK secret to the new provider.
+    } else if (providerChanged) {
       update.custom_ai_key = null;
+      update.custom_ai_vault_secret_id = null;
+      deleteAfterSave = existingVaultId;
     }
 
-    if (existing) {
-      const { error } = await req.supabase!.from("user_preferences").update(update).eq("user_id", userId);
-      if (error) throw new Error(error.message);
-    } else {
-      const { error } = await req.supabase!.from("user_preferences").insert({ user_id: userId, ...update });
-      if (error) throw new Error(error.message);
+    try {
+      if (existing) {
+        const { error } = await req.supabase!.from("user_preferences").update(update).eq("user_id", userId);
+        if (error) throw new Error(error.message);
+      } else {
+        const { error } = await req.supabase!.from("user_preferences").insert({ user_id: userId, ...update });
+        if (error) throw new Error(error.message);
+      }
+    } catch (error) {
+      if (newlyCreatedVaultId) {
+        await deleteAiVaultSecret(userId, newlyCreatedVaultId).catch(() => undefined);
+      }
+      throw error;
+    }
+
+    if (deleteAfterSave) {
+      await deleteAiVaultSecret(userId, deleteAfterSave).catch((error) => {
+        captureException(error, { tags: { subsystem: "ai-vault-cleanup" } });
+      });
     }
 
     res.json(toClientShape(await readPreferences(req)));
