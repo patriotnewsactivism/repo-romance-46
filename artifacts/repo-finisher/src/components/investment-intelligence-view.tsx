@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { FinishRepoAction } from '@/components/finish-repo-action';
+import { PortfolioFinishControl } from '@/components/portfolio-finish-control';
 import {
   AlertTriangle,
   DollarSign,
@@ -212,6 +213,8 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
           </div>
         </div>
       </Card>
+
+      <PortfolioFinishControl analysisId={analysisId} repoCount={data.ranking.length} />
 
       {data.errors.length > 0 && (
         <Card className="p-4 border-amber-500/30">
