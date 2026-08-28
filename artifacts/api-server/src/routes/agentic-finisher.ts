@@ -3,7 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import { z } from "zod";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
-import { createAgenticPreview, type AgenticPreviewInput } from "../lib/agentic-preview";
+import { createAgenticPreview } from "../lib/agentic-preview";
 import {
   claimAsyncJob,
   completeAsyncJob,
@@ -31,7 +31,8 @@ async function runAgenticPreviewJob(
   const claimed = await claimAsyncJob(supabase, userId, jobId);
   if (!claimed?.lease_token) return;
   try {
-    const result = await createAgenticPreview(supabase, userId, claimed.payload as AgenticPreviewInput);
+    const input = inputSchema.parse(claimed.payload);
+    const result = await createAgenticPreview(supabase, userId, input);
     await completeAsyncJob(supabase, userId, jobId, claimed.lease_token, result);
   } catch (error) {
     await failAsyncJob(
