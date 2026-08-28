@@ -8,11 +8,12 @@ Start with:
 - [`../AGENTS.md`](../AGENTS.md) — mandatory operating contract for coding agents.
 - [`PROJECT_STATE.md`](PROJECT_STATE.md) — current deployment/status/priorities checkpoint.
 
-Architecture and operations:
+Architecture, operations, and governance:
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — system components and control/data flows.
 - [`OPERATIONS.md`](OPERATIONS.md) — production deployment, environment, rollback, and incident runbook.
 - [`DECISIONS.md`](DECISIONS.md) — durable architecture/product decisions and their rationale.
+- [`GOVERNANCE.md`](GOVERNANCE.md) — branch/PR/CI/hosting/database governance rules and current branch-protection gap.
 
 AI/autonomy:
 
