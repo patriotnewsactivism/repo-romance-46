@@ -28,6 +28,9 @@ export interface OperationalMemory {
   averageOutcomeScore: number | null;
   averageCompletionDelta: number | null;
   averageReadinessDelta: number | null;
+  outcomeScoreSamples: number;
+  completionDeltaSamples: number;
+  readinessDeltaSamples: number;
   evidence: unknown[];
   lastOutcome: string | null;
   lastSeenAt: string;
@@ -74,16 +77,22 @@ function rowToMemory(row: Record<string, unknown>): OperationalMemory {
     averageOutcomeScore: finite(row.average_outcome_score),
     averageCompletionDelta: finite(row.average_completion_delta),
     averageReadinessDelta: finite(row.average_readiness_delta),
+    outcomeScoreSamples: Number(row.outcome_score_samples || 0),
+    completionDeltaSamples: Number(row.completion_delta_samples || 0),
+    readinessDeltaSamples: Number(row.readiness_delta_samples || 0),
     evidence: Array.isArray(row.evidence) ? row.evidence : [],
     lastOutcome: row.last_outcome ? String(row.last_outcome) : null,
     lastSeenAt: String(row.last_seen_at || row.updated_at || new Date().toISOString()),
   };
 }
 
-function weightedAverage(previousAverage: number | null, previousSamples: number, next: number | null) {
-  if (next === null) return previousAverage;
-  if (previousAverage === null || previousSamples <= 0) return next;
-  return (previousAverage * previousSamples + next) / (previousSamples + 1);
+function updateAverage(previousAverage: number | null, previousSamples: number, next: number | null) {
+  if (next === null) return { average: previousAverage, samples: previousSamples };
+  if (previousAverage === null || previousSamples <= 0) return { average: next, samples: 1 };
+  return {
+    average: (previousAverage * previousSamples + next) / (previousSamples + 1),
+    samples: previousSamples + 1,
+  };
 }
 
 function confidenceFromEvidence(input: {
@@ -129,7 +138,7 @@ export function memoryGuidance(memories: OperationalMemory[], limit = 12): strin
     .map((memory) => {
       const evidence = memory.averageOutcomeScore === null
         ? `${memory.samples} observed sample${memory.samples === 1 ? "" : "s"}`
-        : `${memory.samples} sample${memory.samples === 1 ? "" : "s"}, avg outcome ${Math.round(memory.averageOutcomeScore * 10) / 10}/100`;
+        : `${memory.outcomeScoreSamples} scored sample${memory.outcomeScoreSamples === 1 ? "" : "s"}, avg outcome ${Math.round(memory.averageOutcomeScore * 10) / 10}/100; ${memory.samples} total observation${memory.samples === 1 ? "" : "s"}`;
       return `[${memory.category}; ${Math.round(memory.confidence)}% confidence; ${evidence}] ${memory.recommendation}`;
     });
 }
@@ -156,18 +165,17 @@ export async function recordOperationalMemory(
   if (error) return;
 
   const current = existing ? rowToMemory(existing as Record<string, unknown>) : null;
-  const previousSamples = current?.samples ?? 0;
-  const samples = previousSamples + 1;
+  const samples = (current?.samples ?? 0) + 1;
   const successes = (current?.successes ?? 0) + (input.outcome === "success" ? 1 : 0);
   const failures = (current?.failures ?? 0) + (input.outcome === "failure" ? 1 : 0);
-  const averageOutcomeScore = weightedAverage(current?.averageOutcomeScore ?? null, previousSamples, finite(input.outcomeScore));
-  const averageCompletionDelta = weightedAverage(current?.averageCompletionDelta ?? null, previousSamples, finite(input.completionDelta));
-  const averageReadinessDelta = weightedAverage(current?.averageReadinessDelta ?? null, previousSamples, finite(input.readinessDelta));
+  const outcomeScore = updateAverage(current?.averageOutcomeScore ?? null, current?.outcomeScoreSamples ?? 0, finite(input.outcomeScore));
+  const completionDelta = updateAverage(current?.averageCompletionDelta ?? null, current?.completionDeltaSamples ?? 0, finite(input.completionDelta));
+  const readinessDelta = updateAverage(current?.averageReadinessDelta ?? null, current?.readinessDeltaSamples ?? 0, finite(input.readinessDelta));
   const confidence = confidenceFromEvidence({
     samples,
     successes,
     failures,
-    averageOutcomeScore,
+    averageOutcomeScore: outcomeScore.average,
     explicit: input.confidence,
   });
   const priorEvidence = current?.evidence ?? [];
@@ -180,9 +188,12 @@ export async function recordOperationalMemory(
     samples,
     successes,
     failures,
-    average_outcome_score: averageOutcomeScore,
-    average_completion_delta: averageCompletionDelta,
-    average_readiness_delta: averageReadinessDelta,
+    average_outcome_score: outcomeScore.average,
+    average_completion_delta: completionDelta.average,
+    average_readiness_delta: readinessDelta.average,
+    outcome_score_samples: outcomeScore.samples,
+    completion_delta_samples: completionDelta.samples,
+    readiness_delta_samples: readinessDelta.samples,
     evidence,
     last_outcome: input.outcome ?? "observation",
     last_seen_at: now,
