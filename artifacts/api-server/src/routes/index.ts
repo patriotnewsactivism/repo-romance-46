@@ -15,6 +15,11 @@ import portfolioValuationV2Router from "./portfolio-valuation-v2";
 import tieredIntelligenceRouter from "./tiered-intelligence";
 import vibeToolsRouter from "./vibe-tools";
 import observabilityRouter from "./observability";
+import portfolioGraphRouter from "./portfolio-graph";
+import assuranceRouter from "./assurance";
+import learningAuditRouter from "./learning-audit";
+import continuousReposRouter from "./continuous-repos";
+import externalCompletionPromptsRouter from "./external-completion-prompts";
 
 const router: IRouter = Router();
 
@@ -27,6 +32,11 @@ router.use(repoFinisherRunsRouter);
 router.use(agenticFinisherRouter);
 router.use(portfolioFinisherRouter);
 router.use(selfHealingCiRouter);
+router.use(portfolioGraphRouter);
+router.use(assuranceRouter);
+router.use(learningAuditRouter);
+router.use(continuousReposRouter);
+router.use(externalCompletionPromptsRouter);
 router.use(valuationRouter);
 router.use(tieredIntelligenceRouter);
 router.use(portfolioIntelligenceRouter);

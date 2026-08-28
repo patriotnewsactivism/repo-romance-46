@@ -6,12 +6,14 @@ import { Badge } from "@/components/ui/badge";
 import {
   AlertTriangle,
   CheckCircle2,
+  ClipboardCopy,
   ExternalLink,
   FileCode,
   Loader2,
   RefreshCw,
   Rocket,
   ShieldCheck,
+  Sparkles,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -28,6 +30,7 @@ type RunStatus =
   | "stale";
 
 type ChangeStatus = "created" | "modified" | "deleted";
+type ExternalPromptProvider = "provider-neutral" | "codex" | "claude-code" | "gemini-cli";
 
 interface PreviewChange {
   path: string;
@@ -89,13 +92,22 @@ interface RunDetailResponse {
   } | null;
 }
 
-interface SelfHealResponse {
-  runId: string;
-  scheduled: boolean;
-  status: RunStatus;
-  repairAttempts?: number;
-  maxRepairAttempts?: number;
-  reason?: string;
+interface ExternalPromptResponse {
+  id: string;
+  createdAt: string;
+  prompt: string;
+  provider: ExternalPromptProvider;
+  promptVersion: string;
+  assessment: {
+    repo: string;
+    headSha: string;
+    defaultBranch: string;
+    reasoningTraceId: string | null;
+    reasoningConfidence: number;
+    specialists: string[];
+    summary: string;
+  };
+  note: string;
 }
 
 interface LegacyResult {
@@ -146,8 +158,10 @@ function statusClass(status: RunStatus | null) {
 export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initialResult, compact = false }: FinishRepoActionProps) {
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [detail, setDetail] = useState<RunDetailResponse | null>(null);
-  const [busy, setBusy] = useState<"finish" | "approve" | "execute" | "cancel" | "refresh" | null>(null);
+  const [busy, setBusy] = useState<"finish" | "approve" | "execute" | "cancel" | "refresh" | "prompt" | "copy" | null>(null);
   const [showPlan, setShowPlan] = useState(false);
+  const [externalPrompt, setExternalPrompt] = useState<ExternalPromptResponse | null>(null);
+  const [promptProvider, setPromptProvider] = useState<ExternalPromptProvider>("provider-neutral");
 
   const runId = detail?.run.id ?? preview?.runId ?? null;
   const status = detail?.run.status ?? preview?.status ?? null;
@@ -157,13 +171,7 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
   }, []);
 
   const loadRun = useCallback(async (id: string) => {
-    let data = await fetchRun(id);
-    if (data.run.status === "failed") {
-      const heal = await postJson<SelfHealResponse>(`/api/repo-finisher/runs/${id}/self-heal`).catch(() => null);
-      if (heal?.scheduled || heal?.status === "repairing") {
-        data = await fetchRun(id);
-      }
-    }
+    const data = await fetchRun(id);
     setDetail(data);
     return data;
   }, [fetchRun]);
@@ -194,14 +202,20 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
     let createdRunId: string | null = null;
 
     try {
-      const payload: Record<string, unknown> = { repo, nextSteps, analysisId };
-      if (typeof itemRank === "number" && itemRank > 0) payload.itemRank = itemRank;
+      const payload: Record<string, unknown> = {
+        repo,
+        nextSteps,
+        analysisId,
+        // The user's click is the explicit opt-in for bounded repair commits on
+        // this generated run branch. It still does not authorize auto-merge.
+        boundedAutonomyAcknowledged: true,
+      };
+      if (typeof itemRank === "number" && itemRank >= 0) payload.itemRank = itemRank;
 
       const planned = await postJson<PreviewResponse>("/api/repo-finisher/agentic-preview", payload);
       createdRunId = planned.runId;
       setPreview(planned);
 
-      await postJson(`/api/repo-finisher/runs/${planned.runId}/repair-policy`, { enabled: true, maxAttempts: 2 });
       await postJson(`/api/repo-finisher/runs/${planned.runId}/approve`, { planHash: planned.planHash });
       await postJson(`/api/repo-finisher/runs/${planned.runId}/execute`);
       const latest = await loadRun(planned.runId);
@@ -209,15 +223,43 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
       if (latest.run.status === "succeeded") {
         toast.success(`${repo.split("/")[1]} was finished and verified in a draft PR.`);
       } else if (latest.run.status === "repairing") {
-        toast.success(`CI found a failure and RepoFinisher is repairing it automatically.`);
+        toast.success("CI found a failure and RepoFinisher is re-diagnosing and repairing it automatically.");
       } else if (latest.run.status === "verifying") {
-        toast.success(`Autonomous changes are in a draft PR. CI verification is running.`);
+        toast.success("Autonomous changes are in a draft PR. CI and deployment verification are running.");
       } else {
         toast.success(`Autonomous completion run started for ${repo.split("/")[1]}.`);
       }
     } catch (error) {
       if (createdRunId) await loadRun(createdRunId).catch(() => undefined);
       toast.error(error instanceof Error ? error.message.slice(0, 240) : "Autonomous finishing failed.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleExternalPrompt = async () => {
+    setBusy("prompt");
+    try {
+      const payload: Record<string, unknown> = { repo, analysisId, provider: promptProvider };
+      if (typeof itemRank === "number" && itemRank >= 0) payload.itemRank = itemRank;
+      const generated = await postJson<ExternalPromptResponse>("/api/repo-finisher/external-prompt", payload);
+      setExternalPrompt(generated);
+      toast.success(`Current-state completion prompt generated for ${repo.split("/")[1]}.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message.slice(0, 240) : "Unable to generate external completion prompt.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleCopyPrompt = async () => {
+    if (!externalPrompt?.prompt) return;
+    setBusy("copy");
+    try {
+      await navigator.clipboard.writeText(externalPrompt.prompt);
+      toast.success("Completion prompt copied to clipboard.");
+    } catch {
+      toast.error("Clipboard access was blocked. Select the prompt text and copy it manually.");
     } finally {
       setBusy(null);
     }
@@ -243,7 +285,7 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
     try {
       await postJson(`/api/repo-finisher/runs/${runId}/execute`);
       await loadRun(runId);
-      toast.success("Execution resumed; CI verification and bounded self-healing are enforced.");
+      toast.success("Execution resumed; CI verification and any explicitly authorized bounded repair remain enforced.");
     } catch (error) {
       await loadRun(runId).catch(() => undefined);
       toast.error(error instanceof Error ? error.message.slice(0, 240) : "Execution failed.");
@@ -291,24 +333,92 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
         </Card>
       )}
 
-      {!runId && (
-        <div className={compact ? "" : "rounded-lg border border-primary/20 bg-primary/5 p-3"}>
-          <Button
-            onClick={handleOneClickFinish}
+      <div className={compact ? "space-y-2" : "rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-3"}>
+        {!runId && (
+          <div>
+            <Button
+              onClick={handleOneClickFinish}
+              disabled={busy !== null}
+              className="gap-2"
+              size={compact ? "sm" : "default"}
+              data-testid={`button-finish-${repo}`}
+            >
+              {busy === "finish" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
+              {busy === "finish" ? `Finishing ${repo.split("/")[1]}…` : "Finish repository"}
+            </Button>
+            {!compact && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                One click explicitly authorizes this bounded autonomous run: deep repository reasoning, exact-plan approval, a draft PR, CI/deployment verification, and up to three code-only self-healing attempts on that run branch. Tests, workflows, security policy files, lockfiles, and automatic merge remain protected.
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={promptProvider}
+            onChange={(event) => setPromptProvider(event.target.value as ExternalPromptProvider)}
             disabled={busy !== null}
-            className="gap-2"
-            size={compact ? "sm" : "default"}
-            data-testid={`button-finish-${repo}`}
+            className="h-9 rounded-md border bg-background px-2 text-xs"
+            aria-label={`External LLM target for ${repo}`}
           >
-            {busy === "finish" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
-            {busy === "finish" ? `Finishing ${repo.split("/")[1]}…` : "Finish repository"}
+            <option value="provider-neutral">Any coding LLM</option>
+            <option value="codex">Codex</option>
+            <option value="claude-code">Claude Code</option>
+            <option value="gemini-cli">Gemini CLI</option>
+          </select>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            disabled={busy !== null}
+            onClick={handleExternalPrompt}
+            data-testid={`button-external-prompt-${repo}`}
+          >
+            {busy === "prompt" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {externalPrompt ? "Regenerate external prompt" : "External LLM prompt"}
           </Button>
-          {!compact && (
-            <p className="mt-2 text-xs text-muted-foreground">
-              One click runs the agent council, generates an exact plan, records your approval for that generated hash, creates a draft PR, verifies CI, and can make up to two bounded code-only repair attempts if CI fails. Tests, workflows, security policy files, and lockfiles cannot be changed by self-healing.
-            </p>
-          )}
         </div>
+        {!compact && (
+          <p className="text-xs text-muted-foreground">
+            Generates a separate current-state engineering handoff for an outside coding LLM. It complements RepoFinisher; it does not replace or approve RepoFinisher's own repository writes.
+          </p>
+        )}
+      </div>
+
+      {externalPrompt && (
+        <Card className="p-4 space-y-3 border-violet-500/20">
+          <div className="flex flex-wrap items-center gap-2">
+            <Sparkles className="h-4 w-4" />
+            <span className="font-semibold text-sm">External completion handoff</span>
+            <Badge variant="outline">{externalPrompt.provider}</Badge>
+            <Badge variant="outline">reasoning {Math.round(externalPrompt.assessment.reasoningConfidence)}%</Badge>
+          </div>
+          <div className="grid gap-2 text-xs sm:grid-cols-2">
+            <div className="rounded-md border p-2">
+              <div className="text-muted-foreground">Assessed commit</div>
+              <code>{externalPrompt.assessment.headSha.slice(0, 12)}</code>
+            </div>
+            <div className="rounded-md border p-2">
+              <div className="text-muted-foreground">Specialist lenses</div>
+              <span>{externalPrompt.assessment.specialists.join(", ") || "principal engineering"}</span>
+            </div>
+          </div>
+          <textarea
+            readOnly
+            value={externalPrompt.prompt}
+            className="min-h-72 w-full resize-y rounded-md border bg-muted/30 p-3 font-mono text-xs leading-relaxed"
+            aria-label={`External completion prompt for ${repo}`}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" size="sm" className="gap-2" onClick={handleCopyPrompt} disabled={busy !== null}>
+              {busy === "copy" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardCopy className="h-4 w-4" />}
+              Copy full prompt
+            </Button>
+            <span className="text-xs text-muted-foreground">Generated from {externalPrompt.assessment.headSha.slice(0, 12)}. Regenerate after meaningful repository changes.</span>
+          </div>
+        </Card>
       )}
 
       {runId && (
@@ -392,9 +502,9 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
               {status === "repairing"
-                ? "CI failed; a bounded repair agent is fixing the branch without weakening validation…"
+                ? "CI failed; a bounded repair agent is re-diagnosing and fixing the branch without weakening validation…"
                 : status === "verifying"
-                  ? "Waiting for required checks…"
+                  ? "Waiting for CI and deployment verification…"
                   : "Autonomous agents are finishing the repository…"}
             </div>
           )}
