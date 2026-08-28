@@ -34,7 +34,7 @@ async function loadItem(supabase: SupabaseClient, analysisId: string, itemRank: 
 async function loadPrefs(supabase: SupabaseClient, userId: string) {
   const credential = await loadGithubCredential(supabase, userId);
   const ai = await loadAiCredential(supabase, userId, credential?.token ?? null);
-  return { custom_ai_provider: ai.provider, custom_ai_key: ai.apiKey };
+  return { custom_ai_provider: ai.provider, custom_ai_key: ai.apiKey, custom_ai_model: ai.model };
 }
 
 async function updateItem(supabase: SupabaseClient, itemId: string, patch: Record<string, unknown>) {
@@ -134,7 +134,7 @@ Existing next steps: ${item.next_steps.slice(0, 5).join(" | ")}`;
         ],
         responseFormat: { type: "json_schema", json_schema: { name: "market_and_value", strict: true, schema: marketSchema } },
       },
-      { provider: prefs?.custom_ai_provider || "openai", apiKey: prefs?.custom_ai_key || null },
+      { provider: prefs?.custom_ai_provider || "openai", apiKey: prefs?.custom_ai_key || null, model: prefs?.custom_ai_model || null },
     );
 
     const parsed = JSON.parse(resp.content || "{}");
@@ -197,7 +197,7 @@ Existing next steps: ${item.next_steps.join(" | ")}`;
         ],
         responseFormat: { type: "json_schema", json_schema: { name: "vibe_spec", strict: true, schema: vibeSchema } },
       },
-      { provider: prefs?.custom_ai_provider || "openai", apiKey: prefs?.custom_ai_key || null },
+      { provider: prefs?.custom_ai_provider || "openai", apiKey: prefs?.custom_ai_key || null, model: prefs?.custom_ai_model || null },
     );
 
     const spec = JSON.parse(resp.content || "{}");
@@ -254,7 +254,7 @@ router.post(
         ],
         responseFormat: { type: "json_schema", json_schema: { name: "combine_plan", strict: true, schema: planSchema } },
       },
-      { provider: prefs?.custom_ai_provider || "openai", apiKey: prefs?.custom_ai_key || null },
+      { provider: prefs?.custom_ai_provider || "openai", apiKey: prefs?.custom_ai_key || null, model: prefs?.custom_ai_model || null },
     );
 
     const plan = JSON.parse(planResp.content || "{}") as {

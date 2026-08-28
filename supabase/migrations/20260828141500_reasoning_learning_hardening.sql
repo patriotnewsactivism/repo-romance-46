@@ -4,6 +4,9 @@
 -- and restores explicit opt-in for autonomous repair writes.
 
 -- RLS policies do not grant relation privileges by themselves.
+grant select, insert, update on public.prompt_strategy_experiments to authenticated;
+grant all on public.prompt_strategy_experiments to service_role;
+
 grant select, insert, update, delete on public.learning_memories to authenticated;
 grant select, insert, update, delete on public.reasoning_traces to authenticated;
 grant select, insert, update, delete on public.repo_watch_settings to authenticated;

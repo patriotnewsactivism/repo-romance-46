@@ -834,6 +834,8 @@ components:
           enum: [weekly, monthly, null]
         custom_ai_provider:
           type: ["string", "null"]
+        custom_ai_model:
+          type: ["string", "null"]
         custom_ai_key_set:
           type: boolean
           description: Whether a provider key is stored. The key itself is write-only and never returned.
@@ -863,6 +865,8 @@ components:
           enum: [weekly, monthly]
         custom_ai_provider:
           type: string
+        custom_ai_model:
+          type: ["string", "null"]
         custom_ai_key:
           type: ["string", "null"]
         filter_languages:

@@ -263,6 +263,7 @@ export type Database = {
         Row: {
           created_at: string
           custom_ai_key: string | null
+          custom_ai_model: string | null
           custom_ai_provider: string
           email_notifications: boolean
           filter_exclude_archived: boolean
@@ -278,6 +279,7 @@ export type Database = {
         Insert: {
           created_at?: string
           custom_ai_key?: string | null
+          custom_ai_model?: string | null
           custom_ai_provider?: string
           email_notifications?: boolean
           filter_exclude_archived?: boolean
@@ -293,6 +295,7 @@ export type Database = {
         Update: {
           created_at?: string
           custom_ai_key?: string | null
+          custom_ai_model?: string | null
           custom_ai_provider?: string
           email_notifications?: boolean
           filter_exclude_archived?: boolean

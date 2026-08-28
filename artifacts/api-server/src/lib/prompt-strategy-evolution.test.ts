@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assignPromptArm,
+  completionDeltaFromOutcomeMetrics,
   evaluatePromptExperiment,
   summarizePromptArm,
   type PromptOutcomeSample,
@@ -11,6 +12,12 @@ function samples(version: string, scores: number[], completionDelta = 5): Prompt
 }
 
 describe("controlled prompt experiments", () => {
+  it("reads the persisted post-run completion delta used by the promotion gate", () => {
+    expect(completionDeltaFromOutcomeMetrics({ deltas: { completionPct: 7.5 } })).toBe(7.5);
+    expect(completionDeltaFromOutcomeMetrics({ completion_delta: 4 })).toBe(4);
+    expect(completionDeltaFromOutcomeMetrics({ deltas: {} })).toBeNull();
+  });
+
   it("routes exactly the configured challenger bucket", () => {
     expect(assignPromptArm(25, 0)).toBe("challenger");
     expect(assignPromptArm(25, 24.99)).toBe("challenger");

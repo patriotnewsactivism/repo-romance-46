@@ -14,6 +14,8 @@ export interface PreferencesUpdate {
   schedule_frequency?: PreferencesUpdateScheduleFrequency;
   custom_ai_provider?: string;
   /** @nullable */
+  custom_ai_model?: string | null;
+  /** @nullable */
   custom_ai_key?: string | null;
   filter_languages?: string[];
   filter_exclude_archived?: boolean;

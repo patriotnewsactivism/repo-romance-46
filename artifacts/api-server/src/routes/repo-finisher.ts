@@ -311,6 +311,7 @@ async function generateFinishPlan(
   nextSteps: string[],
   aiProvider: string,
   aiKey: string | null,
+  aiModel: string | null,
 ): Promise<AIFinishPlan> {
   const fileSummaries = files.map((f) => `--- FILE: ${f.path} ---\n${f.content.slice(0, 3000)}`).join("\n\n");
 
@@ -390,7 +391,7 @@ ${fileSummaries}`;
         },
       },
     },
-    { provider: aiProvider, apiKey: aiKey },
+    { provider: aiProvider, apiKey: aiKey, model: aiModel },
   );
   return JSON.parse(aiResult.content || "{}") as AIFinishPlan;
 }
@@ -517,6 +518,7 @@ export async function finishRepoCore(
     nextSteps,
     aiCredential.provider,
     aiCredential.apiKey,
+    aiCredential.model,
   );
 
   const changes = validatePlanChanges(plan.changes, repoTree);

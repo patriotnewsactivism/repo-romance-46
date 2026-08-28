@@ -6,6 +6,7 @@ import { encryptSecret, secretsConfigured } from "../lib/secrets";
 import { loadAiCredential, platformAiStatus } from "../lib/credentials";
 import { callAI } from "../lib/ai-provider";
 import { captureException } from "../instrument";
+import { OPENROUTER_MODELS } from "../lib/openrouter-models";
 
 const router: IRouter = Router();
 
@@ -21,6 +22,7 @@ const READABLE_COLUMNS = [
   "schedule_enabled",
   "schedule_frequency",
   "custom_ai_provider",
+  "custom_ai_model",
   "filter_languages",
   "filter_exclude_archived",
   "filter_min_stars",
@@ -34,7 +36,8 @@ const updateSchema = z.object({
   email_notifications: z.boolean().optional(),
   schedule_enabled: z.boolean().optional(),
   schedule_frequency: z.enum(["weekly", "monthly"]).optional(),
-  custom_ai_provider: z.enum(["google", "openai", "anthropic"]).optional(),
+  custom_ai_provider: z.enum(["google", "openai", "anthropic", "openrouter"]).optional(),
+  custom_ai_model: z.enum(OPENROUTER_MODELS).nullable().optional(),
   /** Write-only. `null` clears the stored key. */
   custom_ai_key: z.string().max(500).nullable().optional(),
   filter_languages: z.array(z.string().max(60)).max(50).optional(),
@@ -99,6 +102,7 @@ router.get(
     const platform = platformAiStatus();
     res.json({
       active_provider: credential.provider,
+      active_model: credential.model,
       configured: Boolean(credential.apiKey),
       credential_source: credential.source,
       platform_default: platform.defaultProvider,
@@ -141,6 +145,7 @@ router.post(
       res.json({
         ok: true,
         provider: credential.provider,
+        model: credential.model,
         credential_source: credential.source,
         latency_ms: Date.now() - started,
       });

@@ -150,7 +150,7 @@ router.post(
       if (!run.auto_repair_enabled) {
         const { error: policyError } = await req.supabase!
           .from("completion_runs")
-          .update({ auto_repair_enabled: true, max_repair_attempts: Math.max(2, Number(run.max_repair_attempts ?? 2)), updated_at: new Date().toISOString() })
+          .update({ auto_repair_enabled: true, max_repair_attempts: Math.max(3, Number(run.max_repair_attempts ?? 3)), updated_at: new Date().toISOString() })
           .eq("id", completionRunId)
           .eq("user_id", req.userId!);
         if (policyError) continue;

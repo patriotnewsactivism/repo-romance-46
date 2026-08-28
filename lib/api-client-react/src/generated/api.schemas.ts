@@ -339,6 +339,8 @@ export interface UserPreferences {
   schedule_frequency?: UserPreferencesScheduleFrequency;
   /** @nullable */
   custom_ai_provider?: string | null;
+  /** @nullable */
+  custom_ai_model?: string | null;
   /** Whether a provider key is stored. The key itself is write-only and never returned. */
   custom_ai_key_set?: boolean;
   filter_languages?: string[];
@@ -374,6 +376,8 @@ export interface PreferencesUpdate {
   schedule_enabled?: boolean;
   schedule_frequency?: PreferencesUpdateScheduleFrequency;
   custom_ai_provider?: string;
+  /** @nullable */
+  custom_ai_model?: string | null;
   /** @nullable */
   custom_ai_key?: string | null;
   filter_languages?: string[];

@@ -34,6 +34,7 @@ type CredentialSource = 'byok' | 'platform' | 'none';
 
 interface AiProviderStatus {
   active_provider: string;
+  active_model: string | null;
   configured: boolean;
   credential_source: CredentialSource;
   platform_default: string;
@@ -41,12 +42,14 @@ interface AiProviderStatus {
     google: { platformConfigured: boolean };
     openai: { platformConfigured: boolean };
     anthropic: { platformConfigured: boolean };
+    openrouter: { platformConfigured: boolean; model: string };
   };
 }
 
 interface AiTestResult {
   ok: boolean;
   provider: string;
+  model: string | null;
   credential_source: CredentialSource;
   latency_ms: number;
 }
@@ -56,8 +59,42 @@ function providerLabel(provider: string) {
     case 'google': return 'Google Gemini';
     case 'openai': return 'OpenAI';
     case 'anthropic': return 'Anthropic';
+    case 'openrouter': return 'OpenRouter';
     default: return provider || 'AI provider';
   }
+}
+
+const OPENROUTER_MODELS = [
+  {
+    value: 'deepseek/deepseek-v4-flash-0731',
+    label: 'DeepSeek V4 Flash — recommended, ultra-low cost',
+  },
+  {
+    value: 'deepseek/deepseek-v4-pro-0813',
+    label: 'DeepSeek V4 Pro — deeper reasoning',
+  },
+  {
+    value: 'google/gemini-3.7-flash',
+    label: 'Google Gemini 3.7 Flash — quality + speed',
+  },
+  {
+    value: 'openai/gpt-5.6-luna',
+    label: 'OpenAI GPT-5.6 Luna — fast + economical',
+  },
+] as const;
+
+const DEFAULT_OPENROUTER_MODEL = OPENROUTER_MODELS[0].value;
+
+function modelLabel(model: string | null | undefined) {
+  return OPENROUTER_MODELS.find((option) => option.value === model)?.label || model || 'Provider default model';
+}
+
+function providerStatusError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/404|cannot get \/api\/preferences\/ai-status|<!doctype html/i.test(message)) {
+    return 'Provider status is temporarily unavailable while the API deployment is being updated.';
+  }
+  return 'Unable to read AI provider status. Refresh and try again.';
 }
 
 function credentialLabel(source: CredentialSource) {
@@ -77,6 +114,7 @@ export default function Settings() {
   const disconnectGithub = useDisconnectGithub();
 
   const [aiProvider, setAiProvider] = useState('google');
+  const [aiModel, setAiModel] = useState<string>(DEFAULT_OPENROUTER_MODEL);
   const [aiKey, setAiKey] = useState('');
   const [aiStatus, setAiStatus] = useState<AiProviderStatus | null>(null);
   const [aiStatusLoading, setAiStatusLoading] = useState(false);
@@ -98,6 +136,7 @@ export default function Settings() {
     if (preferences) {
       const savedProvider = preferences.custom_ai_provider || 'google';
       setAiProvider(savedProvider === 'github_models' ? 'google' : savedProvider);
+      setAiModel(preferences.custom_ai_model || DEFAULT_OPENROUTER_MODEL);
       setAiKey('');
       setAnalysisTier(preferences.analysis_tier || 'balanced');
       setFilterLanguages(preferences.filter_languages?.join(', ') || '');
@@ -114,7 +153,7 @@ export default function Settings() {
       const status = await customFetch<AiProviderStatus>('/api/preferences/ai-status', { responseType: 'json' });
       setAiStatus(status);
     } catch (error) {
-      setAiStatusError(error instanceof Error ? error.message : 'Unable to read AI provider status');
+      setAiStatusError(providerStatusError(error));
     } finally {
       setAiStatusLoading(false);
     }
@@ -146,6 +185,7 @@ export default function Settings() {
       {
         data: {
           custom_ai_provider: aiProvider,
+          custom_ai_model: aiProvider === 'openrouter' ? aiModel : null,
           ...(aiKey ? { custom_ai_key: aiKey } : {}),
           analysis_tier: analysisTier,
           filter_languages: languagesArray.length > 0 ? languagesArray : undefined,
@@ -177,7 +217,7 @@ export default function Settings() {
         body: JSON.stringify({}),
       });
       toast.success(`${providerLabel(result.provider)} is ready`, {
-        description: `${credentialLabel(result.credential_source)} · ${result.latency_ms} ms`,
+        description: `${modelLabel(result.model)} · ${credentialLabel(result.credential_source)} · ${result.latency_ms} ms`,
       });
       await loadAiStatus();
     } catch (error) {
@@ -324,7 +364,7 @@ export default function Settings() {
           <CardHeader>
             <CardTitle>AI Provider</CardTitle>
             <CardDescription>
-              Google Gemini is the default. Use a platform credential or store your own encrypted BYOK key.
+              OpenRouter is recommended for low-cost model choice and provider failover. Use a platform credential or store your own encrypted BYOK key.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -338,9 +378,29 @@ export default function Settings() {
                   <SelectItem value="google">Google Gemini (default)</SelectItem>
                   <SelectItem value="openai">OpenAI</SelectItem>
                   <SelectItem value="anthropic">Anthropic</SelectItem>
+                  <SelectItem value="openrouter">OpenRouter (recommended)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+
+            {aiProvider === 'openrouter' && (
+              <div className="space-y-2">
+                <Label htmlFor="ai-model">OpenRouter model</Label>
+                <Select value={aiModel} onValueChange={setAiModel}>
+                  <SelectTrigger id="ai-model" data-testid="select-ai-model">
+                    <SelectValue placeholder="Choose an OpenRouter model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {OPENROUTER_MODELS.map((model) => (
+                      <SelectItem key={model.value} value={model.value}>{model.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  All four choices use your OpenRouter key and OpenRouter routing—not direct Google, OpenAI, or DeepSeek credentials.
+                </p>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="ai-key">BYOK API Key</Label>
@@ -402,6 +462,7 @@ export default function Settings() {
                   {aiStatus ? (
                     <p className="text-sm text-muted-foreground mt-1">
                       {providerLabel(aiStatus.active_provider)} · {credentialLabel(aiStatus.credential_source)}
+                      {aiStatus.active_model ? ` · ${modelLabel(aiStatus.active_model)}` : ''}
                     </p>
                   ) : aiStatusError ? (
                     <p className="text-sm text-destructive mt-1">{aiStatusError}</p>

@@ -559,12 +559,13 @@ interface StageModels {
 }
 
 /** Returns the best models for each analysis stage based on provider and tier. */
-function getStageModels(provider: string, tier: string): StageModels {
+function getStageModels(provider: string, tier: string, preferredModel?: string | null): StageModels {
   const DEFAULT: Record<string, string> = {
     github_models: "gpt-4o-mini",
     openai: "gpt-4o",
     anthropic: "claude-sonnet-4-20250514",
     google: "gemini-3.7-flash",
+    openrouter: preferredModel || "deepseek/deepseek-v4-flash-0731",
     custom: "gpt-4o",
   };
   const base = DEFAULT[provider] ?? "gemini-3.7-flash";
@@ -575,6 +576,8 @@ function getStageModels(provider: string, tier: string): StageModels {
 
   if (tier === "deep") {
     switch (provider) {
+      case "openrouter":
+        return { profilerModel: base, critiqueModel: base, synthesisModel: base, useThinking: true, thinkingBudget: 10000 };
       case "openai":
       case "custom":
         return { profilerModel: "o3", critiqueModel: "o3", synthesisModel: "o3", useThinking: false, thinkingBudget: 0 };
@@ -595,6 +598,8 @@ function getStageModels(provider: string, tier: string): StageModels {
 
   // balanced (default) — reasoning models for profiling/critique, best synthesis available
   switch (provider) {
+    case "openrouter":
+      return { profilerModel: base, critiqueModel: base, synthesisModel: base, useThinking: true, thinkingBudget: 6000 };
     case "openai":
     case "custom":
       return { profilerModel: "o4-mini", critiqueModel: "o4-mini", synthesisModel: "o3-mini", useThinking: false, thinkingBudget: 0 };
@@ -1029,6 +1034,7 @@ interface AnalysisContext {
   prefs: {
     custom_ai_provider: string;
     custom_ai_key: string | null;
+    custom_ai_model: string | null;
     filter_max_repos: number;
     filter_languages: string[] | null;
     filter_min_stars: number;
@@ -1043,7 +1049,7 @@ async function createAnalysisRow(ctx: AnalysisContext): Promise<string> {
   const { supabase, userId, prefs, triggerType } = ctx;
   const provider = prefs?.custom_ai_provider || "google";
   const tier = prefs?.analysis_tier || "balanced";
-  const models = getStageModels(provider, tier);
+  const models = getStageModels(provider, tier, prefs?.custom_ai_model);
   const { data: analysis, error: aErr } = await supabase
     .from("analyses")
     .insert({
@@ -1117,8 +1123,8 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
 
     const provider = prefs?.custom_ai_provider || "google";
     const aiKey = prefs?.custom_ai_key || null;
-    const aiConfig = { provider, apiKey: aiKey };
-    const stageModels = getStageModels(provider, tier);
+    const aiConfig = { provider, apiKey: aiKey, model: prefs?.custom_ai_model };
+    const stageModels = getStageModels(provider, tier, prefs?.custom_ai_model);
 
     if (!aiKey) {
       throw new Error(`AI provider "${provider}" has no configured API key. Configure a valid server-side or BYOK credential before running analysis.`);
@@ -1459,7 +1465,7 @@ async function getAnalysisContext(supabase: SupabaseClient, userId: string, trig
 
   const { data: prefs } = await supabase
     .from("user_preferences")
-    .select("custom_ai_provider, custom_ai_key, filter_max_repos, filter_languages, filter_min_stars, filter_exclude_archived, analysis_tier")
+    .select("custom_ai_provider, custom_ai_key, custom_ai_model, filter_max_repos, filter_languages, filter_min_stars, filter_exclude_archived, analysis_tier")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -1468,6 +1474,7 @@ async function getAnalysisContext(supabase: SupabaseClient, userId: string, trig
   const normalizedPrefs: AnalysisContext["prefs"] = {
     custom_ai_provider: aiCredential.provider,
     custom_ai_key: aiCredential.apiKey,
+    custom_ai_model: aiCredential.model,
     filter_max_repos: prefs?.filter_max_repos ?? 200,
     filter_languages: prefs?.filter_languages ?? null,
     filter_min_stars: prefs?.filter_min_stars ?? 0,

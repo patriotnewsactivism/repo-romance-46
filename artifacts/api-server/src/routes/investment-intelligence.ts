@@ -715,7 +715,7 @@ router.post(
 
     const github = requireGithubCredential(await loadGithubCredential(req.supabase!, userId));
     const aiCredential = await loadAiCredential(req.supabase!, userId, github.token);
-    const ai = { provider: aiCredential.provider, apiKey: aiCredential.apiKey };
+    const ai = { provider: aiCredential.provider, apiKey: aiCredential.apiKey, model: aiCredential.model };
 
     const inspected: Awaited<ReturnType<typeof inspectOneRepo>>[] = [];
     const errors: string[] = [];

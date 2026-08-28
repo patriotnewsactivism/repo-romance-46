@@ -258,7 +258,7 @@ async function analyzeCandidate(
       thinkingLevel: council ? "high" : "medium",
       timeoutMs: council ? 60_000 : 45_000,
     },
-    { provider: ai.provider, apiKey: ai.apiKey },
+    { provider: ai.provider, apiKey: ai.apiKey, model: ai.model },
   );
   const result = JSON.parse(response.content || "{}") as Record<string, unknown>;
   const opportunityQuality = clamp(

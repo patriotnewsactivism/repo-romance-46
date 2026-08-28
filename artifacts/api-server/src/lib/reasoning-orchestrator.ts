@@ -578,7 +578,7 @@ export async function reasonAboutRepositoryPlan(
       resolvePromptStrategy(supabase, userId),
     ]);
     const aiCredential = await loadAiCredential(supabase, userId, github.token);
-    const ai = { provider: aiCredential.provider, apiKey: aiCredential.apiKey };
+    const ai = { provider: aiCredential.provider, apiKey: aiCredential.apiKey, model: aiCredential.model };
     const memory = memoryGuidance(memories, 14);
     const legacyGuidance = arrayOfStrings(learning.promptGuidance, 12);
     const specialistSelections = selectSpecialists({

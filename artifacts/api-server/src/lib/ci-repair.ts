@@ -350,7 +350,7 @@ async function prepareRepairPlan(
   if (!aiCredential.apiKey) throw new Error(`No usable ${aiCredential.provider} credential is configured for CI repair.`);
   const memory = memoryGuidance(memoriesResult, 12);
   const prior = previousAttempts.data ?? [];
-  const ai = { provider: aiCredential.provider, apiKey: aiCredential.apiKey };
+  const ai = { provider: aiCredential.provider, apiKey: aiCredential.apiKey, model: aiCredential.model };
   const diagnosisInput = {
     repository: run.repo,
     branch: run.branch_name,

@@ -55,6 +55,18 @@ const KEYWORDS: Record<SpecialistRole, string[]> = {
   observability: ["observability", "sentry", "logging", "logs", "metrics", "tracing", "trace", "telemetry", "alert", "health check", "readiness", "monitoring"],
 };
 
+// These terms are useful supporting evidence but too generic to justify an
+// autonomous specialist by themselves (for example, a README can mention a
+// "service" or "build" without containing backend or deployment work).
+const WEAK_KEYWORDS: Partial<Record<SpecialistRole, Set<string>>> = {
+  "frontend-ux": new Set(["web", "screen", "component", "navigation", "render"]),
+  "backend-api": new Set(["node", "worker", "queue", "service", "function"]),
+  database: new Set(["storage", "table", "index"]),
+  "devops-deployment": new Set(["runtime", "build", "release", "infrastructure"]),
+  "qa-reliability": new Set(["test", "testing", "retry", "failure", "reliability"]),
+  observability: new Set(["logging", "logs", "metrics", "trace", "alert", "readiness"]),
+};
+
 function corpus(input: SpecialistSelectionInput) {
   return [
     input.repo,
@@ -75,7 +87,8 @@ export function selectSpecialists(input: SpecialistSelectionInput, maxSpecialist
   const text = corpus(input);
   const scores = (Object.keys(KEYWORDS) as SpecialistRole[]).map((role) => {
     const matches = KEYWORDS[role].filter((keyword) => matchesKeyword(text, keyword));
-    let score = matches.length * 18;
+    const weakKeywords = WEAK_KEYWORDS[role];
+    let score = matches.reduce((total, match) => total + (weakKeywords?.has(match) ? 6 : 18), 0);
     const language = String(input.language || "").toLowerCase();
     if (role === "frontend-ux" && /typescript|javascript/.test(language)) score += 8;
     if (role === "backend-api" && /python|go|rust|java|typescript|javascript/.test(language)) score += 5;

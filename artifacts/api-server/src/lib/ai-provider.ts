@@ -1,8 +1,10 @@
-// Centralized AI provider routing — handles Google Gemini, OpenAI, Anthropic, and legacy/custom providers.
+// Centralized AI provider routing — handles OpenRouter, Google Gemini, OpenAI,
+// Anthropic, and legacy/custom providers.
 
 export interface AIProviderConfig {
-  provider: string; // "google" | "openai" | "anthropic" | "custom" | legacy "github_models"
+  provider: string; // "openrouter" | "google" | "openai" | "anthropic" | "custom" | legacy "github_models"
   apiKey: string | null;
+  model?: string | null;
 }
 
 export interface AIRequest {
@@ -31,6 +33,7 @@ export interface AIResponse {
 // structured outputs, tunable thinking, and strong coding/agent performance.
 const DEFAULT_MODELS: Record<string, string> = {
   google: "gemini-3.7-flash",
+  openrouter: "deepseek/deepseek-v4-flash-0731",
   openai: "gpt-4o",
   anthropic: "claude-sonnet-4-20250514",
   custom: "gpt-4o",
@@ -125,13 +128,14 @@ const PROVIDER_ENDPOINTS: Record<string, string> = {
   openai: "https://api.openai.com/v1/chat/completions",
   anthropic: "https://api.anthropic.com/v1/messages",
   google: "https://generativelanguage.googleapis.com/v1beta/models",
+  openrouter: "https://openrouter.ai/api/v1/chat/completions",
   custom: "https://api.openai.com/v1/chat/completions",
 };
 
 export async function callAI(request: AIRequest, config: AIProviderConfig): Promise<AIResponse> {
   // Never silently fall back to OpenAI. Gemini is the explicit platform default.
   const provider = config.provider || "google";
-  const model = request.model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.google;
+  const model = request.model || config.model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.google;
   const requestTimeoutMs = resolveAIRequestTimeoutMs(request);
 
   if (provider === "anthropic" && config.apiKey) {
@@ -239,7 +243,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
   }
 
   if (
-    (provider === "github_models" || provider === "openai" || provider === "custom") &&
+    (provider === "github_models" || provider === "openai" || provider === "openrouter" || provider === "custom") &&
     config.apiKey
   ) {
     const body: Record<string, unknown> = {
@@ -247,15 +251,25 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       messages: request.messages,
     };
     if (request.responseFormat) body.response_format = request.responseFormat;
+    if (provider === "openrouter" && (request.thinkingLevel || request.thinkingBudgetTokens)) {
+      body.reasoning = { effort: request.thinkingLevel || "high" };
+    }
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${config.apiKey}`,
+    };
+    if (provider === "openrouter") {
+      const appUrl = process.env.PUBLIC_APP_URL?.trim();
+      if (appUrl) headers["HTTP-Referer"] = appUrl;
+      headers["X-OpenRouter-Title"] = "RepoFinisher";
+    }
 
     const res = await fetchWithRetry(
       PROVIDER_ENDPOINTS[provider],
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${config.apiKey}`,
-        },
+        headers,
         body: JSON.stringify(body),
       },
       provider,
@@ -264,7 +278,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`AI error ${res.status}: ${text.slice(0, 300)}`);
+      throw new Error(`${provider} API error ${res.status}: ${text.slice(0, 300)}`);
     }
 
     const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
@@ -278,6 +292,6 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
   }
 
   throw new Error(
-    `No usable credential is configured for "${provider}". For Google, configure GEMINI_API_KEY/GOOGLE_API_KEY on the API server or save a Google BYOK key in Settings.`,
+    `No usable credential is configured for "${provider}". Configure its platform key or save an encrypted BYOK key in Settings.`,
   );
 }

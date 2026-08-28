@@ -224,7 +224,7 @@ router.post(
       },
     };
 
-    const ai = { provider: aiCredential.provider, apiKey: aiCredential.apiKey };
+    const ai = { provider: aiCredential.provider, apiKey: aiCredential.apiKey, model: aiCredential.model };
     if (!ai.apiKey) throw Object.assign(new Error(`No usable ${ai.provider} credential is configured for autonomous agent planning.`), { status: 400 });
 
     const architect = await runReasoningAgent("architect", coreObjective("architect"), sharedContext, ai, promptStrategy.guidance);

@@ -80,12 +80,24 @@ interface ExperimentRow {
   confidence_z: number;
   status: "active" | "paused" | "needs_challenger";
   promotion_history: unknown;
+  updated_at: string;
 }
 
 function numeric(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function completionDeltaFromOutcomeMetrics(value: unknown): number | null {
+  if (!value || typeof value !== "object") return null;
+  const metrics = value as Record<string, unknown>;
+  const direct = numeric(metrics.completion_delta);
+  if (direct !== null) return direct;
+  const deltas = metrics.deltas;
+  return deltas && typeof deltas === "object"
+    ? numeric((deltas as Record<string, unknown>).completionPct)
+    : null;
 }
 
 function mean(values: number[]): number | null {
@@ -186,7 +198,7 @@ export function assignPromptArm(challengerTrafficPct: number, bucket: number): "
   return normalizedBucket < pct ? "challenger" : "incumbent";
 }
 
-function defaultExperiment(userId: string): Omit<ExperimentRow, "id"> {
+function defaultExperiment(userId: string): Omit<ExperimentRow, "id" | "updated_at"> {
   return {
     user_id: userId,
     incumbent_version: CATALOG[0].version,
@@ -225,13 +237,10 @@ async function loadSamples(supabase: SupabaseClient, userId: string, versions: s
     const promptVersion = typeof record.prompt_version === "string" ? record.prompt_version : null;
     const outcomeScore = numeric(record.outcome_score);
     if (!promptVersion || outcomeScore === null) return [];
-    const metrics = record.outcome_metrics && typeof record.outcome_metrics === "object"
-      ? record.outcome_metrics as Record<string, unknown>
-      : {};
     return [{
       promptVersion,
       outcomeScore,
-      completionDelta: numeric(metrics.completion_delta),
+      completionDelta: completionDeltaFromOutcomeMetrics(record.outcome_metrics),
     }];
   });
 }
@@ -249,7 +258,20 @@ async function ensureExperiment(supabase: SupabaseClient, userId: string): Promi
     .insert(seed)
     .select("*")
     .single();
-  return createError || !created ? null : created as ExperimentRow;
+  if (!createError && created) return created as ExperimentRow;
+
+  // Parallel portfolio runs can race to initialize the same per-user experiment.
+  // The unique user_id constraint chooses the winner; every other request should
+  // reload that durable row instead of silently falling back to the incumbent.
+  if (createError?.code === "23505") {
+    const { data: concurrent } = await supabase
+      .from("prompt_strategy_experiments")
+      .select("*")
+      .eq("user_id", userId)
+      .maybeSingle();
+    return (concurrent as ExperimentRow | null) ?? null;
+  }
+  return null;
 }
 
 async function applyDecision(supabase: SupabaseClient, row: ExperimentRow, decision: PromptExperimentDecision): Promise<ExperimentRow> {
@@ -283,9 +305,19 @@ async function applyDecision(supabase: SupabaseClient, row: ExperimentRow, decis
     .from("prompt_strategy_experiments")
     .update(updates)
     .eq("id", row.id)
+    .eq("updated_at", row.updated_at)
     .select("*")
     .maybeSingle();
-  return (data as ExperimentRow | null) ?? { ...working, ...updates };
+  if (data) return data as ExperimentRow;
+
+  // A concurrent evaluator already advanced this experiment. Use its decision
+  // rather than reporting an unpersisted local promotion or appending twice.
+  const { data: current } = await supabase
+    .from("prompt_strategy_experiments")
+    .select("*")
+    .eq("id", row.id)
+    .maybeSingle();
+  return (current as ExperimentRow | null) ?? row;
 }
 
 export async function resolvePromptStrategy(supabase: SupabaseClient, userId: string): Promise<ResolvedPromptStrategy> {
