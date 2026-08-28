@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request } from "express";
 import { z } from "zod";
 import {
   buildPortfolioValuation,
@@ -94,7 +94,7 @@ function inputFromRanking(item: Record<string, unknown>): PortfolioValuationRepo
   };
 }
 
-async function calculate(req: Parameters<typeof requireAuth>[0] extends never ? never : any, analysisId: string) {
+async function calculate(req: Request, analysisId: string) {
   const { data, error } = await req.supabase!
     .from("analyses")
     .select("investment_intelligence")
