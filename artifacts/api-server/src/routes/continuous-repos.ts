@@ -7,6 +7,7 @@ import { reasonAboutRepositoryPlan } from "../lib/reasoning-orchestrator";
 import { recordOperationalMemory } from "../lib/learning-memory";
 
 const router: IRouter = Router();
+const repoSchema = z.string().regex(/^[A-Za-z0-9.-]+\/[A-Za-z0-9._-]+$/);
 
 interface GitHubEvent {
   id: string;
@@ -83,6 +84,8 @@ async function enqueueNewEvents(
   }
   selected.reverse();
   let inserted = 0;
+  let failed = 0;
+  let newestPersisted = lastEventId;
   for (const event of selected.slice(-50)) {
     const type = normalizeEventType(event.type);
     const { error } = await supabase.from("repo_event_queue").insert({
@@ -100,9 +103,21 @@ async function enqueueNewEvents(
       status: "queued",
       available_at: new Date().toISOString(),
     });
-    if (!error || error.code === "23505") inserted += error ? 0 : 1;
+    if (!error) {
+      inserted += 1;
+      newestPersisted = event.id;
+    } else if (error.code === "23505") {
+      newestPersisted = event.id;
+    } else {
+      failed += 1;
+      break;
+    }
   }
-  return { inserted, newestEventId: events[0]?.id ?? lastEventId };
+  return {
+    inserted,
+    failed,
+    newestEventId: failed ? newestPersisted : (events[0]?.id ?? lastEventId),
+  };
 }
 
 async function processQueuedRecommendations(
@@ -182,7 +197,7 @@ router.put(
   requireAuth,
   asyncHandler(async (req, res) => {
     const input = z.object({
-      repo: z.string().regex(/^[A-Za-z0-9.-]+\/[A-Za-z0-9._-]+$/),
+      repo: repoSchema,
       enabled: z.boolean().default(true),
       eventTypes: z.array(z.string().min(1).max(80)).max(20).default(["push", "pull_request", "release"]),
       autoAnalyze: z.boolean().default(true),
@@ -237,7 +252,7 @@ router.post(
   "/repo-finisher/continuous/sync",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const body = z.object({ repo: z.string().optional(), process: z.boolean().default(true), maxProcessedEvents: z.number().int().min(0).max(10).default(3) }).parse(req.body ?? {});
+    const body = z.object({ repo: repoSchema.optional(), process: z.boolean().default(true), maxProcessedEvents: z.number().int().min(0).max(10).default(3) }).parse(req.body ?? {});
     let query = req.supabase!
       .from("repo_watch_settings")
       .select("*")
@@ -247,7 +262,7 @@ router.post(
     const { data: watches, error } = await query.limit(100);
     if (error) throw new Error(`Failed to load continuous repository watches: ${error.message}`);
     const github = requireGithubCredential(await loadGithubCredential(req.supabase!, req.userId!));
-    const synced: Array<{ repo: string; inserted: number; error?: string }> = [];
+    const synced: Array<{ repo: string; inserted: number; failed?: number; error?: string }> = [];
     for (const watch of watches ?? []) {
       const record = watch as Record<string, unknown>;
       const repo = String(record.repo);
@@ -264,10 +279,10 @@ router.post(
         const now = new Date().toISOString();
         await req.supabase!
           .from("repo_watch_settings")
-          .update({ last_event_id: result.newestEventId, last_event_at: events[0]?.created_at ?? record.last_event_at ?? null, last_sync_at: now, updated_at: now })
+          .update({ last_event_id: result.newestEventId, last_event_at: events.find((event) => event.id === result.newestEventId)?.created_at ?? record.last_event_at ?? null, last_sync_at: now, updated_at: now })
           .eq("id", String(record.id))
           .eq("user_id", req.userId!);
-        synced.push({ repo, inserted: result.inserted });
+        synced.push({ repo, inserted: result.inserted, failed: result.failed });
       } catch (err) {
         synced.push({ repo, inserted: 0, error: err instanceof Error ? err.message : String(err) });
       }
@@ -283,7 +298,7 @@ router.get(
   "/repo-finisher/continuous/events",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const query = z.object({ repo: z.string().optional(), limit: z.coerce.number().int().min(1).max(200).default(50) }).parse(req.query);
+    const query = z.object({ repo: repoSchema.optional(), limit: z.coerce.number().int().min(1).max(200).default(50) }).parse(req.query);
     let request = req.supabase!
       .from("repo_event_queue")
       .select("*")
