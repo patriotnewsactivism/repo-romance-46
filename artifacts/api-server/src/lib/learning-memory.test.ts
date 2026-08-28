@@ -16,6 +16,9 @@ function memory(overrides: Partial<OperationalMemory> = {}): OperationalMemory {
     averageOutcomeScore: 82,
     averageCompletionDelta: 6,
     averageReadinessDelta: 4,
+    outcomeScoreSamples: 4,
+    completionDeltaSamples: 3,
+    readinessDeltaSamples: 3,
     evidence: [],
     lastOutcome: "success",
     lastSeenAt: new Date().toISOString(),
@@ -33,10 +36,11 @@ describe("memoryGuidance", () => {
     expect(guidance).toHaveLength(2);
     expect(guidance[0]).toContain("prefer this");
     expect(guidance[0]).toContain("92% confidence");
+    expect(guidance[0]).toContain("4 scored samples");
   });
 
   it("keeps unknown outcome scores explicit instead of inventing them", () => {
-    const guidance = memoryGuidance([memory({ averageOutcomeScore: null, samples: 3 })]);
+    const guidance = memoryGuidance([memory({ averageOutcomeScore: null, outcomeScoreSamples: 0, samples: 3 })]);
     expect(guidance[0]).toContain("3 observed samples");
     expect(guidance[0]).not.toContain("avg outcome");
   });
