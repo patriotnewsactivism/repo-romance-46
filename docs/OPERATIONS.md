@@ -121,7 +121,7 @@ Optional platform AI fallback credentials/models:
 
 ```text
 AI_PROVIDER
-aI_MODEL
+AI_MODEL
 GEMINI_API_KEY
 GOOGLE_API_KEY
 GEMINI_MODEL
@@ -132,8 +132,6 @@ ANTHROPIC_MODEL
 OPENROUTER_API_KEY
 OPENROUTER_MODEL
 ```
-
-Use the actual uppercase variable `AI_MODEL` rather than the lowercase typo shown above if copying values; this note is intentionally explicit because environment names are case-sensitive.
 
 Sentry API configuration may include:
 
