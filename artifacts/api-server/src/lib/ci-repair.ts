@@ -3,6 +3,8 @@ import { waitUntil } from "@vercel/functions";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { callAI } from "./ai-provider";
 import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "./credentials";
+import { loadOperationalMemory, memoryGuidance, recordOperationalMemory } from "./learning-memory";
+import { IMMUTABLE_AGENT_SAFETY_POLICY } from "./prompt-strategy-evolution";
 import {
   validatePlanChanges,
   validateRepoName,
@@ -16,13 +18,13 @@ const MAX_REPAIR_CHANGES = 12;
 const MAX_EVIDENCE_CHARS = 60_000;
 const MAX_CONTEXT_FILES = 18;
 const MAX_CONTEXT_FILE_CHARS = 80_000;
-const CI_REPAIR_PROMPT_VERSION = "ci-repair-v1-bounded";
+const CI_REPAIR_PROMPT_VERSION = "ci-repair-v2-reasoned-learning";
 
 export interface SelfHealingRun {
   id: string;
   user_id?: string;
   repo: string;
-  plan: { changes?: Array<{ path?: string }> } & Record<string, unknown>;
+  plan: { changes?: Array<{ path?: string }>; reasoning?: unknown } & Record<string, unknown>;
   status: string;
   branch_name: string | null;
   head_sha: string | null;
@@ -38,6 +40,16 @@ interface RepairEvidence {
   failedJobs: Array<{ runId: number; jobId: number; name: string; conclusion: string | null; log: string }>;
 }
 
+interface RepairDiagnosis {
+  rootCause: string;
+  confidence: number;
+  evidence: string[];
+  rejectedCauses: string[];
+  repairStrategy: string[];
+  regressionRisks: string[];
+  stopIf: string[];
+}
+
 interface RepairPlan {
   version: 1;
   mode: "ci_repair";
@@ -46,6 +58,7 @@ interface RepairPlan {
   sourceHeadSha: string;
   promptVersion: string;
   analysis: string;
+  diagnosis: RepairDiagnosis;
   failedChecks: string[];
   changes: ValidatedFileChange[];
 }
@@ -124,9 +137,7 @@ async function collectFailureEvidence(token: string, repo: string, headSha: stri
       for (const job of failed.slice(0, 5)) {
         let log = "";
         const logRes = await ghFetch(token, `/repos/${repo}/actions/jobs/${job.id}/logs`, { headers: { Accept: "text/plain" } });
-        if (logRes.ok) {
-          log = tail(redactLog(await logRes.text()), 20_000);
-        }
+        if (logRes.ok) log = tail(redactLog(await logRes.text()), 20_000);
         failedJobs.push({ runId: run.id, jobId: job.id, name: job.name, conclusion: job.conclusion, log });
       }
     }
@@ -172,14 +183,20 @@ async function getFile(token: string, repo: string, path: string, ref: string) {
   return Buffer.from(json.content, "base64").toString("utf-8");
 }
 
-function contextCandidates(tree: GitHubTreeEntry[], originalPlan: SelfHealingRun["plan"]) {
+function contextCandidates(tree: GitHubTreeEntry[], originalPlan: SelfHealingRun["plan"], evidence: RepairEvidence) {
   const existing = new Set(tree.map((entry) => entry.path));
   const candidates: string[] = [];
+  const failureText = JSON.stringify(evidence).toLowerCase();
   const add = (path: string | undefined) => {
     if (!path || !existing.has(path) || candidates.includes(path)) return;
     candidates.push(path);
   };
   for (const change of originalPlan.changes ?? []) add(change.path);
+  for (const entry of tree) {
+    const basename = entry.path.toLowerCase().split("/").at(-1) || "";
+    if (basename.length >= 5 && failureText.includes(basename)) add(entry.path);
+    if (candidates.length >= MAX_CONTEXT_FILES) return candidates;
+  }
   const priority = [
     /^package\.json$/,
     /^tsconfig.*\.json$/,
@@ -219,12 +236,8 @@ function protectedRepairPath(path: string) {
 
 function assertRepairSafety(changes: ValidatedFileChange[], before: Map<string, string>) {
   for (const change of changes) {
-    if (change.status === "deleted") {
-      throw new Error(`Automatic CI repair cannot delete files: ${change.path}`);
-    }
-    if (protectedRepairPath(change.path)) {
-      throw new Error(`Automatic CI repair cannot modify tests, CI/security governance, or lockfiles: ${change.path}`);
-    }
+    if (change.status === "deleted") throw new Error(`Automatic CI repair cannot delete files: ${change.path}`);
+    if (protectedRepairPath(change.path)) throw new Error(`Automatic CI repair cannot modify tests, CI/security governance, or lockfiles: ${change.path}`);
     if (change.path.toLowerCase() === "package.json") {
       const previous = before.get(change.path);
       if (!previous) continue;
@@ -255,6 +268,49 @@ function hashPlan(plan: RepairPlan) {
   return createHash("sha256").update(canonicalize(plan)).digest("hex");
 }
 
+function changesFingerprint(changes: Array<{ path: string; status: string; content?: string }>) {
+  return createHash("sha256").update(canonicalize(changes.map((change) => ({ path: change.path, status: change.status, content: change.content ?? "" })))).digest("hex");
+}
+
+async function diagnoseFailure(
+  ai: { provider: string; apiKey: string | null },
+  input: Record<string, unknown>,
+): Promise<RepairDiagnosis> {
+  const result = await callAI({
+    messages: [
+      {
+        role: "system",
+        content: `You are RepoFinisher's CI failure diagnostician. Determine the most likely root cause before any patch is generated. Separate evidence from guesses, reject attractive-but-unsupported causes, and identify regression risk.\n\n${IMMUTABLE_AGENT_SAFETY_POLICY}\n\nNever solve a failure by weakening validation. Return strict JSON only.`,
+      },
+      { role: "user", content: JSON.stringify(input) },
+    ],
+    responseFormat: {
+      type: "json_schema",
+      json_schema: {
+        name: "ci_failure_diagnosis",
+        strict: true,
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            rootCause: { type: "string" },
+            confidence: { type: "number", minimum: 0, maximum: 100 },
+            evidence: { type: "array", maxItems: 12, items: { type: "string" } },
+            rejectedCauses: { type: "array", maxItems: 10, items: { type: "string" } },
+            repairStrategy: { type: "array", minItems: 1, maxItems: 8, items: { type: "string" } },
+            regressionRisks: { type: "array", maxItems: 10, items: { type: "string" } },
+            stopIf: { type: "array", maxItems: 8, items: { type: "string" } },
+          },
+          required: ["rootCause", "confidence", "evidence", "rejectedCauses", "repairStrategy", "regressionRisks", "stopIf"],
+        },
+      },
+    },
+    thinkingLevel: "high",
+    timeoutMs: 60_000,
+  }, ai);
+  return JSON.parse(result.content || "{}") as RepairDiagnosis;
+}
+
 async function prepareRepairPlan(
   supabase: SupabaseClient,
   userId: string,
@@ -270,7 +326,7 @@ async function prepareRepairPlan(
     throw new Error(`Repair branch moved from ${run.head_sha.slice(0, 12)} to ${head.commitSha.slice(0, 12)}; refusing to repair stale evidence.`);
   }
   const tree = await getTree(github.token, run.repo, head.treeSha);
-  const paths = contextCandidates(tree, run.plan);
+  const paths = contextCandidates(tree, run.plan, evidence);
   const files: Array<{ path: string; content: string }> = [];
   const before = new Map<string, string>();
   for (const path of paths) {
@@ -281,20 +337,39 @@ async function prepareRepairPlan(
     before.set(path, content);
   }
 
-  const aiCredential = await loadAiCredential(supabase, userId, github.token);
+  const [aiCredential, memoriesResult, previousAttempts] = await Promise.all([
+    loadAiCredential(supabase, userId, github.token),
+    loadOperationalMemory(supabase, userId, run.repo, ["ci_repair", "failure_mode", "tooling", "deployment"], 20),
+    supabase
+      .from("completion_repair_attempts")
+      .select("attempt, status, plan, error, failed_checks")
+      .eq("run_id", run.id)
+      .eq("user_id", userId)
+      .order("attempt", { ascending: true }),
+  ]);
   if (!aiCredential.apiKey) throw new Error(`No usable ${aiCredential.provider} credential is configured for CI repair.`);
-  const system = `You are RepoFinisher's CI repair agent. A previously generated draft PR failed CI.
-Find the smallest root-cause code/config fix that makes the existing validation pass.
+  const memory = memoryGuidance(memoriesResult, 12);
+  const prior = previousAttempts.data ?? [];
+  const ai = { provider: aiCredential.provider, apiKey: aiCredential.apiKey };
+  const diagnosisInput = {
+    repository: run.repo,
+    branch: run.branch_name,
+    headSha: run.head_sha,
+    repairAttempt: attempt,
+    originalPlan: run.plan,
+    failedChecks: evidence.failedChecks,
+    checkOutputs: evidence.checkOutputs,
+    failedJobs: evidence.failedJobs,
+    currentFiles: files,
+    operationalMemory: memory,
+    previousRepairAttempts: prior,
+  };
+  const diagnosis = await diagnoseFailure(ai, diagnosisInput);
+  if (diagnosis.confidence < 25) {
+    throw new Error(`CI repair diagnosis confidence is only ${diagnosis.confidence}/100; refusing to guess at a write.`);
+  }
 
-NON-NEGOTIABLE SAFETY RULES:
-- Never weaken, remove, skip, mute, or rewrite tests.
-- Never modify GitHub Actions workflows, CODEOWNERS, SECURITY.md, lockfiles, credential files, or secrets.
-- Never delete files.
-- Never change existing package.json test, lint, or typecheck scripts.
-- Fix product/source/build configuration rather than changing the acceptance criteria.
-- Use only the supplied repository files and CI evidence. Do not invent APIs or dependencies.
-- Keep the patch minimal and directly tied to the observed failure.
-- Return strict JSON only.`;
+  const system = `You are RepoFinisher's bounded CI repair coding agent. A separate diagnostician already analyzed the failure. Implement the smallest patch that addresses the accepted root cause and nothing else.\n\n${IMMUTABLE_AGENT_SAFETY_POLICY}\n\nNON-NEGOTIABLE REPAIR RULES:\n- Never weaken, remove, skip, mute, or rewrite tests.\n- Never modify GitHub Actions workflows, CODEOWNERS, SECURITY.md, lockfiles, credential files, or secrets.\n- Never delete files.\n- Never change existing package.json test, lint, or typecheck scripts.\n- Fix product/source/build configuration rather than changing acceptance criteria.\n- Use only supplied repository files, CI evidence, measured operational memory, and the diagnosis. Do not invent APIs or dependencies.\n- Do not repeat a prior failed repair unchanged.\n- Keep the patch minimal and directly tied to the root cause.\n- Return strict JSON only.`;
 
   const result = await callAI(
     {
@@ -302,17 +377,7 @@ NON-NEGOTIABLE SAFETY RULES:
         { role: "system", content: system },
         {
           role: "user",
-          content: JSON.stringify({
-            repository: run.repo,
-            branch: run.branch_name,
-            headSha: run.head_sha,
-            repairAttempt: attempt,
-            originalPlan: run.plan,
-            failedChecks: evidence.failedChecks,
-            checkOutputs: evidence.checkOutputs,
-            failedJobs: evidence.failedJobs,
-            currentFiles: files,
-          }),
+          content: JSON.stringify({ ...diagnosisInput, diagnosis }),
         },
       ],
       responseFormat: {
@@ -346,13 +411,24 @@ NON-NEGOTIABLE SAFETY RULES:
           },
         },
       },
-      timeoutMs: 45_000,
+      thinkingLevel: "high",
+      timeoutMs: 60_000,
     },
-    { provider: aiCredential.provider, apiKey: aiCredential.apiKey },
+    ai,
   );
   const generated = JSON.parse(result.content || "{}") as { analysis?: string; changes?: AIFileChange[] };
   const changes = validatePlanChanges(generated.changes ?? [], tree);
   assertRepairSafety(changes, before);
+
+  const fingerprint = changesFingerprint(changes);
+  for (const previous of prior) {
+    const previousPlan = (previous as Record<string, unknown>).plan as Record<string, unknown> | null;
+    const previousChanges = Array.isArray(previousPlan?.changes) ? previousPlan!.changes as Array<{ path: string; status: string; content?: string }> : [];
+    if (previousChanges.length && changesFingerprint(previousChanges) === fingerprint) {
+      throw new Error("The proposed repair is identical to a previous attempt. Re-diagnosis must produce a materially different root-cause fix.");
+    }
+  }
+
   const plan: RepairPlan = {
     version: 1,
     mode: "ci_repair",
@@ -360,11 +436,12 @@ NON-NEGOTIABLE SAFETY RULES:
     branch: run.branch_name,
     sourceHeadSha: run.head_sha,
     promptVersion: CI_REPAIR_PROMPT_VERSION,
-    analysis: generated.analysis || "Repair failing CI without changing validation criteria.",
+    analysis: generated.analysis || diagnosis.rootCause,
+    diagnosis,
     failedChecks: evidence.failedChecks,
     changes,
   };
-  return { plan, planHash: hashPlan(plan), token: github.token, treeSha: head.treeSha };
+  return { plan, planHash: hashPlan(plan), token: github.token, treeSha: head.treeSha, memory };
 }
 
 async function createBlob(token: string, repo: string, content: string) {
@@ -439,11 +516,25 @@ async function performRepair(
     const prepared = await prepareRepairPlan(supabase, userId, run, evidence, attempt);
     const { error: attemptUpdateError } = await supabase
       .from("completion_repair_attempts")
-      .update({ plan_hash: prepared.planHash, plan: prepared.plan, evidence })
+      .update({ plan_hash: prepared.planHash, plan: prepared.plan, evidence: { ...evidence, operationalMemory: prepared.memory } })
       .eq("run_id", run.id)
       .eq("user_id", userId)
       .eq("attempt", attempt);
     if (attemptUpdateError) throw new Error(`Failed to persist repair plan: ${attemptUpdateError.message}`);
+
+    await supabase.from("reasoning_traces").insert({
+      user_id: userId,
+      repo: run.repo,
+      completion_run_id: run.id,
+      mode: "repair",
+      stage: "repair_plan_ready",
+      status: "running",
+      prompt_version: CI_REPAIR_PROMPT_VERSION,
+      evidence,
+      hypotheses: [prepared.plan.diagnosis],
+      decision: { planHash: prepared.planHash, analysis: prepared.plan.analysis, changes: prepared.plan.changes.map((change) => ({ path: change.path, status: change.status, description: change.description })) },
+      confidence: prepared.plan.diagnosis.confidence,
+    });
 
     const repairedHead = await applyRepairPlan(prepared.token, prepared.plan, prepared.treeSha, prepared.planHash);
     const now = new Date().toISOString();
@@ -464,58 +555,91 @@ async function performRepair(
       .eq("repair_attempts", attempt);
     if (runError) throw new Error(`Failed to persist repaired head: ${runError.message}`);
 
-    await supabase
-      .from("completion_steps")
-      .update({ status: "verifying", error: null, completed_at: null, updated_at: now })
-      .eq("run_id", run.id)
-      .eq("user_id", userId);
-    await supabase
-      .from("completion_repair_attempts")
-      .update({ status: "applied", repaired_head_sha: repairedHead, completed_at: now })
-      .eq("run_id", run.id)
-      .eq("user_id", userId)
-      .eq("attempt", attempt);
+    await Promise.all([
+      supabase
+        .from("completion_steps")
+        .update({ status: "verifying", error: null, completed_at: null, updated_at: now })
+        .eq("run_id", run.id)
+        .eq("user_id", userId),
+      supabase
+        .from("completion_repair_attempts")
+        .update({ status: "applied", repaired_head_sha: repairedHead, completed_at: now })
+        .eq("run_id", run.id)
+        .eq("user_id", userId)
+        .eq("attempt", attempt),
+      supabase
+        .from("reasoning_traces")
+        .update({ stage: "repair_applied", status: "succeeded", completed_at: now, updated_at: now })
+        .eq("completion_run_id", run.id)
+        .eq("user_id", userId)
+        .eq("mode", "repair")
+        .eq("stage", "repair_plan_ready"),
+    ]);
+
+    await recordOperationalMemory(supabase, userId, {
+      repo: run.repo,
+      category: "ci_repair",
+      memoryKey: `root-cause:${prepared.plan.diagnosis.rootCause.slice(0, 120)}`,
+      observation: `CI repair attempt ${attempt} diagnosed: ${prepared.plan.diagnosis.rootCause}`,
+      recommendation: `For matching CI evidence, investigate this root cause before broad changes: ${prepared.plan.diagnosis.repairStrategy.join("; ")}`,
+      outcome: "observation",
+      confidence: prepared.plan.diagnosis.confidence,
+      evidence: [{ failedChecks: verification.failedChecks, planHash: prepared.planHash, repairedHead, at: now }],
+    });
+
     await recordEvent(
       supabase,
       userId,
       run.id,
       "ci_repair_applied",
       "success",
-      `Self-healing CI repair attempt ${attempt} applied ${prepared.plan.changes.length} bounded change${prepared.plan.changes.length === 1 ? "" : "s"}; checks will run again.`,
-      { attempt, planHash: prepared.planHash, sourceHeadSha: run.head_sha, repairedHeadSha: repairedHead, failedChecks: verification.failedChecks },
+      `Self-healing CI repair attempt ${attempt} applied ${prepared.plan.changes.length} bounded change${prepared.plan.changes.length === 1 ? "" : "s"} after root-cause diagnosis; checks will run again.`,
+      { attempt, planHash: prepared.planHash, sourceHeadSha: run.head_sha, repairedHeadSha: repairedHead, failedChecks: verification.failedChecks, diagnosis: prepared.plan.diagnosis },
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const now = new Date().toISOString();
-    const maxAttempts = Number(run.max_repair_attempts ?? 2);
+    const maxAttempts = Number(run.max_repair_attempts ?? 3);
     const exhausted = attempt >= maxAttempts;
-    await supabase
-      .from("completion_repair_attempts")
-      .update({ status: "failed", error: message, completed_at: now })
-      .eq("run_id", run.id)
-      .eq("user_id", userId)
-      .eq("attempt", attempt);
-    await supabase
-      .from("completion_runs")
-      .update({
-        status: exhausted ? "failed" : "verifying",
-        ci_status: exhausted ? "failed" : "pending",
-        error: exhausted ? `CI self-healing exhausted after ${attempt} attempt${attempt === 1 ? "" : "s"}: ${message}` : null,
-        last_repair_error: message,
-        repairing_at: null,
-        updated_at: now,
-      })
-      .eq("id", run.id)
-      .eq("user_id", userId)
-      .eq("status", "repairing")
-      .eq("repair_attempts", attempt);
+    await Promise.all([
+      supabase
+        .from("completion_repair_attempts")
+        .update({ status: "failed", error: message, completed_at: now })
+        .eq("run_id", run.id)
+        .eq("user_id", userId)
+        .eq("attempt", attempt),
+      supabase
+        .from("completion_runs")
+        .update({
+          status: exhausted ? "failed" : "verifying",
+          ci_status: exhausted ? "failed" : "pending",
+          error: exhausted ? `CI self-healing exhausted after ${attempt} attempt${attempt === 1 ? "" : "s"}: ${message}` : null,
+          last_repair_error: message,
+          repairing_at: null,
+          updated_at: now,
+        })
+        .eq("id", run.id)
+        .eq("user_id", userId)
+        .eq("status", "repairing")
+        .eq("repair_attempts", attempt),
+    ]);
+    await recordOperationalMemory(supabase, userId, {
+      repo: run.repo,
+      category: "failure_mode",
+      memoryKey: `ci-repair-failure:${verification.failedChecks.join("|").slice(0, 160)}`,
+      observation: `CI repair attempt ${attempt} failed: ${message}`,
+      recommendation: "Do not repeat the same repair unchanged. Re-read current logs and branch state, test a different root-cause hypothesis, and stop rather than weaken validation if evidence remains insufficient.",
+      outcome: "failure",
+      confidence: 80,
+      evidence: [{ failedChecks: verification.failedChecks, attempt, error: message, at: now }],
+    }).catch(() => undefined);
     await recordEvent(
       supabase,
       userId,
       run.id,
       "ci_repair_failed",
       exhausted ? "error" : "warning",
-      exhausted ? `CI self-healing exhausted: ${message}` : `CI repair attempt ${attempt} could not be applied; another bounded attempt remains.`,
+      exhausted ? `CI self-healing exhausted: ${message}` : `CI repair attempt ${attempt} could not be applied; another evidence-driven attempt remains.`,
       { attempt, exhausted, error: message, failedChecks: verification.failedChecks },
     ).catch(() => undefined);
   }
@@ -530,7 +654,7 @@ export async function tryScheduleCiRepair(
   if (verification.state !== "failed") return false;
   if (!run.auto_repair_enabled || !run.branch_name || !run.head_sha) return false;
   const currentAttempts = Number(run.repair_attempts ?? 0);
-  const maxAttempts = Number(run.max_repair_attempts ?? 2);
+  const maxAttempts = Number(run.max_repair_attempts ?? 3);
   if (currentAttempts >= maxAttempts) return false;
 
   const attempt = currentAttempts + 1;
@@ -579,7 +703,7 @@ export async function tryScheduleCiRepair(
     run.id,
     "ci_repair_started",
     "info",
-    `CI failed; starting bounded self-healing repair attempt ${attempt}/${maxAttempts}.`,
+    `CI failed; starting evidence-driven self-healing repair attempt ${attempt}/${maxAttempts}.`,
     { attempt, maxAttempts, failedChecks: verification.failedChecks, sourceHeadSha: run.head_sha, promptVersion: CI_REPAIR_PROMPT_VERSION },
   );
 
@@ -595,7 +719,7 @@ export async function tryScheduleCiRepair(
 export async function markLatestRepairVerified(supabase: SupabaseClient, userId: string, runId: string) {
   const { data } = await supabase
     .from("completion_repair_attempts")
-    .select("id")
+    .select("id, attempt, plan, repaired_head_sha")
     .eq("run_id", runId)
     .eq("user_id", userId)
     .eq("status", "applied")
@@ -603,9 +727,32 @@ export async function markLatestRepairVerified(supabase: SupabaseClient, userId:
     .limit(1)
     .maybeSingle();
   if (!data) return;
+  const now = new Date().toISOString();
   await supabase
     .from("completion_repair_attempts")
-    .update({ status: "verified", completed_at: new Date().toISOString() })
+    .update({ status: "verified", completed_at: now })
     .eq("id", (data as { id: string }).id)
     .eq("user_id", userId);
+
+  const { data: run } = await supabase
+    .from("completion_runs")
+    .select("repo")
+    .eq("id", runId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  const repo = run ? String((run as Record<string, unknown>).repo || "") : "";
+  const plan = (data as Record<string, unknown>).plan as Record<string, unknown> | null;
+  const diagnosis = plan?.diagnosis as RepairDiagnosis | undefined;
+  if (repo && diagnosis) {
+    await recordOperationalMemory(supabase, userId, {
+      repo,
+      category: "ci_repair",
+      memoryKey: `root-cause:${diagnosis.rootCause.slice(0, 120)}`,
+      observation: `The diagnosed CI root cause was verified by passing checks after repair attempt ${String((data as Record<string, unknown>).attempt)}.` ,
+      recommendation: `Prefer this repair pattern when future failure evidence matches: ${diagnosis.repairStrategy.join("; ")}`,
+      outcome: "success",
+      confidence: Math.max(85, diagnosis.confidence),
+      evidence: [{ runId, repairedHeadSha: (data as Record<string, unknown>).repaired_head_sha ?? null, verifiedAt: now }],
+    }).catch(() => undefined);
+  }
 }
