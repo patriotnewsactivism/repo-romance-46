@@ -1,0 +1,41 @@
+name: Production smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      frontend_url:
+        description: Netlify frontend URL to verify
+        required: true
+        default: https://repofinisher.donmatthews.live
+      api_url:
+        description: Persistent RepoFinisher API URL
+        required: true
+        default: https://repofinisher-api-live.onrender.com
+      supabase_url:
+        description: Supabase project URL
+        required: true
+        default: https://rdsrxfzahhxbvugyarld.supabase.co
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Verify Netlify + Render + Supabase production seams
+        env:
+          CI_STRICT_SMOKE: "1"
+          FRONTEND_URL: ${{ inputs.frontend_url }}
+          API_URL: ${{ inputs.api_url }}
+          SUPABASE_URL: ${{ inputs.supabase_url }}
+        run: node scripts/smoke-check.mjs
