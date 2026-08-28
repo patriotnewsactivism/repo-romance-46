@@ -137,6 +137,12 @@ Controlled prompt experiments can promote a challenger strategy only after measu
 
 See [`docs/REASONING_AND_LEARNING.md`](docs/REASONING_AND_LEARNING.md).
 
+## External coding-agent handoffs
+
+RepoFinisher can generate a current-state completion prompt for an external coding agent without giving up its own autonomous finishing capability. The handoff is bound to the assessed repository state and should carry the same evidence, remaining-work order, security boundaries, validation requirements, and Definition of Done used internally.
+
+See [`docs/EXTERNAL_LLM_HANDOFFS.md`](docs/EXTERNAL_LLM_HANDOFFS.md).
+
 ## Database migrations
 
 All schema changes belong in `supabase/migrations/` and should be forward-only, reviewable, and safe for production data.
@@ -162,7 +168,7 @@ For every migration:
 
 `.github/workflows/production-smoke.yml` verifies the production seams among Netlify, Render, and Supabase when manually dispatched.
 
-Do not merge a feature merely because local code looks correct. A normal release should have green CI, a successful target-host deployment, and relevant runtime smoke evidence.
+Do not merge a feature merely because local code looks correct. A normal release should have green CI, a successful target-host deployment, and relevant runtime smoke evidence. Use [`docs/RELEASE-CHECKLIST.md`](docs/RELEASE-CHECKLIST.md) for production-impacting work.
 
 ## Documentation map
 
@@ -175,7 +181,10 @@ Do not merge a feature merely because local code looks correct. A normal release
 - [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md) — current operational checkpoint and known remaining work.
 - [`docs/REASONING_AND_LEARNING.md`](docs/REASONING_AND_LEARNING.md) — reasoning, memory, experiments, and self-healing behavior.
 - [`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md) — provider/model/BYOK behavior.
+- [`docs/EXTERNAL_LLM_HANDOFFS.md`](docs/EXTERNAL_LLM_HANDOFFS.md) — external coding-agent completion handoff contract.
+- [`docs/RELEASE-CHECKLIST.md`](docs/RELEASE-CHECKLIST.md) — production release and verification gates.
 - [`docs/DECISIONS.md`](docs/DECISIONS.md) — durable architecture/product decisions.
+- [`docs/GOVERNANCE.md`](docs/GOVERNANCE.md) — repository governance and control gaps.
 - [`docs/sentry-observability.md`](docs/sentry-observability.md) — Sentry-specific notes.
 
 ## Source of truth

@@ -115,6 +115,14 @@ https://repofinish.vercel.app
 
 That is stale and conflicts with the accepted non-Vercel hosting decision. Update the repository homepage to the verified canonical Netlify/custom-domain URL once the frontend cutover is healthy.
 
+### Stale external Vercel commit status
+
+Issue #71 identified a repository-level Vercel integration that still posts a failing `Vercel` commit status even though all Vercel hosting artifacts have been removed and Vercel is not an approved target.
+
+PR #72 restored and proved the intended GitHub Actions pull-request CI path. Its full verification job passed, including the non-Vercel hosting guard, package tests, typecheck, and production build. The CI workflow now has explicit `opened`, `synchronize`, `reopened`, and `ready_for_review` PR triggers plus `workflow_dispatch` for operator recovery.
+
+The stale Vercel status is external integration/configuration drift. It must be disconnected at the repository/Vercel integration level; do not deploy to Vercel to make the status green and do not treat it as an approved release gate.
+
 ### Obsolete Render services still active
 
 In addition to the canonical `repofinisher-api-live` service, Render still contains two older RepoFinisher services pointing at `feat/netlify-migration`:
@@ -130,7 +138,7 @@ They should be retired after confirming no production frontend or external integ
 
 GitHub reports `main` as unprotected and required status-check enforcement as off.
 
-This is a governance gap. The intended rules are documented in `docs/GOVERNANCE.md`: PR-required changes, CI required, no force-push/delete, and no casual auto-merge expansion.
+This is a governance gap. The intended rules are documented in `docs/GOVERNANCE.md`: PR-required changes, GitHub CI required, no force-push/delete, and no casual auto-merge expansion. The stale Vercel status must not be made a required check.
 
 ## AI provider/settings status
 
@@ -224,6 +232,14 @@ The canonical API is currently on Render's free plan. Long-running reasoning and
 
 Upgrade should be based on observed cold starts, CPU/memory, concurrency, and response latency. Do not document an upgrade as completed until the actual service plan is verified.
 
+### 7. Repository governance cleanup
+
+GitHub PR CI is restored and proven through PR #72. Remaining repository-admin cleanup from issue #71 is:
+
+- disconnect the stale external Vercel status source,
+- enable appropriate `main` branch protection/rules with GitHub CI as the intended required check and no Vercel requirement,
+- update repository homepage metadata after the canonical Netlify custom domain is verified.
+
 ## Completed major foundations
 
 The following substantial capabilities are in `main` as of this snapshot:
@@ -251,6 +267,7 @@ The following substantial capabilities are in `main` as of this snapshot:
 - CI non-Vercel hosting guard
 - production seam smoke workflow
 - canonical README/AGENTS/security/operations/governance documentation baseline
+- explicit GitHub PR CI triggers and manual recovery path from PR #72
 
 ## Product correctness principles
 
@@ -270,11 +287,11 @@ A capability is only production-complete when the relevant layers are verified:
 
 ## Next recommended execution order
 
-1. Finish and verify Netlify source deployment/custom-domain cutover.
-2. Correct the stale GitHub repository homepage after the canonical domain is verified.
-3. Run authenticated AI provider Settings acceptance tests against Netlify + Render + Vault.
-4. Retire obsolete RepoFinisher Render services after reference checks.
-5. Enable appropriate `main` branch protection/required CI.
+1. Disconnect the stale Vercel GitHub status source and enable appropriate main-branch protection with GitHub CI as the intended required check.
+2. Finish and verify Netlify source deployment/custom-domain cutover.
+3. Correct the stale GitHub repository homepage after the canonical domain is verified.
+4. Run authenticated AI provider Settings acceptance tests against Netlify + Render + Vault.
+5. Retire obsolete RepoFinisher Render services after reference checks.
 6. Implement the multi-iteration finish-until-target controller.
 7. Add Finish Portfolio self-healing parity.
 8. Connect per-repo completion sessions into portfolio orchestration.

@@ -170,6 +170,8 @@ Generated prompts should include the assessed commit SHA, current state, evidenc
 
 Keep provider-specific formatting thin. The underlying assessment and requirements should remain provider-neutral so Codex, Claude Code, Gemini CLI, or another capable coding agent receives the same substantive task.
 
+See `docs/EXTERNAL_LLM_HANDOFFS.md` for the complete handoff contract.
+
 ## Database changes
 
 All production schema changes belong in `supabase/migrations/`.
@@ -238,6 +240,8 @@ A normal production-impacting change should have:
 
 Do not switch DNS before the replacement target is healthy.
 
+Use `docs/RELEASE-CHECKLIST.md` for production-impacting changes. A merged commit alone is not release-completion evidence.
+
 ## Current known operational caveats
 
 Read `docs/PROJECT_STATE.md` before infrastructure work. It is intentionally time-sensitive.
@@ -256,6 +260,9 @@ Canonical docs:
 - `docs/OPERATIONS.md` — deployment and incident procedures.
 - `docs/PROJECT_STATE.md` — current checkpoint and blockers.
 - `docs/REASONING_AND_LEARNING.md` — reasoning/learning behavior.
+- `docs/EXTERNAL_LLM_HANDOFFS.md` — external coding-agent handoff contract.
+- `docs/RELEASE-CHECKLIST.md` — production release/verification gates.
+- `docs/DECISIONS.md` — durable architecture/product decisions.
 
 Model-specific files (`CLAUDE.md`, `GEMINI.md`, `QWEN.md`, Copilot instructions) must point back to this file instead of maintaining divergent rules.
 
