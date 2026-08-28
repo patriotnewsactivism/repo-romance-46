@@ -69,18 +69,22 @@ router.get(
       events = eventRows.data ?? [];
     }
 
-    const scored = runs.filter((run) => Number.isFinite(Number(run.outcome_score)));
+    const scored = runs.filter(
+      (run) => run.outcome_score !== null && run.outcome_score !== undefined && Number.isFinite(Number(run.outcome_score)),
+    );
     const averageOutcomeScore = scored.length
       ? Math.round((scored.reduce((sum, run) => sum + Number(run.outcome_score), 0) / scored.length) * 10) / 10
       : null;
-    const successRate = runs.length
-      ? Math.round((runs.filter((run) => run.status === "succeeded").length / runs.length) * 1000) / 10
+    const terminalRuns = runs.filter((run) => ["succeeded", "failed", "stale"].includes(String(run.status)));
+    const successRate = terminalRuns.length
+      ? Math.round((terminalRuns.filter((run) => run.status === "succeeded").length / terminalRuns.length) * 1000) / 10
       : null;
 
     res.json({
       repo,
       summary: {
         completionRuns: runs.length,
+        terminalCompletionRuns: terminalRuns.length,
         successRate,
         averageOutcomeScore,
         reasoningTraces: (tracesResult.data ?? []).length,
