@@ -62,6 +62,12 @@ interface RawPortfolioRun {
   status: PortfolioStatus;
 }
 
+interface PortfolioHealResponse {
+  runId: string;
+  scheduled: number;
+  status: PortfolioStatus;
+}
+
 const ACTIVE = new Set<PortfolioStatus>(['queued', 'running', 'verifying']);
 
 function money(value: number | null | undefined) {
@@ -108,7 +114,13 @@ export function PortfolioFinishControl({ analysisId, repoCount }: { analysisId: 
 
   const refresh = async (runId: string) => {
     try {
-      const detail = await customFetch<PortfolioRunResponse>(`/api/repo-finisher/portfolio-runs/${runId}`, { responseType: 'json' });
+      let detail = await customFetch<PortfolioRunResponse>(`/api/repo-finisher/portfolio-runs/${runId}`, { responseType: 'json' });
+      if (detail.items.some((item) => item.status === 'failed' && item.completionRunId)) {
+        const heal = await postJson<PortfolioHealResponse>(`/api/repo-finisher/portfolio-runs/${runId}/self-heal`).catch(() => null);
+        if (heal && heal.scheduled > 0) {
+          detail = await customFetch<PortfolioRunResponse>(`/api/repo-finisher/portfolio-runs/${runId}`, { responseType: 'json' });
+        }
+      }
       setRun(detail);
       setError(null);
     } catch (err) {
@@ -151,7 +163,7 @@ export function PortfolioFinishControl({ analysisId, repoCount }: { analysisId: 
       });
       setRun(result);
       toast.success(`Finish Portfolio started for ${result.run.plannedCount} repositories.`, {
-        description: 'RepoFinisher will create draft pull requests only. It will not merge them automatically.',
+        description: 'Draft PRs only. Failed CI can receive up to two bounded code-only self-healing attempts; tests and validation rules stay protected.',
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unable to start Finish Portfolio.';
@@ -185,10 +197,10 @@ export function PortfolioFinishControl({ analysisId, repoCount }: { analysisId: 
             <h3 className="font-semibold">Finish Portfolio</h3>
           </div>
           <p className="mt-1 text-sm text-muted-foreground leading-relaxed">
-            One action launches bounded autonomous completion across the highest-value repositories. Each repository gets its own generated plan, isolated branch, draft PR, CI verification, audit trail, and outcome score.
+            One action launches bounded autonomous completion across the highest-value repositories. Each repository gets its own generated plan, isolated branch, draft PR, CI verification, audit trail, outcome score, and bounded CI self-healing when needed.
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            This is a higher-autonomy mode: clicking Finish Portfolio authorizes RepoFinisher to generate and execute plans inside the limits below. It never automatically merges a pull request.
+            This is a higher-autonomy mode: clicking Finish Portfolio authorizes RepoFinisher to generate and execute plans inside the limits below. It never automatically merges a pull request, and repair agents cannot modify tests, workflows, security governance, or lockfiles.
           </p>
         </div>
         {isActive && (
@@ -203,48 +215,23 @@ export function PortfolioFinishControl({ analysisId, repoCount }: { analysisId: 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <label className="space-y-1 text-xs text-muted-foreground">
             Repositories
-            <select
-              value={selection}
-              onChange={(event) => setSelection(event.target.value as typeof selection)}
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"
-            >
-              <option value="5">Top 5</option>
-              <option value="10">Top 10</option>
-              <option value="25">Top 25</option>
-              <option value="all">All {repoCount}</option>
+            <select value={selection} onChange={(event) => setSelection(event.target.value as typeof selection)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground">
+              <option value="5">Top 5</option><option value="10">Top 10</option><option value="25">Top 25</option><option value="all">All {repoCount}</option>
             </select>
           </label>
           <label className="space-y-1 text-xs text-muted-foreground">
             Parallel repos
-            <select
-              value={concurrency}
-              onChange={(event) => setConcurrency(event.target.value)}
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"
-            >
+            <select value={concurrency} onChange={(event) => setConcurrency(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground">
               {[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
           </label>
           <label className="space-y-1 text-xs text-muted-foreground">
             Max estimated hours
-            <input
-              type="number"
-              min="1"
-              value={maxHours}
-              onChange={(event) => setMaxHours(event.target.value)}
-              placeholder="No cap"
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"
-            />
+            <input type="number" min="1" value={maxHours} onChange={(event) => setMaxHours(event.target.value)} placeholder="No cap" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground" />
           </label>
           <label className="space-y-1 text-xs text-muted-foreground">
             Max estimated cost
-            <input
-              type="number"
-              min="1"
-              value={maxCost}
-              onChange={(event) => setMaxCost(event.target.value)}
-              placeholder="No cap"
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"
-            />
+            <input type="number" min="1" value={maxCost} onChange={(event) => setMaxCost(event.target.value)} placeholder="No cap" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground" />
           </label>
           <div className="flex items-end">
             <Button onClick={start} disabled={starting || repoCount === 0} className="w-full gap-2 h-10">
@@ -276,9 +263,7 @@ export function PortfolioFinishControl({ analysisId, repoCount }: { analysisId: 
             <div className="rounded border p-2"><div className="text-[11px] text-muted-foreground">Est. cost</div><div className="font-medium">{money(run.run.estimatedCostSelected)}</div></div>
           </div>
 
-          <div className="h-2 rounded-full bg-muted overflow-hidden">
-            <div className="h-full bg-primary transition-all" style={{ width: `${progress}%` }} />
-          </div>
+          <div className="h-2 rounded-full bg-muted overflow-hidden"><div className="h-full bg-primary transition-all" style={{ width: `${progress}%` }} /></div>
 
           <div className="max-h-72 overflow-auto rounded border divide-y">
             {run.items.map((item) => (
@@ -288,14 +273,11 @@ export function PortfolioFinishControl({ analysisId, repoCount }: { analysisId: 
                   <div className="flex flex-wrap gap-x-2 gap-y-1 items-center">
                     <span className="font-mono break-all">#{item.rank} {item.repo}</span>
                     <span className="text-xs text-muted-foreground capitalize">{item.status}</span>
+                    {item.ciStatus === 'repairing' && <span className="text-xs text-blue-500">self-healing CI</span>}
                   </div>
                   {item.error && <p className="mt-1 text-xs text-red-500 break-words">{item.error}</p>}
                 </div>
-                {item.prUrl && (
-                  <a href={item.prUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline flex items-center gap-1 shrink-0">
-                    PR #{item.prNumber} <ExternalLink className="h-3 w-3" />
-                  </a>
-                )}
+                {item.prUrl && <a href={item.prUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline flex items-center gap-1 shrink-0">PR #{item.prNumber} <ExternalLink className="h-3 w-3" /></a>}
               </div>
             ))}
           </div>
