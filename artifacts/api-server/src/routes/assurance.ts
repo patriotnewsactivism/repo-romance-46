@@ -1,3 +1,5 @@
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../lib/async-handler";
@@ -64,32 +66,110 @@ function has(paths: string[], pattern: RegExp) {
   return paths.some((path) => pattern.test(path));
 }
 
+function blockedIpv4(address: string) {
+  const octets = address.split(".").map(Number);
+  if (octets.length !== 4 || octets.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) return true;
+  const [a, b] = octets;
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 0) ||
+    (a === 192 && b === 168) ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    a >= 224
+  );
+}
+
+function blockedIp(address: string) {
+  const version = isIP(address);
+  if (version === 4) return blockedIpv4(address);
+  if (version !== 6) return true;
+  const lower = address.toLowerCase();
+  if (lower === "::" || lower === "::1") return true;
+  if (/^(fc|fd)/.test(lower)) return true;
+  if (/^fe[89ab]/.test(lower)) return true;
+  if (/^ff/.test(lower)) return true;
+  const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) return blockedIpv4(mapped[1]);
+  return false;
+}
+
+async function validateProbeUrl(value: string) {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Invalid homepage URL.");
+  }
+  if (url.protocol !== "https:") throw new Error("Only HTTPS homepage probes are allowed.");
+  if (url.username || url.password) throw new Error("Homepage URLs containing credentials are not allowed.");
+  const hostname = url.hostname.toLowerCase();
+  if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal")) {
+    throw new Error("Local/internal homepage targets are not allowed.");
+  }
+  if (isIP(hostname) && blockedIp(hostname)) throw new Error("Private, loopback, link-local, multicast, or reserved homepage targets are not allowed.");
+  if (!isIP(hostname)) {
+    const addresses = await lookup(hostname, { all: true, verbatim: true });
+    if (!addresses.length) throw new Error("Homepage hostname did not resolve.");
+    if (addresses.some((entry) => blockedIp(entry.address))) {
+      throw new Error("Homepage hostname resolves to a private, loopback, link-local, multicast, or reserved address.");
+    }
+  }
+  return url;
+}
+
 function safeUrl(value: unknown) {
   if (typeof value !== "string" || !/^https:\/\//i.test(value)) return null;
   try {
-    const url = new URL(value);
-    if (["localhost", "127.0.0.1", "0.0.0.0"].includes(url.hostname)) return null;
-    return url.toString();
+    return new URL(value).toString();
   } catch {
     return null;
   }
 }
 
-async function probeHomepage(url: string | null) {
-  if (!url) return { status: "unknown" as const, code: null, evidence: "No HTTPS homepage is configured." };
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12_000);
+async function probeHomepage(rawUrl: string | null) {
+  if (!rawUrl) return { status: "unknown" as const, code: null, evidence: "No HTTPS homepage is configured." };
+  let current = rawUrl;
   try {
-    const response = await fetch(url, { method: "GET", redirect: "follow", signal: controller.signal });
-    return {
-      status: response.status >= 200 && response.status < 400 ? "passed" as const : "failed" as const,
-      code: response.status,
-      evidence: `Homepage ${url} returned HTTP ${response.status}.`,
-    };
+    for (let redirects = 0; redirects <= 3; redirects += 1) {
+      const url = await validateProbeUrl(current);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12_000);
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: "GET",
+          redirect: "manual",
+          signal: controller.signal,
+          headers: { "User-Agent": "RepoFinisher-Assurance/1.0" },
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("location");
+        if (!location) {
+          return { status: "failed" as const, code: response.status, evidence: `Homepage ${url.toString()} returned HTTP ${response.status} without a Location header.` };
+        }
+        if (redirects === 3) return { status: "failed" as const, code: response.status, evidence: "Homepage exceeded the safe redirect limit." };
+        current = new URL(location, url).toString();
+        continue;
+      }
+
+      return {
+        status: response.status >= 200 && response.status < 400 ? "passed" as const : "failed" as const,
+        code: response.status,
+        evidence: `Homepage ${url.toString()} returned HTTP ${response.status}.`,
+      };
+    }
+    return { status: "failed" as const, code: null, evidence: "Homepage exceeded the safe redirect limit." };
   } catch (error) {
-    return { status: "failed" as const, code: null, evidence: `Homepage probe failed: ${error instanceof Error ? error.message : String(error)}` };
-  } finally {
-    clearTimeout(timer);
+    return { status: "failed" as const, code: null, evidence: `Homepage probe blocked or failed: ${error instanceof Error ? error.message : String(error)}` };
   }
 }
 
@@ -116,11 +196,13 @@ router.post(
       headSha = String(branch.commit?.sha || "");
     }
 
-    const treeRes = await ghFetch(github.token, `/repos/${input.repo}/git/trees/${headSha}?recursive=1`);
+    const [treeRes, checksRes] = await Promise.all([
+      ghFetch(github.token, `/repos/${input.repo}/git/trees/${headSha}?recursive=1`),
+      ghFetch(github.token, `/repos/${input.repo}/commits/${headSha}/check-runs?per_page=100`),
+    ]);
     if (!treeRes.ok) throw new Error("Unable to inspect repository tree.");
     const treeJson = await treeRes.json() as { tree?: Array<{ path: string; type: string; size?: number }>; truncated?: boolean };
     const paths = (treeJson.tree ?? []).filter((entry) => entry.type === "blob").map((entry) => entry.path.toLowerCase());
-    const checksRes = await ghFetch(github.token, `/repos/${input.repo}/commits/${headSha}/check-runs?per_page=100`);
     const checkRuns = checksRes.ok
       ? ((await checksRes.json()) as { check_runs?: Array<{ name: string; status: string; conclusion: string | null }> }).check_runs ?? []
       : [];
@@ -138,122 +220,68 @@ router.post(
 
     const checks: AssuranceCheck[] = [
       {
-        id: "credentials-not-committed",
-        area: "security",
-        status: suspiciousCredentialPaths.length ? "failed" : "passed",
-        weight: 14,
+        id: "credentials-not-committed", area: "security", status: suspiciousCredentialPaths.length ? "failed" : "passed", weight: 14,
         title: "Credential-bearing files",
         evidence: suspiciousCredentialPaths.length ? `Potential credential files are committed: ${suspiciousCredentialPaths.slice(0, 8).join(", ")}.` : "No obvious credential-bearing filenames were found in the repository tree.",
         recommendation: suspiciousCredentialPaths.length ? "Remove committed secrets safely, rotate exposed credentials, and add safe templates/ignore rules." : undefined,
       },
       {
-        id: "security-policy",
-        area: "security",
-        status: has(paths, /(^|\/)security\.md$/) ? "passed" : "warning",
-        weight: 4,
-        title: "Security policy",
-        evidence: has(paths, /(^|\/)security\.md$/) ? "SECURITY.md is present." : "SECURITY.md is missing.",
+        id: "security-policy", area: "security", status: has(paths, /(^|\/)security\.md$/) ? "passed" : "warning", weight: 4,
+        title: "Security policy", evidence: has(paths, /(^|\/)security\.md$/) ? "SECURITY.md is present." : "SECURITY.md is missing.",
         recommendation: "Document supported versions and a private vulnerability-reporting path.",
       },
       {
-        id: "dependency-updates",
-        area: "security",
-        status: has(paths, /^\.github\/dependabot\.ya?ml$/) ? "passed" : "warning",
-        weight: 5,
-        title: "Dependency update automation",
-        evidence: has(paths, /^\.github\/dependabot\.ya?ml$/) ? "Dependabot configuration is present." : "No Dependabot configuration was detected.",
+        id: "dependency-updates", area: "security", status: has(paths, /^\.github\/dependabot\.ya?ml$/) ? "passed" : "warning", weight: 5,
+        title: "Dependency update automation", evidence: has(paths, /^\.github\/dependabot\.ya?ml$/) ? "Dependabot configuration is present." : "No Dependabot configuration was detected.",
       },
       {
-        id: "auth-tests",
-        area: "security",
-        status: has(paths, /(auth|oauth|session|permission|jwt)/) && !has(paths, /(auth|oauth|session|permission|jwt).*\.(test|spec)\.|(test|spec).*?(auth|oauth|session|permission|jwt)/)
-          ? "warning" : "passed",
-        weight: 8,
-        title: "Authentication/authorization verification",
+        id: "auth-tests", area: "security",
+        status: has(paths, /(auth|oauth|session|permission|jwt)/) && !has(paths, /(auth|oauth|session|permission|jwt).*\.(test|spec)\.|(test|spec).*?(auth|oauth|session|permission|jwt)/) ? "warning" : "passed",
+        weight: 8, title: "Authentication/authorization verification",
         evidence: has(paths, /(auth|oauth|session|permission|jwt)/) ? "Authentication/authorization code signals are present; test coverage was checked structurally." : "No authentication-sensitive surface was inferred from repository paths.",
       },
       {
-        id: "database-safety",
-        area: "data",
-        status: has(paths, /(supabase\/migrations|(^|\/)migrations\/|prisma|drizzle)/)
-          ? (has(paths, /(migration|schema).*\.(test|spec)\.|test.*migration/) ? "passed" : "warning")
-          : "unknown",
-        weight: 8,
-        title: "Database migration validation",
+        id: "database-safety", area: "data",
+        status: has(paths, /(supabase\/migrations|(^|\/)migrations\/|prisma|drizzle)/) ? (has(paths, /(migration|schema).*\.(test|spec)\.|test.*migration/) ? "passed" : "warning") : "unknown",
+        weight: 8, title: "Database migration validation",
         evidence: has(paths, /(supabase\/migrations|(^|\/)migrations\/|prisma|drizzle)/) ? "Database migrations/schema tooling are present." : "No database migration surface was detected.",
         recommendation: "Validate migrations against disposable infrastructure and confirm rollback/idempotency before production.",
       },
       {
-        id: "ci-present",
-        area: "delivery",
-        status: has(paths, /^\.github\/workflows\/.*\.ya?ml$/) ? "passed" : "failed",
-        weight: 12,
-        title: "Continuous integration",
-        evidence: has(paths, /^\.github\/workflows\/.*\.ya?ml$/) ? "GitHub Actions workflows are present." : "No GitHub Actions workflow was detected.",
+        id: "ci-present", area: "delivery", status: has(paths, /^\.github\/workflows\/.*\.ya?ml$/) ? "passed" : "failed", weight: 12,
+        title: "Continuous integration", evidence: has(paths, /^\.github\/workflows\/.*\.ya?ml$/) ? "GitHub Actions workflows are present." : "No GitHub Actions workflow was detected.",
       },
       {
-        id: "tests-present",
-        area: "product",
-        status: has(paths, /(^|\/)(__tests__|tests?|specs?)(\/|$)|\.(test|spec)\./) ? "passed" : "failed",
-        weight: 12,
-        title: "Automated tests",
-        evidence: has(paths, /(^|\/)(__tests__|tests?|specs?)(\/|$)|\.(test|spec)\./) ? "Automated test files are present." : "No automated test files were detected.",
+        id: "tests-present", area: "product", status: has(paths, /(^|\/)(__tests__|tests?|specs?)(\/|$)|\.(test|spec)\./) ? "passed" : "failed", weight: 12,
+        title: "Automated tests", evidence: has(paths, /(^|\/)(__tests__|tests?|specs?)(\/|$)|\.(test|spec)\./) ? "Automated test files are present." : "No automated test files were detected.",
       },
       {
-        id: "test-script",
-        area: "delivery",
-        status: packageJson ? (packageScripts.test ? "passed" : "warning") : "unknown",
-        weight: 5,
-        title: "Test command",
-        evidence: packageJson ? (packageScripts.test ? `package.json test script: ${packageScripts.test}` : "package.json has no test script.") : "No package.json detected.",
+        id: "test-script", area: "delivery", status: packageJson ? (packageScripts.test ? "passed" : "warning") : "unknown", weight: 5,
+        title: "Test command", evidence: packageJson ? (packageScripts.test ? `package.json test script: ${packageScripts.test}` : "package.json has no test script.") : "No package.json detected.",
       },
       {
-        id: "current-checks",
-        area: "delivery",
-        status: failedChecks.length ? "failed" : checkRuns.length ? (checkRuns.some((check) => check.status !== "completed") ? "warning" : "passed") : "unknown",
-        weight: 12,
-        title: "Current commit checks",
-        evidence: failedChecks.length ? `Failing checks: ${failedChecks.map((check) => check.name).join(", ")}.` : checkRuns.length ? `${checkRuns.length} check run(s) were inspected.` : "No check runs were available for this commit.",
+        id: "current-checks", area: "delivery", status: failedChecks.length ? "failed" : checkRuns.length ? (checkRuns.some((check) => check.status !== "completed") ? "warning" : "passed") : "unknown", weight: 12,
+        title: "Current commit checks", evidence: failedChecks.length ? `Failing checks: ${failedChecks.map((check) => check.name).join(", ")}.` : checkRuns.length ? `${checkRuns.length} check run(s) were inspected.` : "No check runs were available for this commit.",
       },
       {
-        id: "build-check",
-        area: "delivery",
-        status: requiredPassed(/build|ci|verify/i) ? "passed" : checkRuns.length ? "warning" : "unknown",
-        weight: 7,
-        title: "Build verification",
-        evidence: requiredPassed(/build|ci|verify/i) ? "A build/CI verification check passed." : "No clearly identified passing build verification was observed.",
+        id: "build-check", area: "delivery", status: requiredPassed(/build|ci|verify/i) ? "passed" : checkRuns.length ? "warning" : "unknown", weight: 7,
+        title: "Build verification", evidence: requiredPassed(/build|ci|verify/i) ? "A build/CI verification check passed." : "No clearly identified passing build verification was observed.",
       },
       {
-        id: "env-template",
-        area: "operations",
-        status: envExamplePath ? "passed" : "warning",
-        weight: 4,
-        title: "Environment configuration template",
-        evidence: envExamplePath ? `Safe environment template found: ${envExamplePath}.` : "No .env.example/.sample/.template was detected.",
+        id: "env-template", area: "operations", status: envExamplePath ? "passed" : "warning", weight: 4,
+        title: "Environment configuration template", evidence: envExamplePath ? `Safe environment template found: ${envExamplePath}.` : "No .env.example/.sample/.template was detected.",
       },
       {
-        id: "readme",
-        area: "product",
-        status: has(paths, /(^|\/)readme(\.|$)/) ? "passed" : "warning",
-        weight: 3,
-        title: "Operator/user documentation",
-        evidence: has(paths, /(^|\/)readme(\.|$)/) ? "README documentation is present." : "README documentation is missing.",
+        id: "readme", area: "product", status: has(paths, /(^|\/)readme(\.|$)/) ? "passed" : "warning", weight: 3,
+        title: "Operator/user documentation", evidence: has(paths, /(^|\/)readme(\.|$)/) ? "README documentation is present." : "README documentation is missing.",
       },
       {
-        id: "deployment-config",
-        area: "operations",
-        status: has(paths, /(vercel\.json|firebase\.json|render\.ya?ml|cloudbuild\.ya?ml|dockerfile|docker-compose)/) ? "passed" : "warning",
-        weight: 7,
-        title: "Deployment configuration",
-        evidence: has(paths, /(vercel\.json|firebase\.json|render\.ya?ml|cloudbuild\.ya?ml|dockerfile|docker-compose)/) ? "Deployment/container configuration was detected." : "No explicit deployment configuration was detected.",
+        id: "deployment-config", area: "operations", status: has(paths, /(vercel\.json|firebase\.json|render\.ya?ml|cloudbuild\.ya?ml|dockerfile|docker-compose)/) ? "passed" : "warning", weight: 7,
+        title: "Deployment configuration", evidence: has(paths, /(vercel\.json|firebase\.json|render\.ya?ml|cloudbuild\.ya?ml|dockerfile|docker-compose)/) ? "Deployment/container configuration was detected." : "No explicit deployment configuration was detected.",
       },
       {
-        id: "live-homepage",
-        area: "product",
-        status: homepage.status,
-        weight: 9,
-        title: "Live product surface",
-        evidence: homepage.evidence,
+        id: "live-homepage", area: "product", status: homepage.status, weight: 9,
+        title: "Live product surface", evidence: homepage.evidence,
         recommendation: homepage.status === "failed" ? "Repair the deployed product surface and include smoke verification in the completion gate." : undefined,
       },
     ];
@@ -274,7 +302,7 @@ router.post(
         repo: input.repo,
         completion_run_id: input.completionRunId ?? null,
         head_sha: headSha,
-        suite_version: "assurance-v2-security-product",
+        suite_version: "assurance-v3-security-product-ssrf-safe",
         status,
         score: combinedScore,
         checks,
@@ -287,16 +315,17 @@ router.post(
       .single();
     if (readinessError) throw new Error(`Failed to persist product assurance result: ${readinessError.message}`);
 
+    const readinessRunId = String((readiness as Record<string, unknown>).id);
     await Promise.all([
       recordOperationalMemory(req.supabase!, userId, {
         repo: input.repo,
         category: "security",
         memoryKey: "security-assurance",
         observation: `Security assurance score ${securityScore}/100 with ${securityChecks.filter((check) => check.status === "failed").length} blocking failure(s).`,
-        recommendation: blockers.length ? `Prioritize blocking security/delivery findings before declaring the repository finished: ${blockers.slice(0, 4).map((blocker) => blocker.title).join(", ")}.` : "Preserve the verified security controls and re-run assurance after material auth/data/deployment changes.",
+        recommendation: blockers.length ? `Prioritize blocking security/delivery findings before declaring the repository finished: ${blockers.slice(0, 4).map((blocker) => blocker.title).join(", ")}.` : "Preserve verified security controls and re-run assurance after material auth/data/deployment changes.",
         outcome: blockers.length ? "failure" : status === "passed" ? "success" : "partial",
         confidence: 85,
-        evidence: [{ readinessRunId: (readiness as Record<string, unknown>).id, securityScore, blockers }],
+        evidence: [{ readinessRunId, securityScore, blockers }],
       }),
       recordOperationalMemory(req.supabase!, userId, {
         repo: input.repo,
@@ -306,12 +335,12 @@ router.post(
         recommendation: productScore < 85 ? "Do not call the repository production-finished until its core automated delivery, tests, deployment surface, and smoke evidence meet the readiness gate." : "Preserve passing product/delivery evidence and focus future work on measured user-value gaps rather than cosmetic scope.",
         outcome: productScore >= 85 && !blockers.length ? "success" : productScore < 60 ? "failure" : "partial",
         confidence: 82,
-        evidence: [{ readinessRunId: (readiness as Record<string, unknown>).id, productScore, homepage }],
+        evidence: [{ readinessRunId, productScore, homepage }],
       }),
     ]);
 
     res.json({
-      readinessRunId: (readiness as Record<string, unknown>).id,
+      readinessRunId,
       repo: input.repo,
       headSha,
       status,
