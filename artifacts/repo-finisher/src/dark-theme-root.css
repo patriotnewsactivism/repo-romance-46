@@ -1,0 +1,70 @@
+/*
+ * Dark mode is applied to the document root by App.tsx. The generated theme
+ * stylesheet declares :root after .dark, so both selectors can match <html>
+ * and the later light-mode custom properties can win by source order.
+ *
+ * Make the document-root dark selector more specific and load this file last.
+ * This keeps inherited foreground/background colors correct on mobile and
+ * prevents unstyled text/icons from becoming nearly black on a dark surface.
+ */
+:root.dark {
+  --button-outline: rgba(255, 255, 255, 0.1);
+  --badge-outline: rgba(255, 255, 255, 0.05);
+  --opaque-button-border-intensity: 9;
+  --elevate-1: rgba(255, 255, 255, 0.04);
+  --elevate-2: rgba(255, 255, 255, 0.09);
+
+  --background: 222 20% 8%;
+  --foreground: 210 15% 92%;
+  --border: 217 15% 20%;
+
+  --card: 222 18% 11%;
+  --card-foreground: 210 15% 92%;
+  --card-border: 217 15% 18%;
+
+  --sidebar: 222 20% 9%;
+  --sidebar-foreground: 210 12% 82%;
+  --sidebar-border: 217 15% 16%;
+  --sidebar-primary: 189 95% 52%;
+  --sidebar-primary-foreground: 222 20% 8%;
+  --sidebar-accent: 217 18% 16%;
+  --sidebar-accent-foreground: 210 15% 92%;
+  --sidebar-ring: 189 95% 52%;
+
+  --popover: 222 18% 12%;
+  --popover-foreground: 210 15% 92%;
+  --popover-border: 217 15% 22%;
+
+  --primary: 189 95% 52%;
+  --primary-foreground: 222 20% 8%;
+  --secondary: 217 18% 18%;
+  --secondary-foreground: 210 15% 92%;
+  --muted: 217 15% 16%;
+  --muted-foreground: 215 10% 58%;
+  --accent: 189 95% 52%;
+  --accent-foreground: 222 20% 8%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 210 15% 98%;
+  --input: 217 15% 24%;
+  --ring: 189 95% 52%;
+
+  --chart-1: 189 95% 52%;
+  --chart-2: 282 80% 60%;
+  --chart-3: 47 90% 54%;
+  --chart-4: 340 75% 55%;
+  --chart-5: 142 70% 45%;
+
+  --shadow-2xs: 0px 1px 2px 0px rgba(0, 0, 0, 0.3);
+  --shadow-xs: 0px 1px 3px 0px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0px 2px 4px -1px rgba(0, 0, 0, 0.3);
+  --shadow: 0px 3px 6px -2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0px 4px 8px -2px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0px 6px 12px -3px rgba(0, 0, 0, 0.45);
+  --shadow-xl: 0px 10px 20px -4px rgba(0, 0, 0, 0.5);
+  --shadow-2xl: 0px 16px 32px -6px rgba(0, 0, 0, 0.6);
+}
+
+:root.dark body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
