@@ -1,31 +1,52 @@
 # Sentry observability
 
-RepoFinisher reports unexpected server failures, browser crashes, failed 5xx API operations, and sampled performance transactions. It does not enable session replay. Request bodies, cookies, query strings, authorization headers, credentials, and user email addresses are excluded; browser identity is limited to the Supabase user ID. If the browser DSN is omitted, authenticated crash reports fall back to the server relay and the existing local recovery boundary remains active.
+RepoFinisher reports unexpected server failures, browser crashes, failed 5xx API operations, and sampled performance transactions when Sentry is configured. It does not enable session replay. Request bodies, cookies, query strings, authorization headers, credentials, and user email addresses should remain excluded; browser identity is limited to the Supabase user ID. If the browser DSN is omitted, the existing local recovery boundary remains active and server-side observability may still operate independently.
 
 ## Production configuration
 
-Set these runtime variables in the deployment platform:
+Backend/runtime values belong on Render:
 
 - `SENTRY_DSN` — server project DSN
-- `VITE_SENTRY_DSN` — browser project DSN, available at build time
-- `SENTRY_ENVIRONMENT` and `VITE_SENTRY_ENVIRONMENT` — normally `production`
-- `SENTRY_TRACES_SAMPLE_RATE` and `VITE_SENTRY_TRACES_SAMPLE_RATE` — decimal values from `0` to `1`; the default is `0.05`
+- `SENTRY_ENVIRONMENT` — normally `production`
+- `SENTRY_TRACES_SAMPLE_RATE` — decimal value from `0` to `1`; start conservatively
 
-For readable minified stack traces, also set the following build-only values:
+Frontend build values belong on Netlify:
 
-- `SENTRY_AUTH_TOKEN` — a Sentry organization token allowed to upload releases and artifacts
+- `VITE_SENTRY_DSN` — browser project DSN
+- `VITE_SENTRY_ENVIRONMENT` — normally `production`
+- `VITE_SENTRY_TRACES_SAMPLE_RATE` — browser trace sampling rate
+
+For readable minified stack traces, configure build-only upload values on the build environment that creates the relevant artifact:
+
+- `SENTRY_AUTH_TOKEN` — Sentry organization token allowed to upload releases/artifacts
 - `SENTRY_ORG` — organization slug
 - `SENTRY_PROJECT` — project slug
-- `SENTRY_RELEASE` — optional when `VERCEL_GIT_COMMIT_SHA` is available
+- `SENTRY_RELEASE` — explicit release identifier, preferably the deployed Git commit SHA
 
-Never expose the auth token through a `VITE_` variable. The Vite and esbuild plugins upload source maps only when the token, organization, project, and release are all available, then remove uploaded map files from browser output.
+Never expose `SENTRY_AUTH_TOKEN` through a `VITE_` variable. Vite/browser values are public build output.
 
 ## Verification
 
-1. Deploy with both runtime DSNs and the build-only upload variables configured.
-2. Request `GET /api/healthz`. Confirm `observability.sentry.enabled` is `true`, the environment is correct, and the release matches the deployment commit.
-3. Verify the release and its artifacts in Sentry.
-4. Exercise a controlled error in a non-production environment and confirm the server or browser event has readable source frames and no request body, cookies, query string, authorization header, email, or repository contents.
-5. Check that normal `4xx` responses do not create browser error noise and that unexpected `5xx` failures do.
+1. Deploy with the intended runtime/browser DSNs and source-map upload configuration.
+2. Request `GET /api/healthz` and confirm the API reports the expected observability state/environment/release metadata.
+3. Verify the deployed release and source-map artifacts in Sentry.
+4. Exercise a controlled error in a non-production environment and confirm the event has readable source frames and no request body, cookies, query string, authorization header, credential values, user email, or unnecessary private repository contents.
+5. Confirm expected application `4xx` responses do not create noisy error events and unexpected `5xx` failures do.
 
-Production issue inspection requires a separate read-only API token in the operator's local `SENTRY_AUTH_TOKEN` environment variable. Do not paste that token into tickets, chat, source files, or deployment logs.
+## Privacy and secret handling
+
+Sentry must never receive:
+
+- Supabase service-role keys;
+- AI provider keys;
+- GitHub access tokens;
+- authorization headers;
+- private keys;
+- full credential-bearing request bodies; or
+- secret values included in reasoning/repair prompts.
+
+Production issue inspection requires an appropriately scoped read-only Sentry API token in an operator environment. Do not paste that token into tickets, chat, source files, deployment variables intended for the browser, or logs.
+
+## Current status
+
+Sentry integration exists in source, but production observability should not be described as fully verified until live ingestion and readable source-map behavior have been confirmed for the current Netlify + Render deployment. See `docs/CURRENT_STATUS.md` for the dated operational checkpoint.
