@@ -1,0 +1,65 @@
+name: Bug report
+description: Report a reproducible RepoFinisher defect without exposing secrets.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include API keys, tokens, service-role credentials, private repository content, or other secrets. For security vulnerabilities, follow SECURITY.md instead of filing a public exploit report.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What happened and what should have happened?
+      placeholder: Describe the user-visible or autonomous-workflow defect.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Reproduction and evidence
+      description: Include reproducible steps, safe logs/errors, affected route/run/PR, and timestamps where useful.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      options:
+        - Frontend / Netlify
+        - API / Render
+        - Supabase / auth / database / Vault
+        - GitHub integration / CI
+        - AI provider / model / BYOK
+        - Repository reasoning / planning
+        - Autonomous execution / approval
+        - Self-healing / verification
+        - Finish Portfolio
+        - Continuous Repository Mode
+        - Valuation / scoring
+        - Documentation / operations
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit / deployment / run identifier
+      description: If known, provide the safe SHA, deployment ID, PR, or run ID.
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: What workflow is blocked or degraded? Is there data/security/write risk?
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I removed secrets and private credential values from this report.
+          required: true
+        - label: I did not use Vercel deployment as a workaround for this issue.
+          required: true
