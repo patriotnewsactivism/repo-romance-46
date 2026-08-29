@@ -12,12 +12,12 @@ Start with:
 Architecture, operations, and governance:
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — system components and control/data flows.
-- [`OPERATIONS.md`](OPERATIONS.md) — production deployment, environment, rollback, and incident runbook.
+- [`OPERATIONS.md`](OPERATIONS.md) — production deployment, environment, rollback, and operating procedures.
 - [`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md) — severity, triage, hosting/provider/autonomy diagnosis, rollback, and closure criteria.
 - [`DECISIONS.md`](DECISIONS.md) — durable architecture/product decisions and their rationale.
-- [`GOVERNANCE.md`](GOVERNANCE.md) — branch/PR/CI/hosting/database governance rules and current branch-protection gap.
+- [`GOVERNANCE.md`](GOVERNANCE.md) — branch/PR/CI/hosting/database governance rules.
 - [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md) — production release gates from branch through runtime verification/rollback.
-- [`.github/pull_request_template.md`](../.github/pull_request_template.md) — operational checklist that turns the governance rules into a per-PR verification record.
+- [`.github/pull_request_template.md`](../.github/pull_request_template.md) — per-PR evidence and safety checklist.
 
 AI/autonomy:
 
@@ -32,18 +32,14 @@ Security/observability:
 
 Historical compatibility notes:
 
-- [`gemini-3-7-default.md`](gemini-3-7-default.md) — retained as a pointer because old links may exist; the original Vercel-era content is obsolete.
-- [`gemini-configuration-status.md`](gemini-configuration-status.md) — current Gemini pointer to the provider-neutral docs.
+- [`gemini-3-7-default.md`](gemini-3-7-default.md) — retained as a pointer because old links may exist; original Vercel-era content is obsolete.
+- [`gemini-configuration-status.md`](gemini-configuration-status.md) — current Gemini pointer to provider-neutral docs.
 
 Contribution workflow:
 
 - [`../CONTRIBUTING.md`](../CONTRIBUTING.md)
 - [Bug report template](../.github/ISSUE_TEMPLATE/bug_report.yml) — structured defect intake with secret-safety confirmation.
 - [Feature request template](../.github/ISSUE_TEMPLATE/feature_request.yml) — requires evidence, acceptance criteria, and architecture/safety constraints.
-
-## CI governance checkpoint
-
-Issue #71 restored an explicit GitHub Actions pull-request verification trigger and added `workflow_dispatch` as an operator recovery path. PR #72 proved the restored CI path with tests, typecheck, build, and the non-Vercel hosting guard passing before merge. A stale external `Vercel` commit status may still appear until that third-party repository integration is disconnected; it is not an approved deployment target and must never be used to satisfy CI.
 
 ## Documentation rules
 

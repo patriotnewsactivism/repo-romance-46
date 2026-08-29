@@ -1,74 +1,57 @@
-## Problem / verified root cause
+## Problem / evidence
 
-<!-- What is actually wrong? Separate verified evidence from inference. -->
+Describe the verified problem, affected surface, and evidence. Distinguish facts from assumptions.
+
+## Root cause
+
+What is causing the problem? If root cause is not fully known, say so and describe the remaining uncertainty.
 
 ## Implementation
 
-<!-- What changed and why is this the smallest correct change? -->
-
-## Scope / affected surfaces
-
-- [ ] Frontend
-- [ ] API / backend
-- [ ] Database / Supabase migration
-- [ ] AI provider / reasoning / learning
-- [ ] Autonomous repository writes
-- [ ] CI / self-healing / deployment verification
-- [ ] Hosting / DNS / environment variables
-- [ ] Security / auth / RLS / Vault
-- [ ] Documentation only
+Summarize the smallest coherent change made and why it addresses the root cause.
 
 ## Verification
 
-Record what was actually run or observed. Do not check a box based on expectation.
+Check what was actually verified:
 
-- [ ] `pnpm install --frozen-lockfile`
-- [ ] `pnpm test`
-- [ ] `pnpm build`
+- [ ] package tests pass
+- [ ] typecheck/build pass
 - [ ] GitHub CI green
-- [ ] Required Supabase migration applied and verified
-- [ ] Render API deployment healthy when backend changed
-- [ ] Netlify deployment healthy when frontend changed
-- [ ] Production smoke passed when production seams changed
-- [ ] Relevant authenticated/core user journey verified
-- [ ] Mobile/desktop UI verified when UI changed
+- [ ] Supabase migration applied/verified (if applicable)
+- [ ] Render deployment healthy (if backend changed)
+- [ ] Netlify deployment healthy (if frontend changed)
+- [ ] production smoke passed (if material production change)
+- [ ] authenticated user flow verified (if applicable)
+- [ ] completion/readiness/outcome telemetry verified (if autonomous completion behavior changed)
 
-## Security / autonomy review
+Commands/evidence:
 
-- [ ] No secrets were committed, logged, or placed in `VITE_*` variables
-- [ ] RLS/auth/permission boundaries were not weakened
-- [ ] Exact-plan/base-SHA approval and stale-base protections remain intact where applicable
-- [ ] Tests/CI/security acceptance criteria were not weakened merely to obtain a pass
-- [ ] Automatic merge authority was not added or expanded unintentionally
-- [ ] New service-role/Vault operations are least-privilege and backend-only
+```text
+# add relevant commands, workflow/deploy/run IDs, or concise evidence
+```
 
-## Database / migration notes
+## Security / autonomy impact
 
-<!-- Migration ordering, data transformation, grants/RLS, rollback/irreversibility. Write "None" if not applicable. -->
+- Does this touch auth, RLS, Vault, secrets, CORS, permissions, repository writes, self-healing, approval gates, or merge authority?
+- If yes, explain why boundaries remain safe.
 
-## Deployment / rollback notes
+## Database / deployment impact
 
-<!-- Target host, environment changes, domain/DNS impact, rollback path. Vercel is not an approved RepoFinisher target. -->
+List migrations, environment-variable changes, deployment ordering, domain/CORS changes, or `none`.
 
-## Learning / completion impact
+## Documentation
 
-<!-- If this changes autonomous completion, explain outcome telemetry, reasoning/learning behavior, repair limits, and how success will be measured. -->
+- [ ] relevant canonical docs updated
+- [ ] `docs/PROJECT_STATE.md` updated if operational state changed
+- [ ] no secret values included in docs/PR
 
-## Documentation updated
+## Known remaining work / risks
 
-- [ ] `README.md` / `AGENTS.md` if repository-wide behavior changed
-- [ ] `docs/PROJECT_STATE.md` if current operational status changed
-- [ ] `docs/DECISIONS.md` if a durable architecture/product decision changed
-- [ ] `docs/OPERATIONS.md` / `.env.example` if deployment/config changed
-- [ ] `SECURITY.md` if the security model changed
-- [ ] `docs/DEFINITION_OF_DONE.md` if completion criteria changed
-- [ ] Documentation update not required; reason stated below
+State unresolved blockers, follow-ups, limitations, or `none`.
 
-## Known remaining work / limitations
+## RepoFinisher policy checks
 
-<!-- Do not hide known gaps. If none, say none. -->
-
-## Definition of Done
-
-- [ ] This PR does not claim more completion than the evidence supports
-- [ ] Applicable gates in `docs/DEFINITION_OF_DONE.md` are satisfied or explicitly listed as remaining work
+- [ ] no Vercel deployment/configuration reintroduced
+- [ ] no tests/CI/security controls weakened merely to pass
+- [ ] no secrets committed or exposed to `VITE_*`
+- [ ] passing CI is not being represented as proof of full product completion without relevant runtime/product evidence

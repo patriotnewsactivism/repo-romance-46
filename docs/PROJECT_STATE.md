@@ -1,75 +1,57 @@
 # RepoFinisher Project State
 
-**Snapshot date:** 2026-08-28
+**Snapshot date:** 2026-08-29
 
-This file is intentionally time-sensitive. Update it whenever production hosting, core completion behavior, security storage, or major implementation priorities change.
-
-Do not use this file as a substitute for inspecting the current code/deployments. It is a checkpoint and priority register.
+This file is intentionally time-sensitive. Update it whenever production hosting, core completion behavior, security storage, or major implementation priorities change. Verify current code/deployments before relying on this snapshot for an irreversible action.
 
 ## Canonical source
 
-Repository:
+Repository: `patriotnewsactivism/repo-romance-46`
+
+Default branch: `main`
+
+Current verified `main` at this checkpoint:
 
 ```text
-patriotnewsactivism/repo-romance-46
+d8faee9e4e94a3045fe43bb67256917974839901
+chore: replace Vercel waitUntil with provider-neutral background runtime
 ```
 
-Default branch:
-
-```text
-main
-```
-
-Canonical documentation baseline merged through PR #64. Post-merge verification showed:
-
-```text
-main: 5f1a74bf8aba4050a881dcfe6274cd532a4c8f3e
-Merge canonical RepoFinisher operating manual
-```
-
-The earlier Vault-backed AI BYOK implementation is contained in this lineage.
+`main` is branch-protected and requires the `CI` status check for non-admin merges.
 
 ## Production architecture
 
 Approved architecture:
 
-- Netlify frontend
-- Render persistent API
-- Supabase auth/database/RLS/Vault
-- GitHub source/CI/PRs
-- Sentry when configured
+- Netlify — frontend SPA
+- Render — persistent API and long-running agent work
+- Supabase — authentication, database, RLS, Vault
+- GitHub — source, branches, PRs, checks
+- Sentry — observability when configured
 
 Vercel is not an approved deployment target and must not be used again for RepoFinisher.
 
-## Confirmed backend status
+## Backend status
 
-The canonical persistent API endpoint is:
+Canonical API endpoint:
 
 ```text
 https://repofinisher-api-live.onrender.com
 ```
 
-Post-documentation verification showed the canonical Render service:
+The source on `main` includes:
 
-```text
-service: repofinisher-api-live
-branch: main
-auto deploy: enabled
-region: ohio
-plan: free
-latest verified live commit: 5f1a74bf8aba4050a881dcfe6274cd532a4c8f3e
-```
+- provider/model Settings support for Google, OpenAI, Anthropic, and OpenRouter,
+- Supabase Vault-backed AI BYOK storage,
+- service-role-only Vault store/read/delete RPC usage,
+- direct repository bounded self-healing,
+- Finish Portfolio bounded self-healing parity,
+- provider-neutral background runtime in place of Vercel `waitUntil`,
+- multi-stage reasoning and measured operational learning.
 
-The Vault-backed BYOK merge was previously confirmed live on this service.
+At the Vault migration checkpoint, production Supabase had a Vault-backed AI credential reference and no remaining legacy plaintext AI-key row. This is a historical verification point, not permission to expose or print any credential value.
 
-Supabase was also verified to have:
-
-- service-role access to RepoFinisher Vault store/read/delete RPCs,
-- at least one Vault-backed AI credential reference,
-- a readable Vault reference through the service-role path,
-- zero remaining legacy plaintext AI-key rows at that checkpoint.
-
-## Frontend/Netlify status requiring verification
+## Frontend / Netlify status requiring direct verification
 
 A Netlify project named `repofinisher` exists.
 
@@ -79,7 +61,7 @@ The Netlify project reader reported:
 project: repofinisher
 project id: 2a0328fa-7111-4054-86d0-0dba8f3b38c7
 reported primarySiteUrl: http://repofinish.donmatthews.live
-reported deploy state: current, with no detailed current deploy payload
+reported current deploy: no detailed deploy payload
 ```
 
 The intended canonical product domain is:
@@ -88,223 +70,156 @@ The intended canonical product domain is:
 https://repofinisher.donmatthews.live
 ```
 
-The `repofinish` vs `repofinisher` hostname mismatch must be treated as an unresolved infrastructure discrepancy until directly verified and corrected. Do not claim the frontend cutover is complete solely because the Netlify project exists.
+The `repofinish` versus `repofinisher` hostname discrepancy remains unresolved until the actual Netlify source deployment and custom-domain configuration are verified. Do not claim the frontend cutover is complete merely because the Netlify project exists.
 
 Before closing the frontend migration:
 
-1. Confirm current `main` is actually deployed on Netlify.
-2. Confirm the production build contains the current Settings/BYOK fixes.
-3. Confirm `VITE_API_BASE_URL` targets the Render API.
+1. Confirm current `main` is deployed on Netlify.
+2. Confirm the build contains current Settings/BYOK and UI contrast fixes.
+3. Confirm `VITE_API_BASE_URL` points to the Render API.
 4. Confirm Supabase browser variables are present.
-5. Confirm the canonical custom domain is exactly `repofinisher.donmatthews.live` over HTTPS.
-6. Run production smoke.
-7. Verify authenticated Settings save/test/remove flows in the browser.
-8. Verify mobile header/theme contrast on the actual Netlify deployment.
+5. Confirm the custom domain is exactly `repofinisher.donmatthews.live` over HTTPS.
+6. Run `.github/workflows/production-smoke.yml` or equivalent seam verification.
+7. Verify authenticated Settings save/reload/test/remove flows.
+8. Verify mobile header/menu/theme contrast on the actual Netlify deployment.
 
-## Operational hygiene discrepancies
+## AI provider / BYOK status
 
-These are not theoretical. They were directly observed and should remain tracked until corrected.
-
-### Stale GitHub repository homepage
-
-GitHub repository metadata still advertises:
-
-```text
-https://repofinish.vercel.app
-```
-
-That is stale and conflicts with the accepted non-Vercel hosting decision. Update the repository homepage to the verified canonical Netlify/custom-domain URL once the frontend cutover is healthy.
-
-### Stale external Vercel commit status
-
-Issue #71 identified a repository-level Vercel integration that still posts a failing `Vercel` commit status even though all Vercel hosting artifacts have been removed and Vercel is not an approved target.
-
-PR #72 restored and proved the intended GitHub Actions pull-request CI path. Its full verification job passed, including the non-Vercel hosting guard, package tests, typecheck, and production build. The CI workflow now has explicit `opened`, `synchronize`, `reopened`, and `ready_for_review` PR triggers plus `workflow_dispatch` for operator recovery.
-
-The stale Vercel status is external integration/configuration drift. It must be disconnected at the repository/Vercel integration level; do not deploy to Vercel to make the status green and do not treat it as an approved release gate.
-
-### Obsolete Render services still active
-
-In addition to the canonical `repofinisher-api-live` service, Render still contains two older RepoFinisher services pointing at `feat/netlify-migration`:
-
-```text
-repofinisher-api-prod
-repofinisher-api
-```
-
-They should be retired after confirming no production frontend or external integration references them. Keeping multiple similarly named live APIs increases the risk of configuration drift and accidental routing to stale code.
-
-### Main branch protection is not enabled
-
-GitHub reports `main` as unprotected and required status-check enforcement as off.
-
-This is a governance gap. The intended rules are documented in `docs/GOVERNANCE.md`: PR-required changes, GitHub CI required, no force-push/delete, and no casual auto-merge expansion. The stale Vercel status must not be made a required check.
-
-## AI provider/settings status
-
-Current source supports:
+Source supports:
 
 - Google
 - OpenAI
 - Anthropic
 - OpenRouter
 
-User preferences support an explicit provider and model.
+Preferences support an explicit provider and exact model identifier. New AI BYOK credentials use Supabase Vault and are read only through the trusted server path. Browser responses must never contain decrypted credentials.
 
-User-supplied AI keys are stored in Supabase Vault. The server retrieves them through service-role-only RPCs; the browser should receive only configuration/status metadata.
-
-Remaining acceptance test:
-
-- verify an authenticated production user can save, reload, test, switch, and remove each supported provider/model from the Netlify Settings UI without exposing the key.
+Production acceptance still requires a real authenticated Netlify user flow proving save, reload, test, provider switch, and remove behavior against Render + Vault.
 
 ## Reasoning and learning state
 
-Implemented foundation includes:
+Implemented foundations include:
 
-- multi-stage repository reasoning,
-- evidence analyst,
-- skeptical critic,
+- multi-stage repository evidence analysis,
+- competing root-cause hypotheses,
+- skeptical/verification critic,
 - dynamically selected specialists,
 - principal-plan synthesis,
-- durable operational memories,
-- repo-local and cross-repo learning,
-- outcome scoring,
-- prompt strategy experiments,
+- durable repo-local and cross-repo operational memory,
+- measured outcome scoring,
+- controlled prompt-strategy experiments,
 - reasoning traces/audit data,
-- reasoned CI repair,
+- reasoned bounded CI repair,
+- direct-run and Finish Portfolio self-healing parity,
 - external LLM completion prompts,
 - continuous repository event reasoning,
 - portfolio relationship analysis,
-- assurance/readiness runs.
+- product/security assurance runs.
 
-Learning is measured operational memory, not autonomous model-weight retraining.
+Learning means measured operational memory and strategy adaptation. It is not autonomous model-weight retraining.
 
-## High-priority incomplete integration work
+## Highest-priority remaining product work
 
 ### 1. Multi-iteration finish-until-target controller
 
-The database contains `repo_completion_sessions` schema for multi-iteration completion objectives, but current code search shows this table referenced only by migrations/hardening SQL, not by an active runtime controller.
-
-That means the intended loop is not yet complete:
+The database contains `repo_completion_sessions`, but an end-to-end runtime controller still needs to prove the complete loop:
 
 ```text
 reason -> implement -> verify -> rescore
-   -> still below completion/readiness target?
-   -> reason again with fresh evidence
+   -> still below completion/readiness target or material blocker remains?
+   -> reason again from fresh evidence
    -> next bounded iteration
 ```
 
-This is a critical gap because a green first PR is not equivalent to a fully completed repository.
+This remains the most important completion-quality gap because a green first PR is not equivalent to a finished product.
 
-### 2. Finish Portfolio self-healing parity
+### 2. Portfolio completion-session orchestration
 
-The direct per-repository run path contains bounded CI self-healing integration. Current source search shows `portfolio-finisher.ts` does not call `tryScheduleCiRepair`.
-
-Finish Portfolio therefore still needs explicit parity so a child repository can use the same evidence-driven bounded repair behavior before the portfolio orchestrator treats it as terminally failed.
-
-### 3. Portfolio completion-session orchestration
-
-Once the iterative controller exists, Finish Portfolio should coordinate per-repo sessions without collapsing rollback/failure boundaries. Each repository must retain its own:
+Finish Portfolio now has bounded CI self-healing parity. The next step is to coordinate true per-repository iterative completion sessions while preserving each repository's independent:
 
 - plan hash,
 - branch,
-- PR,
+- draft PR,
 - CI state,
 - repair attempts,
-- budget,
-- outcome telemetry.
+- budget/risk boundary,
+- outcome telemetry,
+- stop reason.
 
-### 4. Product-flow verification depth
+### 3. Product-specific acceptance depth
 
-The assurance system can inspect repository, CI, deployment, and live-surface evidence, but application-specific authenticated browser journeys still need stronger explicit definitions for products involving login, payments, privileged operations, or complex state.
+Generic assurance can inspect repository, CI, deployment, and live-surface evidence. Products involving login, payments, privileged operations, native/mobile flows, or complex state still need stronger application-specific acceptance definitions and browser/runtime evidence before RepoFinisher should call them complete.
 
-RepoFinisher should derive or request a product-specific acceptance suite and treat those flows as part of the Definition of Done. See `docs/DEFINITION_OF_DONE.md`.
+### 4. Render capacity / background execution
 
-### 5. Residual Vercel runtime compatibility dependency
+Verify the canonical Render service plan and workload behavior under real portfolio reasoning, repair, and long-running jobs. Upgrade capacity based on measured cold starts, CPU/memory, concurrency, and latency rather than assumption.
 
-`artifacts/api-server/package.json` still lists `@vercel/functions`, and CI repair code historically used its `waitUntil` helper.
+### 5. Netlify production completion
 
-This does not authorize Vercel hosting. It is residual technical debt. Replace it with a provider-neutral lifecycle/background-job mechanism when safe, then remove the dependency.
-
-### 6. Render capacity
-
-The canonical API is currently on Render's free plan. Long-running reasoning and portfolio workloads should not rely indefinitely on severely constrained/free compute.
-
-Upgrade should be based on observed cold starts, CPU/memory, concurrency, and response latency. Do not document an upgrade as completed until the actual service plan is verified.
-
-### 7. Repository governance cleanup
-
-GitHub PR CI is restored and proven through PR #72. Remaining repository-admin cleanup from issue #71 is:
-
-- disconnect the stale external Vercel status source,
-- enable appropriate `main` branch protection/rules with GitHub CI as the intended required check and no Vercel requirement,
-- update repository homepage metadata after the canonical Netlify custom domain is verified.
+Finish the first verified source deploy/custom-domain cutover and run the authenticated Settings and mobile UI acceptance tests listed above.
 
 ## Completed major foundations
 
-The following substantial capabilities are in `main` as of this snapshot:
+Substantial capabilities present in `main` include:
 
 - Repo Investment Intelligence and adaptive finishing
 - measured post-run rescoring
-- final synthesis hang fix
 - full portfolio value and one-click finishing foundations
-- 500-repo analysis limit migration
+- 500-repo analysis limit
 - Finish Portfolio orchestration foundation
-- bounded self-healing CI
+- direct and portfolio bounded self-healing CI
 - tiered portfolio intelligence
 - mobile/dark-theme contrast hardening
 - deployment sandbox verification
 - confidence-adjusted portfolio valuation
-- controlled prompt evolution and specialist-agent foundation
-- deeper Reasoning & Learning OS schema and APIs
+- controlled prompt evolution and specialist agents
+- Reasoning & Learning OS schema/APIs
 - portfolio consolidation graph
 - security/product assurance
 - continuous repository watch/event reasoning
 - external LLM completion handoffs
-- dedicated AI provider/model Settings path including OpenRouter
+- provider/model Settings including OpenRouter
 - Supabase Vault-backed AI BYOK storage
+- provider-neutral background runtime replacing `@vercel/functions`/Vercel `waitUntil`
 - Netlify configuration and Render persistent API migration foundation
-- CI non-Vercel hosting guard
+- non-Vercel CI hosting guard
 - production seam smoke workflow
-- canonical README/AGENTS/security/operations/governance documentation baseline
-- explicit GitHub PR CI triggers and manual recovery path from PR #72
 
-## Product correctness principles
+## Definition of completion
 
-Do not mark work complete based on a commit alone.
+Do not mark work complete based on a commit, PR, or green CI alone.
 
-A capability is only production-complete when the relevant layers are verified:
+Use `docs/DEFINITION_OF_DONE.md`. Relevant completion evidence can include:
 
 - code merged,
-- CI green,
-- migrations applied,
+- required migration applied,
 - deployment healthy,
-- runtime path works,
-- user-facing behavior works where applicable,
-- outcome/learning telemetry is recorded for autonomous completion behavior.
+- runtime/user path verified,
+- auth/data/payment/security behavior verified where applicable,
+- completion/readiness re-scored,
+- outcome/learning telemetry persisted,
+- no known material blocker left inside scope.
 
-`docs/DEFINITION_OF_DONE.md` is the canonical completion evidence standard.
+## Recommended execution order
 
-## Next recommended execution order
+1. Complete and verify Netlify source deployment/custom-domain cutover.
+2. Run authenticated AI Settings acceptance against Netlify + Render + Vault.
+3. Implement the multi-iteration finish-until-target controller.
+4. Connect per-repo completion sessions into Finish Portfolio orchestration.
+5. Add product-specific acceptance suites/browser-flow verification.
+6. Verify/upgrade Render production capacity where measurements justify it.
+7. Run real repositories end-to-end and tune reasoning/repair strategy from measured outcomes rather than synthetic success alone.
 
-1. Disconnect the stale Vercel GitHub status source and enable appropriate main-branch protection with GitHub CI as the intended required check.
-2. Finish and verify Netlify source deployment/custom-domain cutover.
-3. Correct the stale GitHub repository homepage after the canonical domain is verified.
-4. Run authenticated AI provider Settings acceptance tests against Netlify + Render + Vault.
-5. Retire obsolete RepoFinisher Render services after reference checks.
-6. Implement the multi-iteration finish-until-target controller.
-7. Add Finish Portfolio self-healing parity.
-8. Connect per-repo completion sessions into portfolio orchestration.
-9. Add stronger application-specific product-flow acceptance suites.
-10. Remove residual `@vercel/functions` dependency with a provider-neutral background lifecycle.
-11. Verify/upgrade Render production capacity.
-12. Run real repositories end-to-end and use measured outcomes to tune reasoning/repair strategy rather than judging success from synthetic tests alone.
+## Documentation / governance checkpoint
+
+PR #76 adds the missing operating-manual layer: Definition of Done, external-LLM handoff contract, incident response, release checklist, PR template, and structured issue templates. `README.md` and `AGENTS.md` are canonical entrypoints; model-specific instruction files must defer to `AGENTS.md` rather than fork policy.
 
 ## Updating this file
 
-Whenever a priority above is completed:
+When a priority is completed:
 
-- cite the implementing PR/commit in the updated text,
-- record whether production deployment was verified,
-- remove obsolete warnings rather than accumulating contradictory status,
-- move newly discovered gaps into the priority register with evidence.
+- identify the implementing PR/commit,
+- state whether deployment/runtime/user-flow verification actually occurred,
+- remove obsolete warnings instead of accumulating contradictions,
+- move newly discovered gaps into the priority register with evidence,
+- keep secret values out of this file.
