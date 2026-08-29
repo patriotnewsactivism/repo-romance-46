@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { waitUntil } from "@vercel/functions";
+import { runInBackground } from "../lib/background-tasks";
 import { z } from "zod";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
@@ -45,7 +45,7 @@ router.post(
         : undefined,
     });
 
-    if (process.env["VERCEL"]) waitUntil(flushSentry());
+    runInBackground(flushSentry(), "sentry-flush");
     res.status(202).json({ accepted: true });
   }),
 );
