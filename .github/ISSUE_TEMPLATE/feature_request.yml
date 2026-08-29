@@ -1,0 +1,61 @@
+name: Feature request
+description: Propose a RepoFinisher capability or reliability improvement.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: User/product outcome
+      description: What should RepoFinisher be able to do better after this change?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence / current limitation
+      description: What current behavior, repository failure, measured outcome, or workflow gap justifies this feature?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Repository analysis / scoring
+        - Reasoning / specialist agents
+        - Learning / prompt strategy
+        - Autonomous implementation
+        - Self-healing / verification
+        - Finish Portfolio
+        - Continuous Repository Mode
+        - External LLM handoff
+        - AI providers / models
+        - Security / auth / Vault
+        - Frontend / UX
+        - Deployment / operations
+        - Valuation / commercial intelligence
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Describe observable evidence that would make this feature complete. Refer to docs/DEFINITION_OF_DONE.md where applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Safety / architecture constraints
+      description: Note effects on approval, repository writes, security, hosting, migrations, cost/risk budgets, or compatibility.
+  - type: checkboxes
+    id: policy
+    attributes:
+      label: Repository policy
+      options:
+        - label: This proposal does not require Vercel as a RepoFinisher deployment target.
+          required: true
+        - label: This proposal should not weaken tests, security controls, approval boundaries, or evidence requirements merely to increase autonomy.
+          required: true
