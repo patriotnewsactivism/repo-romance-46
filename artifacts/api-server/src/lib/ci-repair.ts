@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { waitUntil } from "@vercel/functions";
+import { runInBackground } from "./background-tasks";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { callAI } from "./ai-provider";
 import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "./credentials";
@@ -709,7 +709,7 @@ export async function tryScheduleCiRepair(
 
   const job = performRepair(supabase, userId, { ...run, repair_attempts: attempt }, verification, attempt);
   try {
-    waitUntil(job);
+    runInBackground(job);
   } catch {
     void job.catch(() => undefined);
   }
