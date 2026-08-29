@@ -9,6 +9,21 @@ Current supported provider identifiers:
 - `anthropic`
 - `openrouter`
 
+## Recommended production defaults
+
+OpenRouter is the preferred platform/BYOK entry point because one credential can reach multiple high-quality models without changing the integration.
+
+Recommended model policy:
+
+- default high-value model: `deepseek/deepseek-v4-flash-0731`
+- premium OpenRouter alternative: `openai/gpt-5.6-luna`
+- quality/speed alternative: `google/gemini-3.7-flash`
+- direct Google fallback: `gemini-3.7-flash`
+
+If `AI_PROVIDER` is explicitly configured and its matching platform credential exists, RepoFinisher honors it. If that provider is unusable because its server-side credential is absent, the backend automatically selects an available configured credential, preferring OpenRouter first. When no platform credential exists, Settings defaults to OpenRouter so a user can supply an OpenRouter BYOK key without being pushed toward a legacy provider.
+
+The preferred OpenRouter default can be overridden with `OPENROUTER_MODEL` or the common `AI_MODEL` variable. A user-saved exact model identifier takes precedence over those defaults.
+
 ## User BYOK flow
 
 The Settings UI stores:
@@ -74,6 +89,8 @@ Status endpoints may expose safe metadata such as:
 - whether a platform fallback is configured.
 
 They must not expose key values.
+
+`GET /api/preferences/ai-status` is an authenticated API route on the persistent Render service. Production smoke verification deliberately calls it without a token and expects a JSON `401`; an HTML or `404` response is treated as a deployment/routing regression.
 
 ## Credential storage
 
