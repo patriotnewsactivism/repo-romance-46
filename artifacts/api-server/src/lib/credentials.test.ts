@@ -1,5 +1,32 @@
-import { describe, expect, it } from "vitest";
-import { normalizeAiProvider } from "./credentials";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { normalizeAiProvider, platformAiProvider } from "./credentials";
+
+const AI_ENV_KEYS = [
+  "AI_PROVIDER",
+  "OPENROUTER_API_KEY",
+  "GEMINI_API_KEY",
+  "GOOGLE_API_KEY",
+  "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
+] as const;
+
+const originalAiEnv = new Map<string, string | undefined>();
+
+beforeEach(() => {
+  for (const key of AI_ENV_KEYS) {
+    originalAiEnv.set(key, process.env[key]);
+    delete process.env[key];
+  }
+});
+
+afterEach(() => {
+  for (const key of AI_ENV_KEYS) {
+    const original = originalAiEnv.get(key);
+    if (original === undefined) delete process.env[key];
+    else process.env[key] = original;
+  }
+  originalAiEnv.clear();
+});
 
 describe("normalizeAiProvider", () => {
   it("keeps supported providers including OpenRouter", () => {
@@ -9,6 +36,11 @@ describe("normalizeAiProvider", () => {
     expect(normalizeAiProvider("google")).toBe("google");
   });
 
+  it("defaults missing provider state to OpenRouter", () => {
+    expect(normalizeAiProvider(undefined)).toBe("openrouter");
+    expect(normalizeAiProvider(null)).toBe("openrouter");
+  });
+
   it("moves historical providers to the configured fallback", () => {
     expect(normalizeAiProvider("github_models", "openrouter")).toBe("openrouter");
     expect(normalizeAiProvider("lovable", "google")).toBe("google");
@@ -16,5 +48,30 @@ describe("normalizeAiProvider", () => {
 
   it("does not permit arbitrary unsupported provider names", () => {
     expect(normalizeAiProvider("made-up-provider", "google")).toBe("google");
+  });
+});
+
+describe("platformAiProvider", () => {
+  it("prefers OpenRouter when its platform credential is available", () => {
+    process.env.OPENROUTER_API_KEY = "test-openrouter-key";
+    process.env.GEMINI_API_KEY = "test-gemini-key";
+    expect(platformAiProvider()).toBe("openrouter");
+  });
+
+  it("honors an explicitly configured provider when it has a usable key", () => {
+    process.env.AI_PROVIDER = "google";
+    process.env.GEMINI_API_KEY = "test-gemini-key";
+    process.env.OPENROUTER_API_KEY = "test-openrouter-key";
+    expect(platformAiProvider()).toBe("google");
+  });
+
+  it("fails over from an unusable configured provider to an available key", () => {
+    process.env.AI_PROVIDER = "google";
+    process.env.OPENROUTER_API_KEY = "test-openrouter-key";
+    expect(platformAiProvider()).toBe("openrouter");
+  });
+
+  it("uses OpenRouter as the BYOK-oriented default when no platform key exists", () => {
+    expect(platformAiProvider()).toBe("openrouter");
   });
 });
