@@ -39,6 +39,19 @@ async function checkApiHealth() {
   });
 }
 
+async function checkAiStatusRoute() {
+  const target = new URL('/api/preferences/ai-status', apiUrl);
+  return request('Render API /api/preferences/ai-status route', target, {}, async (response) => {
+    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+    const body = await response.text();
+
+    // This endpoint is authenticated, so an anonymous request should be JSON
+    // 401. A 404 or HTML response means the SPA is pointed at the wrong host or
+    // the persistent API was deployed without the preferences router.
+    return response.status === 401 && contentType.includes('application/json') && !/<html|<!doctype html/i.test(body);
+  });
+}
+
 async function checkFrontend() {
   if (!frontendUrl) {
     console.log('[SMOKE SKIP] FRONTEND_URL not supplied.');
@@ -83,6 +96,7 @@ async function runSmokeSuite() {
   console.log(`RepoFinisher smoke verification\nAPI: ${apiUrl}\nFrontend: ${frontendUrl || '(not supplied)'}\nSupabase: ${supabaseUrl || '(not supplied)'}`);
   const results = await Promise.all([
     checkApiHealth(),
+    checkAiStatusRoute(),
     checkFrontend(),
     checkCorsSeam(),
     checkSupabase(),

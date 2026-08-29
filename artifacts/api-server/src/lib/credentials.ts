@@ -62,16 +62,32 @@ export interface AiCredential {
 export const SUPPORTED_AI_PROVIDERS = ["google", "openai", "anthropic", "openrouter"] as const;
 const SUPPORTED_PLATFORM_PROVIDERS = new Set<string>(SUPPORTED_AI_PROVIDERS);
 
-export function normalizeAiProvider(value: string | null | undefined, fallback = "google"): string {
+export function normalizeAiProvider(value: string | null | undefined, fallback = "openrouter"): string {
   const configured = String(value || "").trim().toLowerCase();
   if (SUPPORTED_PLATFORM_PROVIDERS.has(configured)) return configured;
   if (configured === "github_models" || configured === "lovable" || !configured) return fallback;
   return fallback;
 }
 
+/**
+ * Resolve the platform provider without silently stranding production on a
+ * provider whose server-side key is missing. An explicitly configured provider
+ * still wins when it is usable; otherwise OpenRouter is preferred, followed by
+ * the other configured platform credentials. With no platform key at all,
+ * OpenRouter remains the default so the Settings BYOK flow lands on the
+ * preferred multi-model provider instead of an unrelated legacy default.
+ */
 export function platformAiProvider(): string {
-  const configured = (process.env.AI_PROVIDER || "google").trim().toLowerCase();
-  return normalizeAiProvider(configured, "google");
+  const configuredRaw = process.env.AI_PROVIDER?.trim().toLowerCase();
+  const configured = configuredRaw ? normalizeAiProvider(configuredRaw, "openrouter") : null;
+
+  if (configured && platformAiKey(configured)) return configured;
+  if (platformAiKey("openrouter")) return "openrouter";
+  if (platformAiKey("google")) return "google";
+  if (platformAiKey("openai")) return "openai";
+  if (platformAiKey("anthropic")) return "anthropic";
+
+  return configured || "openrouter";
 }
 
 function platformAiKey(provider: string): string | null {
@@ -93,10 +109,10 @@ function platformAiModel(provider: string): string | null {
   const common = process.env.AI_MODEL?.trim();
   if (common) return common;
   switch (provider) {
-    case "google": return process.env.GEMINI_MODEL?.trim() || null;
+    case "google": return process.env.GEMINI_MODEL?.trim() || "gemini-3.7-flash";
     case "openai": return process.env.OPENAI_MODEL?.trim() || null;
     case "anthropic": return process.env.ANTHROPIC_MODEL?.trim() || null;
-    case "openrouter": return process.env.OPENROUTER_MODEL?.trim() || null;
+    case "openrouter": return process.env.OPENROUTER_MODEL?.trim() || "deepseek/deepseek-v4-flash-0731";
     default: return null;
   }
 }
