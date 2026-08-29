@@ -7,23 +7,22 @@ Start with:
 - [`../README.md`](../README.md) — product/repository overview.
 - [`../AGENTS.md`](../AGENTS.md) — mandatory operating contract for coding agents.
 - [`PROJECT_STATE.md`](PROJECT_STATE.md) — current deployment/status/priorities checkpoint.
-- [`DEFINITION_OF_DONE.md`](DEFINITION_OF_DONE.md) — evidence standard for calling RepoFinisher or a target repository complete.
+- [`DEFINITION_OF_DONE.md`](DEFINITION_OF_DONE.md) — evidence standard for declaring a target repository materially complete.
 
 Architecture, operations, and governance:
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — system components and control/data flows.
-- [`OPERATIONS.md`](OPERATIONS.md) — production deployment, environment, rollback, and incident runbook.
-- [`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md) — severity, triage, hosting/provider/autonomy diagnosis, rollback, and closure criteria.
+- [`OPERATIONS.md`](OPERATIONS.md) — production deployment, environment, rollback, and operating procedures.
+- [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) — pre-merge, migration, deployment, smoke, and post-release checklist.
+- [`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md) — incident triage, hosting/provider/autonomy diagnosis, rollback, and closure criteria.
 - [`DECISIONS.md`](DECISIONS.md) — durable architecture/product decisions and their rationale.
 - [`GOVERNANCE.md`](GOVERNANCE.md) — branch/PR/CI/hosting/database governance rules and current branch-protection gap.
-- [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md) — production release gates from branch through runtime verification/rollback.
-- [`.github/pull_request_template.md`](../.github/pull_request_template.md) — operational checklist that turns the governance rules into a per-PR verification record.
 
 AI/autonomy:
 
 - [`REASONING_AND_LEARNING.md`](REASONING_AND_LEARNING.md) — reasoning pipeline, operational memory, prompt experiments, self-healing, and iterative completion target.
 - [`AI_PROVIDERS.md`](AI_PROVIDERS.md) — provider/model settings, BYOK Vault storage, and provider acceptance checks.
-- [`EXTERNAL_LLM_HANDOFFS.md`](EXTERNAL_LLM_HANDOFFS.md) — required structure and safety/validation contract for external coding-agent completion prompts.
+- [`EXTERNAL_LLM_HANDOFF.md`](EXTERNAL_LLM_HANDOFF.md) — required contents and safety/evidence contract for external completion prompts.
 
 Security/observability:
 
@@ -38,24 +37,17 @@ Historical compatibility notes:
 Contribution workflow:
 
 - [`../CONTRIBUTING.md`](../CONTRIBUTING.md)
-- [Bug report template](../.github/ISSUE_TEMPLATE/bug_report.yml) — structured defect intake with secret-safety confirmation.
-- [Feature request template](../.github/ISSUE_TEMPLATE/feature_request.yml) — requires evidence, acceptance criteria, and architecture/safety constraints.
-
-## CI governance checkpoint
-
-Issue #71 restored an explicit GitHub Actions pull-request verification trigger and added `workflow_dispatch` as an operator recovery path. PR #72 proved the restored CI path with tests, typecheck, build, and the non-Vercel hosting guard passing before merge. A stale external `Vercel` commit status may still appear until that third-party repository integration is disconnected; it is not an approved deployment target and must never be used to satisfy CI.
+- [PR template](../.github/pull_request_template.md) — requires verification/security/deployment disclosure.
+- [Bug report template](../.github/ISSUE_TEMPLATE/bug_report.yml) — structured, secret-safe defect reporting.
+- [Feature request template](../.github/ISSUE_TEMPLATE/feature_request.yml) — requires evidence and acceptance criteria.
 
 ## Documentation rules
 
 1. `AGENTS.md` is the canonical agent-policy file.
 2. Model-specific root files (`CLAUDE.md`, `GEMINI.md`, `QWEN.md`, Copilot instructions) should remain thin pointers rather than fork policy.
 3. `PROJECT_STATE.md` is time-sensitive; update it as infrastructure/features are verified.
-4. `DEFINITION_OF_DONE.md` defines the evidence threshold for completion claims; do not lower it to make a score look better.
+4. `DEFINITION_OF_DONE.md` is the default product-completion evidence standard; product-specific acceptance criteria may add to it but should not silently weaken it.
 5. Architecture/security/hosting changes must update the corresponding docs in the same PR.
-6. Pull requests should use the repository PR template and record which deployment/runtime gates were actually verified.
-7. External-agent prompt behavior must stay aligned with `EXTERNAL_LLM_HANDOFFS.md` and the internal completion contract.
-8. Production-impacting work should use `RELEASE-CHECKLIST.md` rather than treating merge success as release completion.
-9. Production incidents should use `INCIDENT_RESPONSE.md`, preserving evidence and separating code-fixed, deployed, and runtime-verified states.
-10. Public bug/feature issues must not contain credentials or private secret material.
-11. If code and docs disagree, verify current code/production state and fix the discrepancy instead of choosing whichever text is more convenient.
-12. Never place secret values in documentation.
+6. Release claims should distinguish code merged, migration applied, deployed, runtime verified, and authenticated-user-flow verified.
+7. If code and docs disagree, verify current code/production state and fix the discrepancy instead of choosing whichever text is more convenient.
+8. Never place secret values in documentation.

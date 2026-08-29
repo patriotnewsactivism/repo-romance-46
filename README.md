@@ -32,7 +32,7 @@ Core capabilities include:
 - Exact-plan hashing and approval binding before repository writes.
 - Isolated branches and draft pull requests for generated work.
 - CI and deployment-preview verification.
-- Bounded self-healing CI repair that diagnoses root causes and does not weaken validation to obtain a passing result.
+- Bounded self-healing CI repair that diagnoses root causes and does not weaken validation to obtain a passing result, including direct completion and Finish Portfolio execution paths.
 - Continuous Repository Mode for re-reasoning after repository events.
 - Portfolio relationship analysis for duplicate/shared IP, frontend/backend pairs, workers, merge candidates, and archive candidates.
 - Product/security assurance checks.
@@ -125,6 +125,8 @@ Repository-writing behavior must preserve these boundaries:
 - If the repository changes after planning, the plan is stale and must be regenerated.
 - Passing CI alone is not proof that a repository is fully finished. Completion/readiness must be re-measured and unresolved product blockers must remain visible.
 
+The evidence threshold for calling a target repository materially complete is defined in [`docs/DEFINITION_OF_DONE.md`](docs/DEFINITION_OF_DONE.md). Internal finishing and external-LLM handoffs must use the same substantive completion standard.
+
 See [`AGENTS.md`](AGENTS.md) for the rules that automated coding agents must follow.
 
 ## Learning model
@@ -168,7 +170,7 @@ For every migration:
 
 `.github/workflows/production-smoke.yml` verifies the production seams among Netlify, Render, and Supabase when manually dispatched.
 
-Do not merge a feature merely because local code looks correct. A normal release should have green CI, a successful target-host deployment, and relevant runtime smoke evidence. Use [`docs/RELEASE-CHECKLIST.md`](docs/RELEASE-CHECKLIST.md) for production-impacting work.
+Do not merge a feature merely because local code looks correct. A normal release should have green CI, a successful target-host deployment, and relevant runtime smoke evidence. Use [`docs/RELEASE-CHECKLIST.md`](docs/RELEASE-CHECKLIST.md) for production-impacting work and [`docs/INCIDENT_RESPONSE.md`](docs/INCIDENT_RESPONSE.md) when production is degraded or unsafe.
 
 ## Documentation map
 
@@ -179,10 +181,12 @@ Do not merge a feature merely because local code looks correct. A normal release
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system architecture and data/control flow.
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — deployment, environment, smoke, incident, and rollback procedures.
 - [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md) — current operational checkpoint and known remaining work.
+- [`docs/DEFINITION_OF_DONE.md`](docs/DEFINITION_OF_DONE.md) — evidence standard for declaring a target repository materially complete.
 - [`docs/REASONING_AND_LEARNING.md`](docs/REASONING_AND_LEARNING.md) — reasoning, memory, experiments, and self-healing behavior.
 - [`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md) — provider/model/BYOK behavior.
 - [`docs/EXTERNAL_LLM_HANDOFFS.md`](docs/EXTERNAL_LLM_HANDOFFS.md) — external coding-agent completion handoff contract.
 - [`docs/RELEASE-CHECKLIST.md`](docs/RELEASE-CHECKLIST.md) — production release and verification gates.
+- [`docs/INCIDENT_RESPONSE.md`](docs/INCIDENT_RESPONSE.md) — production incident triage, containment, recovery, and closure.
 - [`docs/DECISIONS.md`](docs/DECISIONS.md) — durable architecture/product decisions.
 - [`docs/GOVERNANCE.md`](docs/GOVERNANCE.md) — repository governance and control gaps.
 - [`docs/sentry-observability.md`](docs/sentry-observability.md) — Sentry-specific notes.
@@ -195,7 +199,8 @@ The hierarchy for decisions is:
 2. `AGENTS.md` for repository-working rules.
 3. `README.md`, `docs/DECISIONS.md`, and the architecture/operations documentation.
 4. `docs/PROJECT_STATE.md` for time-sensitive operational status.
-5. Model-specific instruction files are compatibility entrypoints only and must defer to `AGENTS.md`.
-6. Old experiment notes, backup metadata, and archived branches are historical only unless explicitly promoted back into the canonical docs.
+5. `docs/DEFINITION_OF_DONE.md` for completion claims.
+6. Model-specific instruction files are compatibility entrypoints only and must defer to `AGENTS.md`.
+7. Old experiment notes, backup metadata, and archived branches are historical only unless explicitly promoted back into the canonical docs.
 
 When code and documentation disagree, do not guess. Verify the implementation, fix the discrepancy, and update the documentation in the same PR.

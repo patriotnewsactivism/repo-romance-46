@@ -14,15 +14,9 @@ import {
 } from "../lib/repo-finisher-engine";
 import { normalizeInvestmentMetrics } from "../lib/run-outcome-score";
 import { finalizeRunEvolution } from "../lib/post-run-evolution";
-import {
-  markLatestRepairVerified,
-  tryScheduleCiRepair,
-  type SelfHealingRun,
-} from "../lib/ci-repair";
 
 const router: IRouter = Router();
 const PORTFOLIO_PROMPT_VERSION = "portfolio-finisher-v1-bounded";
-const PORTFOLIO_MAX_REPAIR_ATTEMPTS = 3;
 const WORKER_LEASE_MS = 9 * 60_000;
 const WORKER_BUDGET_MS = 7 * 60_000;
 const ACTIVE_PORTFOLIO_STATUSES = ["queued", "running", "verifying"] as const;
@@ -177,7 +171,7 @@ async function loadInvestmentEntry(
   return (ranking.find((entry) => (entry as Record<string, unknown>).repo === repo) as RankingEntry | undefined) ?? null;
 }
 
-export async function setIndividualVerification(
+async function setIndividualVerification(
   supabase: SupabaseClient,
   userId: string,
   item: PortfolioItemRow,
@@ -185,25 +179,6 @@ export async function setIndividualVerification(
   verification: VerificationResult,
 ) {
   if (verification.state === "pending") return;
-
-  if (verification.state === "failed") {
-    const repairScheduled = await tryScheduleCiRepair(
-      supabase,
-      userId,
-      completionRun as unknown as SelfHealingRun,
-      verification,
-    );
-    if (repairScheduled) {
-      const now = new Date().toISOString();
-      const { error } = await supabase
-        .from("portfolio_completion_items")
-        .update({ status: "verifying", error: null, completed_at: null, updated_at: now })
-        .eq("id", item.id)
-        .eq("user_id", userId);
-      if (error) throw new Error(`Failed to keep portfolio item active during CI repair: ${error.message}`);
-      return;
-    }
-  }
 
   const now = new Date().toISOString();
   const succeeded = verification.state === "passed";
@@ -263,10 +238,6 @@ export async function setIndividualVerification(
     },
   );
 
-  if (succeeded) {
-    await markLatestRepairVerified(supabase, userId, String(completionRun.id)).catch(() => undefined);
-  }
-
   await finalizeRunEvolution(supabase, userId, {
     ...completionRun,
     status: completionStatus,
@@ -317,7 +288,6 @@ async function processPortfolioItem(
         maxEstimatedHours: portfolioRun.max_estimated_hours,
         maxEstimatedCostUsd: portfolioRun.max_estimated_cost_usd,
         stopOnFailure: portfolioRun.stop_on_failure,
-        maxRepairAttempts: PORTFOLIO_MAX_REPAIR_ATTEMPTS,
         draftPullRequestsOnly: true,
         automaticMerge: false,
       },
@@ -341,9 +311,6 @@ async function processPortfolioItem(
         portfolio_run_id: portfolioRun.id,
         autonomy_mode: "bounded_portfolio",
         approval_policy: approvalPolicy,
-        auto_repair_enabled: true,
-        repair_attempts: 0,
-        max_repair_attempts: PORTFOLIO_MAX_REPAIR_ATTEMPTS,
         created_at: now,
         updated_at: now,
       })
@@ -448,29 +415,17 @@ async function processPortfolioItem(
       completionRunId,
       "draft_pr_created",
       "success",
-      `Created bounded-autonomy draft PR #${result.pr_number}; waiting for checks with up to ${PORTFOLIO_MAX_REPAIR_ATTEMPTS} evidence-driven repair attempts armed.`,
+      `Created bounded-autonomy draft PR #${result.pr_number}; waiting for checks.`,
       { portfolioRunId: portfolioRun.id, prUrl: result.pr_url, branch: result.branch, headSha: result.head_sha },
     );
 
     const verification = await verifyCommitChecks(supabase, userId, claimedItem.repo, result.head_sha);
     const verificationItem = { ...claimedItem, status: "verifying", completion_run_id: completionRunId } as PortfolioItemRow;
-    const verifyingRun = {
-      ...(completionRun as Record<string, unknown>),
-      status: "verifying",
-      branch_name: result.branch,
-      head_sha: result.head_sha,
-      pr_number: result.pr_number,
-      pr_url: result.pr_url,
-      ci_status: "pending",
-      auto_repair_enabled: true,
-      repair_attempts: 0,
-      max_repair_attempts: PORTFOLIO_MAX_REPAIR_ATTEMPTS,
-    };
     await setIndividualVerification(
       supabase,
       userId,
       verificationItem,
-      verifyingRun,
+      completionRun as Record<string, unknown>,
       verification,
     );
   } catch (error) {
@@ -542,7 +497,6 @@ async function pollVerifyingItems(
         .eq("user_id", userId)
         .maybeSingle();
       if (runError || !completionRun) return;
-      if (String((completionRun as Record<string, unknown>).status) === "repairing") return;
       const headSha = String((completionRun as Record<string, unknown>).head_sha || "");
       if (!headSha) return;
       const verification = await verifyCommitChecks(supabase, userId, item.repo, headSha);
