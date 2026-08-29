@@ -4,14 +4,14 @@ import { GitBranch, Zap, Target, Sparkles } from 'lucide-react';
 
 export default function Landing() {
   return (
-    <div className="min-h-screen bg-background dark">
+    <div className="min-h-screen bg-background text-white dark">
       {/* Navigation */}
       <nav className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center gap-2">
               <GitBranch className="w-6 h-6 text-primary" />
-              <span className="font-bold text-xl">RepoFinisher</span>
+              <span className="font-bold text-xl text-white">RepoFinisher</span>
             </div>
             <Link href="/auth">
               <Button variant="default" data-testid="button-signin">
@@ -26,7 +26,7 @@ export default function Landing() {
       <section className="relative py-24 px-4 sm:px-6 lg:px-8 overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent pointer-events-none" />
         <div className="max-w-4xl mx-auto text-center relative">
-          <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold mb-6 leading-tight">
+          <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold mb-6 leading-tight text-white">
             Stop collecting.
             <br />
             <span className="text-gradient-cyan">Start shipping.</span>
@@ -46,13 +46,13 @@ export default function Landing() {
       {/* How it works */}
       <section className="py-20 px-4 sm:px-6 lg:px-8 bg-card/30">
         <div className="max-w-6xl mx-auto">
-          <h2 className="text-3xl font-bold text-center mb-16">Four-stage analysis</h2>
+          <h2 className="text-3xl font-bold text-center text-white mb-16">Four-stage analysis</h2>
           <div className="grid md:grid-cols-4 gap-8">
             <div className="space-y-3">
               <div className="w-12 h-12 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center">
                 <GitBranch className="w-6 h-6 text-primary" />
               </div>
-              <h3 className="text-lg font-semibold">Profile</h3>
+              <h3 className="text-lg font-semibold text-white">Profile</h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
                 AI reads your entire portfolio to understand your technical identity and domain expertise.
               </p>
@@ -62,7 +62,7 @@ export default function Landing() {
               <div className="w-12 h-12 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center">
                 <Target className="w-6 h-6 text-primary" />
               </div>
-              <h3 className="text-lg font-semibold">Analyze</h3>
+              <h3 className="text-lg font-semibold text-white">Analyze</h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
                 Clusters repos by domain, identifies synergies, and builds a custom analysis strategy.
               </p>
@@ -72,7 +72,7 @@ export default function Landing() {
               <div className="w-12 h-12 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center">
                 <Sparkles className="w-6 h-6 text-primary" />
               </div>
-              <h3 className="text-lg font-semibold">Critique</h3>
+              <h3 className="text-lg font-semibold text-white">Critique</h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
                 Self-critiques the analysis to remove generic advice and sharpen recommendations.
               </p>
@@ -82,7 +82,7 @@ export default function Landing() {
               <div className="w-12 h-12 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center">
                 <Zap className="w-6 h-6 text-primary" />
               </div>
-              <h3 className="text-lg font-semibold">Synthesize</h3>
+              <h3 className="text-lg font-semibold text-white">Synthesize</h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
                 Generates ranked opportunities with effort scores, tech stacks, and marketing copy.
               </p>
@@ -94,11 +94,11 @@ export default function Landing() {
       {/* What you get */}
       <section className="py-20 px-4 sm:px-6 lg:px-8">
         <div className="max-w-6xl mx-auto">
-          <h2 className="text-3xl font-bold text-center mb-16">What you get</h2>
+          <h2 className="text-3xl font-bold text-center text-white mb-16">What you get</h2>
           <div className="grid md:grid-cols-3 gap-8">
             <div className="border border-border rounded-lg p-6 bg-card">
               <div className="font-mono text-sm text-primary mb-3">FINISH</div>
-              <h3 className="text-xl font-semibold mb-3">Polish & Ship</h3>
+              <h3 className="text-xl font-semibold text-white mb-3">Polish & Ship</h3>
               <p className="text-muted-foreground mb-4">
                 Repos that are 80% done. AI tells you exactly what's missing, estimates effort, and writes launch copy.
               </p>
@@ -109,7 +109,7 @@ export default function Landing() {
 
             <div className="border border-border rounded-lg p-6 bg-card">
               <div className="font-mono text-sm text-chart-2 mb-3">COMBINE</div>
-              <h3 className="text-xl font-semibold mb-3">Merge Into One</h3>
+              <h3 className="text-xl font-semibold text-white mb-3">Merge Into One</h3>
               <p className="text-muted-foreground mb-4">
                 Related repos that solve the same problem differently. Get merge instructions and a new repo name.
               </p>
@@ -120,7 +120,7 @@ export default function Landing() {
 
             <div className="border border-border rounded-lg p-6 bg-card">
               <div className="font-mono text-sm text-chart-3 mb-3">REPURPOSE</div>
-              <h3 className="text-xl font-semibold mb-3">Turn Into SaaS</h3>
+              <h3 className="text-xl font-semibold text-white mb-3">Turn Into SaaS</h3>
               <p className="text-muted-foreground mb-4">
                 Internal tools or libraries that could be products. AI pitches the market opportunity.
               </p>
@@ -135,7 +135,7 @@ export default function Landing() {
       {/* CTA */}
       <section className="py-20 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-transparent to-primary/5">
         <div className="max-w-3xl mx-auto text-center">
-          <h2 className="text-4xl font-bold mb-6">
+          <h2 className="text-4xl font-bold text-white mb-6">
             Your repos are waiting
           </h2>
           <p className="text-lg text-muted-foreground mb-8">
