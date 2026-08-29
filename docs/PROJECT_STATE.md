@@ -13,8 +13,8 @@ Default branch: `main`
 Current verified `main` at this checkpoint:
 
 ```text
-2e5229cc237e064d1428a669eee07c6bcd32dd06
-fix: give Finish Portfolio bounded CI self-healing parity
+d8faee9e4e94a3045fe43bb67256917974839901
+chore: replace Vercel waitUntil with provider-neutral background runtime
 ```
 
 `main` is branch-protected and requires the `CI` status check for non-admin merges.
@@ -46,6 +46,7 @@ The source on `main` includes:
 - service-role-only Vault store/read/delete RPC usage,
 - direct repository bounded self-healing,
 - Finish Portfolio bounded self-healing parity,
+- provider-neutral background runtime in place of Vercel `waitUntil`,
 - multi-stage reasoning and measured operational learning.
 
 At the Vault migration checkpoint, production Supabase had a Vault-backed AI credential reference and no remaining legacy plaintext AI-key row. This is a historical verification point, not permission to expose or print any credential value.
@@ -149,15 +150,11 @@ Finish Portfolio now has bounded CI self-healing parity. The next step is to coo
 
 Generic assurance can inspect repository, CI, deployment, and live-surface evidence. Products involving login, payments, privileged operations, native/mobile flows, or complex state still need stronger application-specific acceptance definitions and browser/runtime evidence before RepoFinisher should call them complete.
 
-### 4. Residual Vercel runtime compatibility dependency
-
-Current `main` still contains `@vercel/functions` references, including the API dependency/compatibility path. This is technical debt only; it does not authorize Vercel hosting. Replace the required lifecycle/background behavior with a provider-neutral mechanism, keep tests green, then remove the dependency and stale references.
-
-### 5. Render capacity / background execution
+### 4. Render capacity / background execution
 
 Verify the canonical Render service plan and workload behavior under real portfolio reasoning, repair, and long-running jobs. Upgrade capacity based on measured cold starts, CPU/memory, concurrency, and latency rather than assumption.
 
-### 6. Netlify production completion
+### 5. Netlify production completion
 
 Finish the first verified source deploy/custom-domain cutover and run the authenticated Settings and mobile UI acceptance tests listed above.
 
@@ -183,6 +180,7 @@ Substantial capabilities present in `main` include:
 - external LLM completion handoffs
 - provider/model Settings including OpenRouter
 - Supabase Vault-backed AI BYOK storage
+- provider-neutral background runtime replacing `@vercel/functions`/Vercel `waitUntil`
 - Netlify configuration and Render persistent API migration foundation
 - non-Vercel CI hosting guard
 - production seam smoke workflow
@@ -209,9 +207,8 @@ Use `docs/DEFINITION_OF_DONE.md`. Relevant completion evidence can include:
 3. Implement the multi-iteration finish-until-target controller.
 4. Connect per-repo completion sessions into Finish Portfolio orchestration.
 5. Add product-specific acceptance suites/browser-flow verification.
-6. Remove residual `@vercel/functions` dependency with a provider-neutral background lifecycle.
-7. Verify/upgrade Render production capacity where measurements justify it.
-8. Run real repositories end-to-end and tune reasoning/repair strategy from measured outcomes rather than synthetic success alone.
+6. Verify/upgrade Render production capacity where measurements justify it.
+7. Run real repositories end-to-end and tune reasoning/repair strategy from measured outcomes rather than synthetic success alone.
 
 ## Documentation / governance checkpoint
 
