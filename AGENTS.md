@@ -2,7 +2,7 @@
 
 This file is the canonical instruction set for coding agents, autonomous assistants, and external LLMs working in this repository.
 
-Read this file, `README.md`, and `docs/PROJECT_STATE.md` before making changes. For architecture-sensitive work also read `docs/ARCHITECTURE.md` and `docs/OPERATIONS.md`.
+Read this file, `README.md`, and `docs/PROJECT_STATE.md` before making changes. For architecture-sensitive work also read `docs/ARCHITECTURE.md` and `docs/OPERATIONS.md`. For completion claims, use `docs/DEFINITION_OF_DONE.md`. For production incidents, use `docs/INCIDENT_RESPONSE.md`.
 
 ## Mission
 
@@ -99,6 +99,8 @@ A repair agent may change source or safe configuration when evidence supports th
 
 After a failed repair, collect fresh evidence and re-diagnose. If no evidence-backed safe repair remains, stop and surface the blocker.
 
+The same self-healing safety rules apply to direct repository completion and Finish Portfolio execution. Portfolio-scale execution must not become a weaker safety path.
+
 ## Reasoning quality
 
 Prefer evidence-driven multi-stage reasoning over a single broad prompt.
@@ -160,13 +162,15 @@ Completion should consider, as applicable:
 - documentation/operator setup,
 - outstanding blockers identified by prior analysis.
 
-After a successful run, re-score the repository. If it remains materially below the configured completion/readiness target, the system should be capable of another bounded reasoning/implementation iteration rather than treating the first green PR as final.
+`docs/DEFINITION_OF_DONE.md` is the canonical default evidence standard. Do not lower it privately inside a prompt or scoring rule to make a run appear complete.
+
+After a successful run, re-score the repository. If it remains materially below the configured completion/readiness target or has a known material blocker, the system should be capable of another bounded reasoning/implementation iteration rather than treating the first green PR as final.
 
 ## External LLM completion prompts
 
 The external completion prompt is a complement to RepoFinisher, not a substitute.
 
-Generated prompts should include the assessed commit SHA, current state, evidence-backed blockers, ordered work, specialist concerns, validation requirements, security boundaries, and a clear definition of done. They must instruct the external agent to re-assess if the repository head has moved.
+Generated prompts should include the assessed commit SHA, current state, evidence-backed blockers, ordered work, specialist concerns, validation requirements, security boundaries, and the same Definition of Done used internally. They must instruct the external agent to re-assess if the repository head has moved.
 
 Keep provider-specific formatting thin. The underlying assessment and requirements should remain provider-neutral so Codex, Claude Code, Gemini CLI, or another capable coding agent receives the same substantive task.
 
@@ -223,7 +227,7 @@ Do not bypass CI failures. Diagnose and fix them.
 
 Prefer focused branches and PRs. Avoid broad unrelated refactors bundled into production-critical fixes.
 
-Update documentation in the same PR when architecture, environment variables, deployment targets, security storage, approval policy, or operational behavior changes.
+Update documentation in the same PR when architecture, environment variables, deployment targets, security storage, approval policy, completion criteria, or operational behavior changes.
 
 ## Release workflow
 
@@ -242,11 +246,17 @@ Do not switch DNS before the replacement target is healthy.
 
 Use `docs/RELEASE-CHECKLIST.md` for production-impacting changes. A merged commit alone is not release-completion evidence.
 
+## Incident response
+
+Use `docs/INCIDENT_RESPONSE.md` when production is unavailable, serving stale code, failing authentication/API seams, exposing a security concern, or producing unsafe/unreliable autonomous completion behavior.
+
+Preserve evidence before changing infrastructure. Distinguish `code fixed`, `merged`, `deployed`, and `runtime verified`; they are not interchangeable states. Do not use Vercel as an emergency workaround.
+
 ## Current known operational caveats
 
 Read `docs/PROJECT_STATE.md` before infrastructure work. It is intentionally time-sensitive.
 
-As of the documentation baseline, the canonical source branch contains the Vault-backed AI BYOK implementation and the persistent Render API is live. The Netlify project exists, but its final source deployment/domain state must be verified before claiming the frontend cutover is complete.
+As of the documentation baseline, the canonical source branch contains the Vault-backed AI BYOK implementation and Finish Portfolio has bounded CI self-healing parity with direct completion. The persistent Render API is live. The Netlify project exists, but its current source deployment/custom-domain state must be verified before claiming the frontend cutover is complete.
 
 ## Documentation discipline
 
@@ -257,11 +267,13 @@ Canonical docs:
 - `SECURITY.md` — security policy and secret handling.
 - `CONTRIBUTING.md` — human/agent contribution workflow.
 - `docs/ARCHITECTURE.md` — system design.
-- `docs/OPERATIONS.md` — deployment and incident procedures.
+- `docs/OPERATIONS.md` — deployment and operational procedures.
 - `docs/PROJECT_STATE.md` — current checkpoint and blockers.
+- `docs/DEFINITION_OF_DONE.md` — evidence threshold for completion claims.
 - `docs/REASONING_AND_LEARNING.md` — reasoning/learning behavior.
 - `docs/EXTERNAL_LLM_HANDOFFS.md` — external coding-agent handoff contract.
 - `docs/RELEASE-CHECKLIST.md` — production release/verification gates.
+- `docs/INCIDENT_RESPONSE.md` — incident triage/recovery/closure.
 - `docs/DECISIONS.md` — durable architecture/product decisions.
 
 Model-specific files (`CLAUDE.md`, `GEMINI.md`, `QWEN.md`, Copilot instructions) must point back to this file instead of maintaining divergent rules.

@@ -1,197 +1,151 @@
 # RepoFinisher Definition of Done
 
-This document defines what "done" means for RepoFinisher itself and for repositories RepoFinisher attempts to complete.
+RepoFinisher must not equate "a patch was created" or "CI passed" with "the repository is finished."
 
-Green CI is necessary evidence, but it is not sufficient proof that a product is finished.
+This document defines the default evidence standard for declaring a target repository materially complete. Individual repositories may require additional product-specific acceptance criteria.
 
-## 1. Evidence before conclusion
+## Core rule
 
-A repository may be called complete only when the claim is supported by current evidence from the assessed commit/deployment. Evidence should distinguish:
+A repository is only complete when the intended product can be used, operated, deployed, and maintained with no known material blocker inside the agreed scope.
 
-- verified facts,
-- reasoned inferences,
-- unknown or untested areas.
+Completion must be based on current evidence from the assessed commit/deployment. Unknowns remain unknown until verified.
 
-If the repository HEAD or deployment changes after assessment, stale evidence must not be treated as current.
+## Required completion dimensions
 
-## 2. Product intent and core journeys
+Assess each dimension as applicable.
 
-RepoFinisher must identify the product's intended primary users and core journeys from repository evidence, documentation, UI/API structure, configuration, and prior analysis.
+### Product intent and core user journeys
 
-For each material core journey, completion should verify as applicable:
+- Product purpose is understood from repository and product evidence.
+- Primary user journey works end-to-end.
+- Critical actions do not terminate in placeholders, dead controls, mock-only behavior, or unhandled errors.
+- Empty/loading/error/success states are intentional.
+- Mobile and desktop behavior is usable when a web UI exists.
 
-- the user can enter the journey,
-- required authentication/authorization works,
-- required data can be created/read/updated safely,
-- external integrations are configured or fail clearly,
-- errors are handled without corrupting state,
-- the journey reaches its intended successful end state,
-- mobile/desktop behavior is usable when a web UI exists.
+### Frontend and UX
 
-A product with an unverified or broken primary journey is not fully complete even if unit tests pass.
+- Navigation is functional and readable.
+- Critical controls are visible and accessible.
+- Responsive layouts do not hide required actions.
+- Theme/contrast remains usable.
+- Forms save, reload, validate, and report errors correctly.
+- Broken images/placeholders do not damage core UI.
 
-## 3. Code and repository quality
+### API/backend
 
-Applicable gates include:
+- Required routes exist and match frontend/client contracts.
+- Authentication and authorization are enforced server-side.
+- Input validation and meaningful error responses exist.
+- Long-running work has an appropriate execution model and does not rely on a request lifetime it cannot satisfy.
+- Retry/idempotency behavior is considered where duplicate execution is dangerous.
 
-- install succeeds from a clean checkout,
-- typecheck succeeds,
-- build succeeds,
-- automated tests pass,
-- lint/static analysis passes when configured,
-- no known critical source/configuration blocker remains,
-- required environment variables are documented,
-- no credentials are committed,
-- generated changes preserve existing working interfaces unless evidence justifies a breaking change.
+### Data and migrations
 
-## 4. Security and authorization
+- Required schema exists through repository-tracked migrations.
+- Migrations are safe for existing data and production ordering.
+- RLS/authorization is correct for user-owned data.
+- Service-role functions are least-privilege.
+- No unresolved manual-schema drift is required to operate the product.
 
-Where applicable, verify:
+### Authentication and secrets
 
-- authentication works,
-- authorization is enforced server-side,
-- tenant/user data boundaries are preserved,
-- database RLS/policies are appropriate,
-- service-role credentials remain backend-only,
-- secrets are stored in approved secret storage,
-- repository write authority remains bounded,
-- sensitive logs/errors are redacted,
-- SSRF/network probes are constrained,
-- dependency/security checks have no unresolved release-blocking result.
+- Login/session behavior works where required.
+- Secrets are server-side and never embedded in browser-visible variables/source.
+- Credentials are stored using the approved secret-storage mechanism.
+- Secret values are not returned in normal API responses or logs.
 
-Never lower a security or acceptance boundary simply to increase a completion score.
+### Payments/commercial flows
 
-## 5. Database and migration readiness
+When applicable:
 
-If the product has schema/data changes:
+- Checkout/subscription/payment state is connected to real backend behavior.
+- Success, failure, cancellation, renewal, and entitlement states are handled.
+- Test/live environment separation is explicit.
+- Revenue/customer claims are not inferred from code presence alone.
 
-- migrations are committed to source control,
-- production ordering is understood,
-- migrations are safe for existing data,
-- RLS/grants/functions are reviewed,
-- disposable/staging validation is used where practical,
-- irreversible/destructive steps are explicit,
-- production migration status is verified before calling the dependent feature live.
+### Tests and CI
 
-## 6. Deployment and runtime evidence
+- Relevant tests exist for critical behavior.
+- Tests pass without weakening acceptance criteria.
+- Typecheck/lint/build checks required by the repository pass.
+- CI runs on the current implementation commit or PR.
+- A missing test surface is treated as a readiness gap, not assumed correct.
 
-For deployable products, verify the real target environment rather than assuming a successful build equals a successful deployment.
+### Deployment and runtime
 
-Applicable evidence includes:
+- Production/release configuration is present and valid.
+- Target deployment succeeds.
+- Runtime health/smoke evidence is available.
+- Frontend/API/auth/data seams work across actual production origins.
+- Environment variables are documented and correctly scoped.
 
-- deployment completed successfully,
-- health endpoint/smoke probe succeeds,
-- expected domain resolves over HTTPS,
-- frontend reaches the intended API,
-- API reaches required data/services,
-- no obvious production 5xx/runtime failure is present,
-- environment/configuration matches the documented architecture.
+### Security
 
-For RepoFinisher itself, approved production architecture is Netlify frontend + Render API + Supabase + GitHub. Vercel is not an approved target.
+- No known committed secrets.
+- Auth/RLS/permission boundaries are not bypassed.
+- High-risk network probes defend against SSRF where relevant.
+- Security-sensitive changes preserve least privilege.
+- CI/self-healing does not mutate security controls merely to pass.
 
-## 7. UI/UX/accessibility
+### Accessibility
 
-For user-facing applications, verify as applicable:
+For user-facing applications, verify at minimum:
 
-- usable responsive layout,
+- keyboard-accessible primary interactions,
+- labels/names for critical controls,
 - readable contrast,
-- navigation/menu access,
-- loading/empty/error states,
-- form validation and save/reload behavior,
-- keyboard/focus behavior for key flows,
-- accessible labels/semantics on critical interactions,
-- no broken images or invisible controls blocking primary journeys.
+- focus behavior for dialogs/menus,
+- no major blocker identifiable from repository/UI evidence.
 
-## 8. Payments and high-value integrations
+### Observability and operations
 
-If payments, subscriptions, email, OAuth, media streaming, AI providers, or other material integrations exist, completion requires evidence that the actual integration path works or is intentionally disabled with clear setup instructions.
+- Material failures are diagnosable through logs/events/traces where appropriate.
+- Runbooks/environment docs exist for non-obvious production dependencies.
+- Operator actions such as migrations, credential setup, and deployment are reproducible.
 
-Do not mark a provider/integration complete merely because its name appears in the UI.
+### Documentation
 
-## 9. Observability and operability
+- README/setup instructions match current architecture.
+- Required environment variables are documented without secret values.
+- Deployment/operations instructions reflect the actual approved hosts.
+- Known limitations are not hidden.
 
-Production-capable applications should have enough operational evidence to diagnose failures. Depending on scope this can include:
+## RepoFinisher autonomous-run evidence
 
-- structured logs,
-- error reporting,
-- health checks,
-- deployment logs,
-- run/audit events,
-- documented rollback/recovery steps.
+A RepoFinisher-generated completion run should not be treated as terminal success until, as applicable:
 
-RepoFinisher autonomous runs must persist enough evidence to reconstruct plan, approval, branch/PR, verification, repairs, and measured outcome without exposing private chain-of-thought.
+1. exact plan/base SHA were bound and approved,
+2. changes were written to an isolated branch,
+3. a draft PR exists,
+4. CI/checks pass,
+5. deployment/runtime verification passes or is explicitly unavailable,
+6. completion/readiness is re-scored,
+7. measured outcome telemetry is persisted,
+8. unresolved material blockers are surfaced,
+9. another bounded iteration is scheduled/available when targets are not met.
 
-## 10. Documentation
+## Target thresholds
 
-The repository must contain enough documentation for a competent maintainer or external coding agent to continue from the current state without relying on chat history.
+Default percentage targets are planning controls, not substitutes for evidence.
 
-At minimum, material changes should keep current:
+A high completion/readiness percentage cannot override a known critical blocker. Conversely, a repository should not be held below completion only because a non-applicable category lacks evidence.
 
-- setup/run instructions,
-- environment variables,
-- deployment architecture,
-- migration requirements,
-- security constraints,
-- known blockers/current state.
+## Stop conditions
 
-## 11. RepoFinisher autonomous-run completion
+A completion loop should stop and surface a blocker rather than guessing when:
 
-For RepoFinisher to mark one of its own completion runs successful:
+- required access/credentials are unavailable,
+- evidence is insufficient to make a safe change,
+- the base repository moved and invalidated the plan,
+- repeated attempts produce no measurable progress,
+- a configured risk/cost/time limit is reached,
+- required human/product decisions are genuinely ambiguous,
+- the next action would require weakening tests/security/approval boundaries.
 
-1. Current repository evidence was gathered.
-2. Reasoning identified the root blockers and ordered prerequisites.
-3. The exact plan was bound to the assessed base SHA.
-4. Required approval/autonomy acknowledgement was recorded.
-5. Changes were isolated on a branch/draft PR.
-6. CI/deployment/runtime evidence was collected.
-7. Bounded self-healing, if needed, fixed implementation rather than acceptance criteria.
-8. Completion/readiness was re-scored after the change.
-9. Outcome telemetry and reusable learning were recorded.
-10. No unresolved release-blocking condition remains hidden.
+## External-LLM parity
 
-## 12. Iterative completion rule
+The detailed external completion prompt must use this same Definition of Done. An external coding agent is not allowed to call the repository complete using a weaker standard than RepoFinisher itself.
 
-A successful first patch is not automatically the end of the job.
+## Updating this document
 
-After verification, compare measured completion/readiness against the configured target. If the repository remains materially unfinished, RepoFinisher should perform another bounded evidence/reasoning iteration unless a stop condition applies.
-
-Valid stop conditions include:
-
-- target completion/readiness reached,
-- evidence is insufficient and further writes would be guessing,
-- no-progress threshold reached,
-- explicit user cancellation,
-- time/cost/risk budget exhausted,
-- required external credential/approval/infrastructure is unavailable,
-- a safety/security boundary would need to be weakened to continue.
-
-The runtime finish-until-target controller is tracked as incomplete until current source actually executes this loop end to end.
-
-## 13. External LLM handoff Definition of Done
-
-A generated external-agent completion prompt should carry this same substantive standard. It must not become a shortcut that lowers RepoFinisher's own standards.
-
-The prompt should require the external agent to:
-
-- verify the assessed SHA/current state,
-- re-diagnose if the repository moved,
-- resolve root causes rather than symptoms,
-- iterate through remaining blockers,
-- run real tests/build/CI,
-- verify applicable auth/data/payment/security/integration flows,
-- verify the deployed product when relevant,
-- report unresolved blockers explicitly,
-- stop rather than fabricate success.
-
-## 14. Completion reporting
-
-Every completion claim should say what was actually verified.
-
-Preferred status language:
-
-- **Verified complete** — applicable Definition of Done gates have evidence and no material blocker remains.
-- **Production-ready with known limitations** — release gates pass but documented non-blocking limitations remain.
-- **Partially complete** — meaningful improvement landed, but material gates remain unresolved.
-- **Blocked** — progress requires missing evidence, credential, approval, infrastructure, or a decision.
-
-Never convert an unknown into a passing result merely to raise a percentage.
+When a new product class exposes a recurring completion dimension not represented here, add it here and update RepoFinisher's assurance/planning logic where practical. Do not silently add a stricter or weaker private definition only inside one prompt.
