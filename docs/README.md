@@ -13,6 +13,7 @@ Architecture, operations, and governance:
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — system components and control/data flows.
 - [`OPERATIONS.md`](OPERATIONS.md) — production deployment, environment, rollback, and incident runbook.
+- [`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md) — severity, triage, hosting/provider/autonomy diagnosis, rollback, and closure criteria.
 - [`DECISIONS.md`](DECISIONS.md) — durable architecture/product decisions and their rationale.
 - [`GOVERNANCE.md`](GOVERNANCE.md) — branch/PR/CI/hosting/database governance rules and current branch-protection gap.
 - [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md) — production release gates from branch through runtime verification/rollback.
@@ -37,6 +38,8 @@ Historical compatibility notes:
 Contribution workflow:
 
 - [`../CONTRIBUTING.md`](../CONTRIBUTING.md)
+- [Bug report template](../.github/ISSUE_TEMPLATE/bug_report.yml) — structured defect intake with secret-safety confirmation.
+- [Feature request template](../.github/ISSUE_TEMPLATE/feature_request.yml) — requires evidence, acceptance criteria, and architecture/safety constraints.
 
 ## CI governance checkpoint
 
@@ -52,5 +55,7 @@ Issue #71 restored an explicit GitHub Actions pull-request verification trigger 
 6. Pull requests should use the repository PR template and record which deployment/runtime gates were actually verified.
 7. External-agent prompt behavior must stay aligned with `EXTERNAL_LLM_HANDOFFS.md` and the internal completion contract.
 8. Production-impacting work should use `RELEASE-CHECKLIST.md` rather than treating merge success as release completion.
-9. If code and docs disagree, verify current code/production state and fix the discrepancy instead of choosing whichever text is more convenient.
-10. Never place secret values in documentation.
+9. Production incidents should use `INCIDENT_RESPONSE.md`, preserving evidence and separating code-fixed, deployed, and runtime-verified states.
+10. Public bug/feature issues must not contain credentials or private secret material.
+11. If code and docs disagree, verify current code/production state and fix the discrepancy instead of choosing whichever text is more convenient.
+12. Never place secret values in documentation.
