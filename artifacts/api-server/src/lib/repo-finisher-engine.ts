@@ -33,6 +33,7 @@ export interface PreparedFinishPlan {
   mode: "atomic_plan";
   repo: string;
   defaultBranch: string;
+  sourceBranch?: string;
   baseSha: string;
   summary: string;
   nextSteps: string[];
@@ -83,6 +84,7 @@ interface AIFinishPlan {
 interface RepoContext {
   token: string;
   defaultBranch: string;
+  sourceBranch: string;
   baseSha: string;
   treeSha: string;
   tree: GitHubTreeEntry[];
@@ -173,7 +175,7 @@ async function getFileContent(token: string, repo: string, path: string, ref: st
   return Buffer.from(json.content, "base64").toString("utf-8");
 }
 
-async function loadRepoContext(supabase: SupabaseClient, userId: string, repoName: string): Promise<RepoContext> {
+async function loadRepoContext(supabase: SupabaseClient, userId: string, repoName: string, sourceBranch?: string): Promise<RepoContext> {
   validateRepoName(repoName);
   const connection = requireGithubCredential(await loadGithubCredential(supabase, userId));
   const token = connection.token;
@@ -182,12 +184,14 @@ async function loadRepoContext(supabase: SupabaseClient, userId: string, repoNam
   if (!repoRes.ok) throw Object.assign(new Error(`Repo not found or inaccessible: ${repoName}`), { status: 404 });
   const repo = (await repoRes.json()) as Record<string, unknown>;
   const defaultBranch = String(repo.default_branch || "main");
-  const head = await getBranchHead(token, repoName, defaultBranch);
+  const resolvedSourceBranch = sourceBranch?.trim() || defaultBranch;
+  const head = await getBranchHead(token, repoName, resolvedSourceBranch);
   const tree = await getRepoTree(token, repoName, head.treeSha);
 
   return {
     token,
     defaultBranch,
+    sourceBranch: resolvedSourceBranch,
     baseSha: head.commitSha,
     treeSha: head.treeSha,
     tree,
@@ -479,6 +483,7 @@ export async function prepareFinishPlan(
     portfolioRunId?: string;
     reasoning?: boolean;
     mode?: "plan" | "replan";
+    baseBranch?: string;
   },
 ) {
   const requestedNextSteps = await resolveNextSteps(supabase, data);
@@ -492,6 +497,7 @@ export async function prepareFinishPlan(
         itemRank: data.itemRank,
         completionRunId: data.completionRunId,
         portfolioRunId: data.portfolioRunId,
+        ref: data.baseBranch,
         mode: data.mode ?? "plan",
       });
     } catch (error) {
@@ -499,7 +505,7 @@ export async function prepareFinishPlan(
     }
   }
   const nextSteps = reasoning?.nextSteps?.length ? reasoning.nextSteps : requestedNextSteps;
-  const context = await loadRepoContext(supabase, userId, data.repo);
+  const context = await loadRepoContext(supabase, userId, data.repo, data.baseBranch);
   const files = await fetchKeyFiles(context.token, data.repo, context.baseSha, context.tree);
   const aiCredential = await loadAiCredential(supabase, userId, context.token);
 
@@ -519,6 +525,7 @@ export async function prepareFinishPlan(
     mode: "atomic_plan",
     repo: data.repo,
     defaultBranch: context.defaultBranch,
+    sourceBranch: data.baseBranch?.trim() || undefined,
     baseSha: context.baseSha,
     summary: reasoning ? `${reasoning.summary}\n\nCoding plan: ${generated.analysis}` : generated.analysis,
     nextSteps,
@@ -610,6 +617,9 @@ export async function executePreparedPlan(
   if (actualHash !== expectedPlanHash) {
     throw Object.assign(new Error("Stored completion plan no longer matches its approval hash."), { status: 409 });
   }
+  if (plan.sourceBranch) {
+    throw Object.assign(new Error("Continuation plans must be executed with executeContinuationPlan so the existing draft PR branch is preserved."), { status: 409 });
+  }
 
   const connection = requireGithubCredential(await loadGithubCredential(supabase, userId));
   const token = connection.token;
@@ -685,6 +695,74 @@ export async function executePreparedPlan(
   };
 
   return result;
+}
+
+async function updateBranchAtCommit(token: string, repo: string, branch: string, sha: string) {
+  const res = await ghFetch(token, `/repos/${repo}/git/refs/heads/${encodeURIComponent(branch)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sha, force: false }),
+  });
+  if (!res.ok) throw new Error(`Failed to advance continuation branch: ${res.status} ${(await res.text()).slice(0, 200)}`);
+}
+
+export async function executeContinuationPlan(
+  supabase: SupabaseClient,
+  userId: string,
+  plan: PreparedFinishPlan,
+  expectedPlanHash: string,
+  branchName: string,
+  prNumber: number,
+  prUrl: string,
+): Promise<FinishResult> {
+  validateRepoName(plan.repo);
+  const actualHash = hashPreparedPlan(plan);
+  if (actualHash !== expectedPlanHash) {
+    throw Object.assign(new Error("Stored continuation plan no longer matches its approval hash."), { status: 409 });
+  }
+  if (!plan.sourceBranch || plan.sourceBranch !== branchName) {
+    throw Object.assign(new Error("Continuation plan is not bound to the active RepoFinisher branch."), { status: 409 });
+  }
+  const connection = requireGithubCredential(await loadGithubCredential(supabase, userId));
+  const token = connection.token;
+  const current = await getBranchHead(token, plan.repo, branchName);
+  if (current.commitSha !== plan.baseSha) {
+    throw Object.assign(new Error(`Continuation branch changed after planning. Approved base ${plan.baseSha.slice(0, 12)} is no longer current; re-plan from the new head.`), { status: 409, code: "STALE_BASE" });
+  }
+  const tree = await getRepoTree(token, plan.repo, current.treeSha);
+  const changes = validatePlanChanges(plan.changes, tree);
+  const blobs = new Map<string, string>();
+  await Promise.all(changes.filter((change) => change.status !== "deleted").map(async (change) => {
+    const blob = await createBlob(token, plan.repo, change.content);
+    blobs.set(change.path, blob.sha);
+  }));
+  const treeEntries = changes.map((change) => ({
+    path: change.path,
+    mode: change.mode,
+    type: "blob" as const,
+    sha: change.status === "deleted" ? null : blobs.get(change.path) || null,
+  }));
+  if (treeEntries.some((entry) => entry.sha === null && changes.find((change) => change.path === entry.path)?.status !== "deleted")) {
+    throw new Error("Failed to create one or more continuation Git blobs; branch was not changed.");
+  }
+  const newTree = await createTree(token, plan.repo, current.treeSha, treeEntries);
+  const commit = await createCommit(token, plan.repo, `repo-finisher: continue approved plan ${expectedPlanHash.slice(0, 12)}`, newTree.sha, plan.baseSha);
+  await updateBranchAtCommit(token, plan.repo, branchName, commit.sha);
+  const changeLog = changes.map((change) => ({ file: change.path, status: change.status, description: change.description }));
+  return {
+    repo: plan.repo,
+    branch: branchName,
+    pr_url: prUrl,
+    pr_number: prNumber,
+    files_changed: changes.length,
+    additions: 0,
+    deletions: 0,
+    summary: plan.summary,
+    changes: changeLog,
+    base_sha: plan.baseSha,
+    head_sha: commit.sha,
+    plan_hash: expectedPlanHash,
+  };
 }
 
 export async function verifyCommitChecks(
