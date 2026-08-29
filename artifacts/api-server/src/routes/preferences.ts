@@ -185,7 +185,7 @@ router.patch(
       update.custom_ai_vault_secret_id = null;
       deleteAfterSave = existingVaultId;
     } else if (input.api_key) {
-      const vaultId = await storeAiVaultSecret(userId, input.api_key, existingVaultId);
+      const vaultId = await storeAiVaultSecret(req.supabase!, userId, input.api_key, existingVaultId);
       update.custom_ai_key = null;
       update.custom_ai_vault_secret_id = vaultId;
       if (!existingVaultId) newlyCreatedVaultId = vaultId;
@@ -201,13 +201,13 @@ router.patch(
       }
     } catch (error) {
       if (newlyCreatedVaultId) {
-        await deleteAiVaultSecret(userId, newlyCreatedVaultId).catch(() => undefined);
+        await deleteAiVaultSecret(req.supabase!, userId, newlyCreatedVaultId).catch(() => undefined);
       }
       throw error;
     }
 
     if (deleteAfterSave) {
-      await deleteAiVaultSecret(userId, deleteAfterSave).catch((error) => {
+      await deleteAiVaultSecret(req.supabase!, userId, deleteAfterSave).catch((error) => {
         captureException(error, { tags: { subsystem: "ai-vault-cleanup" } });
       });
     }
@@ -301,7 +301,7 @@ router.patch(
         update.custom_ai_vault_secret_id = null;
         deleteAfterSave = existingVaultId;
       } else if (incomingKey !== undefined) {
-        const vaultId = await storeAiVaultSecret(userId, incomingKey, existingVaultId);
+        const vaultId = await storeAiVaultSecret(req.supabase!, userId, incomingKey, existingVaultId);
         update.custom_ai_key = null;
         update.custom_ai_vault_secret_id = vaultId;
         if (!existingVaultId) newlyCreatedVaultId = vaultId;
@@ -322,13 +322,13 @@ router.patch(
       }
     } catch (error) {
       if (newlyCreatedVaultId) {
-        await deleteAiVaultSecret(userId, newlyCreatedVaultId).catch(() => undefined);
+        await deleteAiVaultSecret(req.supabase!, userId, newlyCreatedVaultId).catch(() => undefined);
       }
       throw error;
     }
 
     if (deleteAfterSave) {
-      await deleteAiVaultSecret(userId, deleteAfterSave).catch((error) => {
+      await deleteAiVaultSecret(req.supabase!, userId, deleteAfterSave).catch((error) => {
         captureException(error, { tags: { subsystem: "ai-vault-cleanup" } });
       });
     }
