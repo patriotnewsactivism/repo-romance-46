@@ -24,6 +24,7 @@ export interface RepoEvidence {
     language: string | null;
     topics: string[];
     defaultBranch: string;
+    evidenceRef: string;
     headSha: string;
     stars: number;
     forks: number;
@@ -182,13 +183,14 @@ async function fetchFile(token: string, repo: string, path: string, ref: string)
   return Buffer.from(json.content, "base64").toString("utf-8");
 }
 
-async function collectRepoEvidence(token: string, repoName: string, requestedNextSteps: string[]): Promise<RepoEvidence> {
+async function collectRepoEvidence(token: string, repoName: string, requestedNextSteps: string[], ref?: string): Promise<RepoEvidence> {
   const repoResponse = await ghFetch(token, `/repos/${repoName}`);
   if (!repoResponse.ok) throw Object.assign(new Error(`Repo not found or inaccessible: ${repoName}`), { status: 404 });
   const repo = await repoResponse.json() as Record<string, unknown>;
   const defaultBranch = String(repo.default_branch || "main");
-  const branchResponse = await ghFetch(token, `/repos/${repoName}/branches/${encodeURIComponent(defaultBranch)}`);
-  if (!branchResponse.ok) throw new Error(`Unable to inspect ${repoName} default branch.`);
+  const evidenceRef = ref?.trim() || defaultBranch;
+  const branchResponse = await ghFetch(token, `/repos/${repoName}/branches/${encodeURIComponent(evidenceRef)}`);
+  if (!branchResponse.ok) throw new Error(`Unable to inspect ${repoName} ref ${evidenceRef}.`);
   const branch = await branchResponse.json() as { commit?: { sha?: string } };
   const headSha = String(branch.commit?.sha || "");
   if (!/^[0-9a-f]{40}$/i.test(headSha)) throw new Error(`Unable to resolve a valid head SHA for ${repoName}.`);
@@ -238,6 +240,7 @@ async function collectRepoEvidence(token: string, repoName: string, requestedNex
       language: typeof repo.language === "string" ? repo.language : null,
       topics: Array.isArray(repo.topics) ? repo.topics.map(String) : [],
       defaultBranch,
+      evidenceRef,
       headSha,
       stars: Number(repo.stargazers_count || 0),
       forks: Number(repo.forks_count || 0),
@@ -556,6 +559,7 @@ export async function reasonAboutRepositoryPlan(
     itemRank?: number;
     completionRunId?: string;
     portfolioRunId?: string;
+    ref?: string;
     mode?: "plan" | "replan";
   },
 ): Promise<ReasonedPlanningResult> {
@@ -571,7 +575,7 @@ export async function reasonAboutRepositoryPlan(
   try {
     const github = requireGithubCredential(await loadGithubCredential(supabase, userId));
     const [evidence, learning, memories, analysisContext, strategy] = await Promise.all([
-      collectRepoEvidence(github.token, input.repo, requestedNextSteps),
+      collectRepoEvidence(github.token, input.repo, requestedNextSteps, input.ref),
       loadAdaptiveLearningContext(supabase, userId, input.repo),
       loadOperationalMemory(supabase, userId, input.repo),
       loadAnalysisContext(supabase, userId, input.analysisId, input.repo),
