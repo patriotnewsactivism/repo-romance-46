@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { waitUntil } from "@vercel/functions";
+import { runInBackground } from "../lib/background-tasks";
 import { z } from "zod";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
@@ -47,7 +47,7 @@ async function runAgenticPreviewJob(
 
 function keepAlive(job: Promise<unknown>) {
   try {
-    waitUntil(job);
+    runInBackground(job);
   } catch {
     void job.catch(() => undefined);
   }

@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
 import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "../lib/credentials";
-import { waitUntil } from "@vercel/functions";
+import { runInBackground } from "../lib/background-tasks";
 import { callAI } from "../lib/ai-provider";
 import { captureException, flushSentry } from "../instrument";
 
@@ -1447,11 +1447,7 @@ function startAnalysisJob(ctx: AnalysisContext, analysisId: string): void {
     await flushSentry();
   });
 
-  if (process.env.VERCEL) {
-    waitUntil(job);
-  } else {
-    void job;
-  }
+  runInBackground(job, "analysis-job");
 }
 
 async function getAnalysisContext(supabase: SupabaseClient, userId: string, triggerType: string): Promise<AnalysisContext> {

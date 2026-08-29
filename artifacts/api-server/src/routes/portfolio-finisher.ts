@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { waitUntil } from "@vercel/functions";
+import { runInBackground } from "../lib/background-tasks";
 import { Router, type IRouter } from "express";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
@@ -108,7 +108,7 @@ interface RankingEntry {
 
 function keepAlive(job: Promise<unknown>) {
   try {
-    waitUntil(job);
+    runInBackground(job);
   } catch {
     void job.catch(() => undefined);
   }

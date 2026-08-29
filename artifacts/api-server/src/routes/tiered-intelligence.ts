@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { waitUntil } from "@vercel/functions";
+import { runInBackground } from "../lib/background-tasks";
 import { Router, type IRouter } from "express";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
@@ -467,7 +467,7 @@ async function processRun(supabase: SupabaseClient, userId: string, runId: strin
 
 function kick(supabase: SupabaseClient, userId: string, runId: string) {
   const job = processRun(supabase, userId, runId).catch(() => undefined);
-  try { waitUntil(job); } catch { void job; }
+  try { runInBackground(job); } catch { void job; }
 }
 
 async function detail(supabase: SupabaseClient, userId: string, runId: string) {

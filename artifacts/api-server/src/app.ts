@@ -7,7 +7,7 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 import { config } from "./lib/config";
 import { flushSentry, installExpressErrorHandler } from "./instrument";
-import { waitUntil } from "@vercel/functions";
+import { runInBackground } from "./lib/background-tasks";
 
 const app: Express = express();
 
@@ -104,7 +104,7 @@ app.use((err: Error & { status?: number }, req: Request, res: Response, _next: N
   const status = err.status ?? 500;
   if (status >= 500) {
     req.log?.error({ err }, "Unhandled error");
-    if (process.env["VERCEL"]) waitUntil(flushSentry());
+    runInBackground(flushSentry(), "sentry-flush");
   }
   // Internal failures must not leak stack details or upstream messages.
   res.status(status).json({ error: status >= 500 ? "Internal server error" : err.message || "Request failed" });
