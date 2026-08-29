@@ -1,141 +1,129 @@
-# External LLM Completion Handoffs
+# External LLM Completion Handoff Contract
 
-RepoFinisher can generate a detailed current-state completion prompt for an external coding agent. This is a **complementary handoff path**, not a replacement for RepoFinisher's own autonomous finishing engine.
+RepoFinisher may generate a detailed completion prompt for an external coding agent such as Codex, Claude Code, Gemini CLI, or a provider-neutral agent.
 
-The purpose of the handoff is to let a user take RepoFinisher's evidence, reasoning, remaining-work analysis, and Definition of Done into another capable coding environment without throwing away the work already performed by RepoFinisher.
+This feature is a portability/complementary workflow. It must not become a substitute for improving RepoFinisher's own autonomous completion engine.
 
-## Product contract
+## Purpose
 
-For each repository, the generated handoff should be derived from the same current-state assessment used by RepoFinisher itself. It should not be a generic prompt such as "finish this repository."
+The handoff should let an external agent start from RepoFinisher's current evidence and reasoning instead of receiving a generic instruction such as "finish this repo."
 
-A handoff should include, when available:
+A useful handoff should answer:
 
-- repository owner/name,
-- assessed default branch,
-- assessed HEAD SHA,
-- assessment timestamp/version,
-- repository/product intent inferred from evidence,
-- current completion and production-readiness state,
-- evidence confidence and known unknowns,
-- accepted root-cause findings,
-- rejected/low-confidence hypotheses where useful,
-- ordered remaining work,
-- prerequisite relationships,
-- specialist concerns,
-- security/data/auth/payment/deployment risks when present,
-- required tests and validation evidence,
-- deployment/runtime verification expectations,
-- explicit stop/re-diagnosis conditions,
-- Definition of Done.
+- What product is this repository intended to be?
+- What exact commit was assessed?
+- How complete and production-ready is it now?
+- What is verified, inferred, or unknown?
+- What material blockers remain?
+- What root causes/prerequisites were identified?
+- What work should happen first and why?
+- What security/approval/deployment constraints apply?
+- What evidence is required before calling the repository complete?
 
-The handoff must clearly state that the assessment is bound to a specific repository state. If the current repository HEAD no longer matches the assessed SHA, the external agent must inspect the delta and re-diagnose before applying the old plan.
+## Required prompt contents
 
-## Provider-neutral core
+Every generated completion handoff should include, when available:
 
-The substantive task must remain provider-neutral.
+1. repository identifier and assessed HEAD SHA,
+2. product intent/summary,
+3. current completion/readiness assessment,
+4. evidence-backed blockers/findings,
+5. known unknowns and confidence limitations,
+6. ordered implementation plan,
+7. specialist findings/risks,
+8. relevant operational memories without secret content,
+9. existing deployment/CI/schema/auth/payment constraints,
+10. validation plan and Definition of Done,
+11. stop conditions,
+12. explicit instruction to re-assess if the repository HEAD has changed.
 
-Provider-specific variants such as Codex, Claude Code, Gemini CLI, or another agent may adapt formatting, command conventions, or tool-use phrasing, but they must not silently change:
+## Safety requirements
 
-- repository evidence,
-- security boundaries,
-- approval constraints,
-- scope/risk limits,
-- validation requirements,
-- Definition of Done.
+The external prompt must preserve RepoFinisher's safety expectations:
 
-Do not create separate strategic truth for each model provider.
+- never expose or request secrets for repository content,
+- do not weaken tests/CI/security controls to get a passing result,
+- preserve existing working interfaces unless evidence supports changing them,
+- use repository migrations for schema changes,
+- validate auth/RLS/permissions where relevant,
+- require actual deployment/runtime evidence when claiming production readiness,
+- do not fabricate revenue, users, demand, market share, or competitive facts,
+- do not declare completion solely because a build passes.
 
-## Required external-agent behavior
+The prompt must not include decrypted BYOK credentials, GitHub tokens, service-role keys, signing secrets, or sensitive user data.
 
-The generated prompt should tell the external agent to:
+## Provider-specific variants
 
-1. Read the repository before writing code.
-2. Verify the current HEAD against the assessed SHA.
-3. Re-diagnose material drift rather than blindly applying stale instructions.
-4. Preserve working behavior and public interfaces unless evidence shows they are the blocker.
-5. Fix root causes rather than symptoms.
-6. Work through prerequisites before dependent polish/features.
-7. Keep changes bounded and reviewable.
-8. Run the repository's actual tests, typecheck, lint/build, and CI-equivalent checks where available.
-9. Inspect real failures and continue iterating within the authorized scope rather than stopping after one patch.
-10. Validate database migrations safely before production use.
-11. Validate auth/authorization, secrets, payments, privileged flows, and data boundaries when relevant.
-12. Validate the deployed/runtime product when a deployment surface exists.
-13. Never weaken tests, security controls, CI acceptance criteria, or permissions merely to make a result green.
-14. Never invent secrets, production credentials, customers, revenue, market data, or repository APIs.
-15. Report unresolved blockers explicitly instead of claiming completion.
+Provider-specific versions should only change execution ergonomics, not substance.
+
+Examples:
+
+- Codex: emphasize repository inspection, commands/tests, focused edits, and iterative verification.
+- Claude Code: emphasize evidence, plan checkpoints, source inspection, and exact validation.
+- Gemini CLI: emphasize repo/tool inspection, commands, implementation, and test/deploy validation.
+- Neutral: avoid provider-specific command assumptions.
+
+The underlying findings, constraints, and Definition of Done should remain equivalent.
+
+## Iterative behavior
+
+The external agent should be instructed to work iteratively:
+
+```text
+inspect current HEAD
+-> validate RepoFinisher assessment
+-> implement highest-priority root-cause fix
+-> run relevant checks
+-> inspect failures
+-> correct implementation without weakening acceptance criteria
+-> re-assess remaining product gaps
+-> continue until Definition of Done or a documented stop condition
+```
+
+The prompt should explicitly discourage a one-patch-and-stop interpretation when material blockers remain.
 
 ## Definition of Done
 
-A strong handoff should define completion in evidence terms, not activity terms.
+External handoffs must reference or embed the substance of `docs/DEFINITION_OF_DONE.md`.
 
-Depending on the repository, completion may require:
+If the target application has product-specific acceptance criteria, include them in addition to the default standard.
 
-- core user journey works end to end,
-- no known critical/high-confidence blockers remain,
-- tests pass,
-- typecheck/build pass,
-- CI passes,
-- auth and authorization boundaries are verified,
-- database migrations are safe and applied where required,
-- payment/subscription flows are verified where present,
-- deployment configuration is valid,
-- deployed product responds correctly,
-- mobile/responsive/accessibility concerns are addressed where applicable,
-- security-sensitive configuration is not exposed,
-- documentation/operator setup is current,
-- no known regression is being hidden by weaker acceptance criteria.
+## Assessment freshness
 
-The external agent should return a final handoff/report describing what changed, what was verified, and what remains unresolved.
+The assessed commit SHA is mandatory when known.
 
-## Relationship to RepoFinisher autonomy
+If the external agent observes a different HEAD:
 
-Generating an external prompt must never disable or degrade RepoFinisher's internal completion capability.
+- do not blindly execute stale file-level instructions,
+- re-inspect changed areas,
+- preserve still-valid requirements,
+- re-plan where assumptions no longer hold.
 
-The internal product should still be able to:
+## Output expectations for the external agent
 
-- reason about the repository,
-- create an exact plan,
-- obtain the required approval,
-- implement on an isolated branch,
-- create a draft PR,
-- verify CI/deployment evidence,
-- self-heal bounded failures,
-- re-score outcomes,
-- learn from the result,
-- continue with another bounded iteration when appropriate.
+The handoff should ask the external agent to report:
 
-The external handoff is an additional delivery channel for the same high-quality assessment.
+- changes made,
+- files affected,
+- tests/checks run and results,
+- deployment/runtime verification,
+- migrations applied/required,
+- unresolved blockers,
+- any deviation from the supplied plan and why,
+- final evidence for each material Definition-of-Done dimension.
 
-## Persisted handoff metadata
+## RepoFinisher reintegration
 
-When a handoff is persisted, prefer recording safe metadata such as:
+Where practical, externally completed work should be re-ingested by RepoFinisher for re-analysis and scoring rather than accepted on narrative claims alone.
 
-- repository,
-- analysis ID,
-- reasoning trace ID,
-- assessed SHA,
-- provider target,
-- generated timestamp,
-- assessment version,
-- prompt hash/version where implemented.
+The ideal loop is:
 
-Do not persist decrypted provider credentials or unrelated secrets in prompt artifacts.
+```text
+RepoFinisher assessment
+-> external implementation (optional)
+-> GitHub commit/PR
+-> RepoFinisher re-analysis/verification
+-> updated completion/readiness/value evidence
+```
 
-## Quality review checklist
-
-Before treating an external prompt as useful, verify:
-
-- it names the exact repository and assessed SHA,
-- it contains current evidence rather than generic best practices only,
-- its work is ordered,
-- it distinguishes facts/inferences/unknowns,
-- it includes validation and stop conditions,
-- it does not expose credentials,
-- it does not authorize test/security weakening,
-- it makes clear that a stale repository requires re-assessment,
-- it complements rather than replaces RepoFinisher's own completion path.
-
-## Maintenance
-
-If the reasoning schema, specialist system, completion contract, validation model, or security policy changes, update the handoff generator and this document in the same pull request.
+This preserves RepoFinisher's role as the system of record for completion intelligence even when implementation is delegated.
