@@ -1,13 +1,23 @@
-import { createServiceSupabaseClient } from "./service-supabase";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 function normalizeSecretId(value: unknown): string | null {
   return typeof value === "string" && /^[0-9a-f-]{36}$/i.test(value) ? value : null;
 }
 
-export async function readAiVaultSecret(userId: string, secretId: string | null | undefined): Promise<string | null> {
+/**
+ * BYOK Vault operations deliberately use the already-authenticated, user-scoped
+ * Supabase client from the request. The database RPCs are SECURITY DEFINER but
+ * verify auth.uid() matches p_user_id before touching Vault, so saving a user's
+ * provider key does not depend on a service-role/secret key being present on the
+ * API host.
+ */
+export async function readAiVaultSecret(
+  supabase: SupabaseClient,
+  userId: string,
+  secretId: string | null | undefined,
+): Promise<string | null> {
   if (!secretId) return null;
-  const service = createServiceSupabaseClient();
-  const { data, error } = await service.rpc("repo_finisher_read_ai_secret", {
+  const { data, error } = await supabase.rpc("repo_finisher_read_ai_secret", {
     p_user_id: userId,
     p_secret_id: secretId,
   });
@@ -16,14 +26,14 @@ export async function readAiVaultSecret(userId: string, secretId: string | null 
 }
 
 export async function storeAiVaultSecret(
+  supabase: SupabaseClient,
   userId: string,
   plaintext: string,
   existingSecretId?: string | null,
 ): Promise<string> {
   const secret = plaintext.trim();
   if (!secret) throw new Error("AI provider key cannot be empty.");
-  const service = createServiceSupabaseClient();
-  const { data, error } = await service.rpc("repo_finisher_store_ai_secret", {
+  const { data, error } = await supabase.rpc("repo_finisher_store_ai_secret", {
     p_user_id: userId,
     p_secret: secret,
     p_existing_secret_id: existingSecretId || null,
@@ -34,10 +44,13 @@ export async function storeAiVaultSecret(
   return id;
 }
 
-export async function deleteAiVaultSecret(userId: string, secretId?: string | null): Promise<void> {
+export async function deleteAiVaultSecret(
+  supabase: SupabaseClient,
+  userId: string,
+  secretId?: string | null,
+): Promise<void> {
   if (!secretId) return;
-  const service = createServiceSupabaseClient();
-  const { error } = await service.rpc("repo_finisher_delete_ai_secret", {
+  const { error } = await supabase.rpc("repo_finisher_delete_ai_secret", {
     p_user_id: userId,
     p_secret_id: secretId,
   });
