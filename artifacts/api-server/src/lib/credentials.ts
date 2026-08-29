@@ -162,7 +162,7 @@ export async function loadAiCredential(
   let userKey: string | null = null;
   if (row?.custom_ai_vault_secret_id) {
     try {
-      userKey = await readAiVaultSecret(userId, row.custom_ai_vault_secret_id);
+      userKey = await readAiVaultSecret(supabase, userId, row.custom_ai_vault_secret_id);
     } catch {
       userKey = null;
     }
