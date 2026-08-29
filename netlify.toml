@@ -1,5 +1,10 @@
 [build]
-  command = "pnpm --filter @workspace/repo-finisher typecheck && pnpm --filter @workspace/repo-finisher build"
+  # repo-finisher references composite workspace libraries (notably
+  # @workspace/api-client-react). A clean Netlify clone has no generated .d.ts
+  # files yet, so build the root TypeScript project references before running
+  # the frontend's no-emit typecheck. Do not call a package-level `build` on
+  # api-client-react: that package intentionally has no build script.
+  command = "pnpm run typecheck:libs && pnpm --filter @workspace/repo-finisher typecheck && pnpm --filter @workspace/repo-finisher build"
   publish = "artifacts/repo-finisher/dist/public"
 
 [build.environment]
