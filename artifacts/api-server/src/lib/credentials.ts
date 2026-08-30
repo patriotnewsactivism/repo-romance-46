@@ -90,16 +90,34 @@ export function platformAiProvider(): string {
   return configured || "openrouter";
 }
 
-function platformAiKey(provider: string): string | null {
+/**
+ * A credential that is present but blank is not a credential.
+ *
+ * Env vars and stored rows can both hold whitespace, and a whitespace string is
+ * truthy, so a blank key used to survive every `if (key)` check between here and
+ * the provider call and go out as `Authorization: Bearer `. OpenRouter answers
+ * that with `401 Missing Authentication header`, which reads like an integration
+ * bug rather than an unconfigured key. Normalizing here makes a blank value
+ * indistinguishable from an absent one, so the caller reports the real problem.
+ *
+ * Trimming also rescues the common case of a key pasted with surrounding
+ * whitespace, which is otherwise a working key that always fails to authenticate.
+ */
+export function normalizeCredentialValue(raw: string | null | undefined): string | null {
+  const trimmed = typeof raw === "string" ? raw.trim() : "";
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export function platformAiKey(provider: string): string | null {
   switch (provider) {
     case "google":
-      return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || null;
+      return normalizeCredentialValue(process.env.GEMINI_API_KEY) ?? normalizeCredentialValue(process.env.GOOGLE_API_KEY);
     case "openai":
-      return process.env.OPENAI_API_KEY || null;
+      return normalizeCredentialValue(process.env.OPENAI_API_KEY);
     case "anthropic":
-      return process.env.ANTHROPIC_API_KEY || null;
+      return normalizeCredentialValue(process.env.ANTHROPIC_API_KEY);
     case "openrouter":
-      return process.env.OPENROUTER_API_KEY || null;
+      return normalizeCredentialValue(process.env.OPENROUTER_API_KEY);
     default:
       return null;
   }
@@ -162,7 +180,7 @@ export async function loadAiCredential(
   let userKey: string | null = null;
   if (row?.custom_ai_vault_secret_id) {
     try {
-      userKey = await readAiVaultSecret(supabase, userId, row.custom_ai_vault_secret_id);
+      userKey = normalizeCredentialValue(await readAiVaultSecret(supabase, userId, row.custom_ai_vault_secret_id));
     } catch {
       userKey = null;
     }
@@ -170,7 +188,7 @@ export async function loadAiCredential(
 
   if (!userKey && row?.custom_ai_key) {
     try {
-      userKey = decryptSecret(row.custom_ai_key);
+      userKey = normalizeCredentialValue(decryptSecret(row.custom_ai_key));
     } catch {
       userKey = null;
     }

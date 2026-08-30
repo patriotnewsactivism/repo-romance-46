@@ -135,7 +135,16 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
   const model = request.model || config.model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.google;
   const requestTimeoutMs = resolveAIRequestTimeoutMs(request);
 
-  if (provider === "anthropic" && config.apiKey) {
+  // Last line of defence for a blank-but-truthy credential. Sending one produces
+  // `Authorization: Bearer ` and a provider-side auth error that blames the
+  // request rather than the missing key — OpenRouter reports it as
+  // `401 Missing Authentication header`. Treating blank as absent lets the call
+  // fall through to this function's own "no usable credential" message, which
+  // names the provider and tells the operator what to configure. The trim also
+  // makes a key stored with stray surrounding whitespace work as intended.
+  const apiKey = typeof config.apiKey === "string" && config.apiKey.trim().length > 0 ? config.apiKey.trim() : null;
+
+  if (provider === "anthropic" && apiKey) {
     const systemMsg = request.messages.find((m) => m.role === "system")?.content || "";
     const userMessages = request.messages.filter((m) => m.role !== "system");
     const useThinking = !!request.thinkingBudgetTokens && request.thinkingBudgetTokens > 0;
@@ -152,7 +161,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      "x-api-key": config.apiKey,
+      "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
     };
     if (useThinking) headers["anthropic-beta"] = "interleaved-thinking-2025-05-14";
@@ -178,7 +187,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     };
   }
 
-  if (provider === "google" && config.apiKey) {
+  if (provider === "google" && apiKey) {
     const systemMsg = request.messages.find((m) => m.role === "system")?.content || "";
     const contents = request.messages
       .filter((m) => m.role !== "system")
@@ -205,7 +214,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       url,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": config.apiKey },
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
         body: JSON.stringify(body),
       },
       "google",
@@ -224,14 +233,14 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
 
   if (
     (provider === "github_models" || provider === "openai" || provider === "openrouter" || provider === "custom") &&
-    config.apiKey
+    apiKey
   ) {
     const body: Record<string, unknown> = { model, messages: request.messages };
     if (request.responseFormat) body.response_format = request.responseFormat;
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${config.apiKey}`,
+      Authorization: `Bearer ${apiKey}`,
     };
     if (provider === "openrouter") {
       headers["X-Title"] = "RepoFinisher";

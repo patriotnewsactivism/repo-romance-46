@@ -22,7 +22,11 @@ export async function readAiVaultSecret(
     p_secret_id: secretId,
   });
   if (error) throw new Error(`Failed to read AI credential from Vault: ${error.message}`);
-  return typeof data === "string" && data.length > 0 ? data : null;
+  // A whitespace-only secret is not a usable credential: it is truthy, so it
+  // would reach the provider as an empty bearer token and fail authentication
+  // with an error that looks nothing like "no key configured".
+  const secret = typeof data === "string" ? data.trim() : "";
+  return secret.length > 0 ? secret : null;
 }
 
 export async function storeAiVaultSecret(

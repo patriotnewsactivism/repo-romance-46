@@ -61,9 +61,13 @@ OPENROUTER_MODEL
 
 `AI_MODEL`, when set, is the common model override. Provider-specific model variables are fallback choices when a common override is absent.
 
+A credential variable that is present but blank (empty or whitespace) counts as unconfigured. Blank values are normalized to absent in `loadAiCredential` and again in `callAI`, so provider selection, `platformAiStatus`, and the "no usable credential" error all agree. Without that rule a whitespace key is truthy, passes every readiness check, and reaches the provider as `Authorization: Bearer `, which comes back as a misleading authentication error instead of a configuration error. Stored credentials are also trimmed, so a key saved with surrounding whitespace still authenticates.
+
 ## Exact model identifiers
 
 RepoFinisher should persist the exact model identifier selected/configured by the user rather than silently substituting a different model.
+
+This applies to per-stage model selection as well. Portfolio analysis picks a profiler/critique/synthesis model per tier, but the identifier resolved by `loadAiCredential` — the user's saved model, else the provider's platform default — overrides those stage defaults. Stage defaults are only a fallback for a provider with no configured model, and each provider's fallback must be valid for that provider: OpenRouter identifiers are vendor-namespaced (`deepseek/deepseek-v4-flash-0731`), so a bare `gpt-4o-mini` is not a usable OpenRouter default.
 
 When a provider rejects a model:
 

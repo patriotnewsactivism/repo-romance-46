@@ -258,6 +258,19 @@ If Settings cannot save or use a provider/model:
 7. Confirm `user_preferences.custom_ai_vault_secret_id` can be written for the authenticated user through the API flow.
 8. Confirm no plaintext credential is returned or logged.
 9. Test provider connectivity separately from persistence if the save succeeds but model invocation fails.
+10. Confirm the platform key variable holds a real value and not whitespace. A variable that exists but is blank is treated as unconfigured, exactly as if it were unset.
+
+### Reading a provider authentication failure
+
+A `401` from the provider names which side is at fault. Do not respond to all of them the same way.
+
+| Provider response | Meaning | Action |
+| --- | --- | --- |
+| `Missing Authentication header` | The request carried an empty bearer token. | The credential in use is blank. Set a real key. |
+| `User not found.` / `Invalid API key` | A key was sent and the provider rejected it. | The key is wrong, revoked, or from another account. Rotate it. |
+| `No auth credentials found` | No `Authorization` header reached the provider. | Integration bug — inspect the outbound request. |
+
+RepoFinisher normalizes blank credentials to "absent" before any provider call, so a blank key now fails with the API's own `AI provider "<provider>" has no configured API key` message rather than a provider `401`. Seeing `Missing Authentication header` from RepoFinisher again means a credential is reaching `callAI` without passing through `loadAiCredential`.
 
 ## Repository-finishing incident checklist
 
