@@ -10,7 +10,7 @@
 [build.environment]
   NODE_VERSION = "24"
   PNPM_VERSION = "9.15.9"
-  VITE_API_BASE_URL = "https://repofinisher-api-live.onrender.com"
+  VITE_API_BASE_URL = "https://repofinisher-api-z6kubh2jtq-uc.a.run.app"
   VITE_SUPABASE_URL = "https://rdsrxfzahhxbvugyarld.supabase.co"
   # Supabase publishable keys are intentionally public browser credentials; RLS remains the authorization boundary.
   VITE_SUPABASE_ANON_KEY = "sb_publishable_95xMusG9KjCGJemIa8dgcw_-8JqzgER"
