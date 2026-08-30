@@ -38,6 +38,9 @@ jobs:
             fi
           done
 
+      - name: Enforce canonical documentation topology
+        run: node scripts/check-docs-consistency.mjs
+
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
