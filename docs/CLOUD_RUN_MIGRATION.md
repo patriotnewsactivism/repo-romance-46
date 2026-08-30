@@ -1,6 +1,8 @@
-# RepoFinisher Cloud Run Migration
+# RepoFinisher Cloud Run Deployment and Cutover Runbook
 
-This runbook moves RepoFinisher's backend execution plane from Render to Google Cloud without using Vercel.
+This document began as the Render-to-Cloud-Run migration plan. It is retained at the same path because existing links may depend on it, but it now describes the **full Cloud Run production topology, current cutover state, acceptance gates, and rollback procedure**.
+
+Vercel is not part of this architecture and must not be used as a fallback.
 
 ## Target topology
 
@@ -8,50 +10,55 @@ This runbook moves RepoFinisher's backend execution plane from Render to Google 
 Browser
   |
   v
-Netlify frontend
+Cloudflare DNS -> repofinisher.donmatthews.live
   |
   v
-Google Cloud Run API/control plane
-  |             \
-  |              \-> Cloud Run Job: completion-session worker
+Cloud Run service: repofinisher-web
   |
-  +-> Supabase: auth, database, RLS, Vault, durable session state
-  +-> GitHub: repositories, branches, draft PRs, checks
-  +-> OpenRouter / configured AI provider
+  v
+Cloud Run service: repofinisher-api
+  |                    \
+  |                     \-> Cloud Run Job: repofinisher-completion-session
+  |                              |
+  |                              +-> GitHub REST / Actions / PRs / checks
+  |                              +-> configured AI provider
+  |
+  +-> Supabase: Auth / DB / RLS / Vault / durable state
+  +-> GitHub: repositories / branches / draft PRs / check evidence
 
 GitHub Actions
   +-> CI/build/test
-  +-> Workload Identity Federation -> Google Cloud deployment
+  +-> OIDC/WIF -> Google Cloud deployment
+  +-> immutable Artifact Registry images
+  +-> Secret Manager bindings
+  +-> domain mapping + Cloudflare DNS reconciliation
 ```
 
-The API is deliberately lightweight. Long-running finish-until-target work is dispatched to Cloud Run Jobs so repository reasoning, verification waits, and CI repair are not tied to an HTTP request lifetime.
-
-Render stays available only as a temporary rollback target during cutover. Vercel is not part of this architecture.
+Former Netlify/Render configuration is legacy rollback/migration material, not the canonical target runtime.
 
 ## Why this split
 
-The API service handles authentication, orchestration, status reads, repository metadata work, and job dispatch. Cloud Run can scale this control plane to zero when idle.
+`repofinisher-api` is the request-serving control plane. Long-running finish-until-target work is dispatched to `repofinisher-completion-session`, which can use larger resources only while active and can survive HTTP request lifetimes by loading durable state from Supabase.
 
-The completion-session worker runs with a larger CPU/memory allocation only while work exists. It reuses RepoFinisher's durable Supabase completion-session lease/state and can survive CI waiting/repair cycles without requiring a permanently large server.
+The frontend is also containerized and deployed to Cloud Run as `repofinisher-web`, keeping the production web/API build provenance tied to immutable Git SHAs and one deployment workflow.
 
-GitHub Actions remains the source of truth for target-repository CI and build/test evidence. RepoFinisher does not need to host every target repository's build toolchain permanently in its API container.
+GitHub Actions remains the source of truth for RepoFinisher release automation and for target-repository CI evidence.
 
-## Source changes
+## Key source files
 
-The migration introduces:
-
-- `artifacts/api-server/src/lib/cloud-run-jobs.ts` — metadata-identity based Cloud Run Jobs dispatch.
-- `artifacts/api-server/src/lib/completion-session-scheduler.ts` — Cloud Run dispatch with duplicate-worker suppression and an in-process fallback.
-- `artifacts/api-server/src/completion-session-job.ts` — Job entrypoint that keeps a durable completion session progressing through planning, execution, CI verification, bounded repair, and rescoring.
-- `Dockerfile.apiserver` — shared API/worker image, Cloud Run port 8080.
-- `.github/workflows/deploy-cloud-run.yml` — immutable image build + Cloud Run Job/API deploy through Workload Identity Federation.
-- `infra/gcp/bootstrap-cloud-run.sh` — one-time Google Cloud bootstrap.
+- `artifacts/api-server/src/lib/cloud-run-jobs.ts` — metadata-identity Cloud Run Job dispatch.
+- `artifacts/api-server/src/lib/completion-session-scheduler.ts` — dispatch and duplicate-worker suppression.
+- `artifacts/api-server/src/completion-session-job.ts` — durable completion-session worker entrypoint.
+- `Dockerfile.apiserver` — API/worker image.
+- `Dockerfile.frontend` — production frontend image.
+- `.github/workflows/deploy-cloud-run.yml` — image build, service/job deploy, environment audit, domain/DNS cutover.
+- `infra/gcp/bootstrap-cloud-run.sh` — one-time APIs/IAM/WIF/Artifact Registry/Secret Manager bootstrap.
 
 ## Security model
 
-Do not create or store a long-lived Google service-account JSON key for GitHub Actions. The deployment workflow uses GitHub OIDC + Google Workload Identity Federation.
+GitHub Actions authenticates to Google Cloud through GitHub OIDC + Workload Identity Federation. Do not create/store a long-lived Google service-account JSON key.
 
-Cloud Run receives sensitive values from Google Secret Manager. Required secret resources are:
+Cloud Run backend secrets come from Google Secret Manager. Required production secret resources include:
 
 ```text
 repofinisher-supabase-backend-key
@@ -59,51 +66,37 @@ repofinisher-secret-encryption-key
 repofinisher-plan-signing-secret
 ```
 
-The values must be the current production values during migration.
+`SECRET_ENCRYPTION_KEY` protects server-sealed credentials such as stored GitHub connections. Do not rotate it casually; an unplanned rotation can make previous envelopes unreadable.
 
-`SECRET_ENCRYPTION_KEY` must not be casually rotated during cutover. RepoFinisher uses it for server-sealed credentials such as stored GitHub connections; replacing it without a deliberate credential migration can make those values unreadable.
+`PLAN_SIGNING_SECRET` binds in-flight repository plans/approvals and should not be rotated without understanding that effect.
 
-`PLAN_SIGNING_SECRET` should not be rotated while approved/in-flight plans exist because plan signatures are bound to that key.
-
-AI BYOK values remain in Supabase Vault. They do not need to be copied into Google Secret Manager merely because the API host changes.
+User AI BYOK values remain in Supabase Vault and are not copied into Google Secret Manager, frontend build args, Job overrides, or browser-visible configuration.
 
 ## One-time Google Cloud bootstrap
 
-From an authenticated machine with `gcloud` installed:
+From a trusted authenticated environment with `gcloud`:
 
 ```bash
 chmod +x infra/gcp/bootstrap-cloud-run.sh
-./infra/gcp/bootstrap-cloud-run.sh YOUR_GCP_PROJECT_ID us-central1
+./infra/gcp/bootstrap-cloud-run.sh repofinish us-central1
 ```
 
-The script:
+The bootstrap is intended to:
 
-1. enables Cloud Run, Artifact Registry, IAM, IAM Credentials, STS, and Secret Manager APIs;
-2. creates the `repofinisher` Docker Artifact Registry repository;
-3. creates separate deploy and runtime service accounts;
-4. grants the deploy identity only the deployment permissions it needs;
-5. creates a GitHub Workload Identity pool/provider restricted to `patriotnewsactivism/repo-romance-46`;
-6. creates the required Secret Manager secret resources;
-7. grants the runtime/deploy identities secret access;
-8. writes non-secret GitHub repository variables automatically when authenticated `gh` CLI is available, otherwise prints the exact variables to add.
+1. enable required Google APIs;
+2. create the `repofinisher` Artifact Registry repository;
+3. create separate deploy/runtime service accounts;
+4. configure least-privilege deploy/runtime IAM;
+5. create the GitHub Workload Identity pool/provider restricted to this repository;
+6. create required Secret Manager resources;
+7. grant intended secret access;
+8. configure or print required non-secret GitHub variables.
 
-The script intentionally does not accept, print, or commit application secret values.
+It must not accept, print, or commit application secret values.
 
-## Add existing production secret values
+## Required GitHub configuration
 
-Add current production values to the three Secret Manager resources from a trusted local shell or Google Cloud console. Do not paste them into source files, issues, pull requests, or chat.
-
-Example local pattern:
-
-```bash
-printf %s "$SUPABASE_BACKEND_KEY" | gcloud secrets versions add repofinisher-supabase-backend-key --data-file=-
-printf %s "$SECRET_ENCRYPTION_KEY" | gcloud secrets versions add repofinisher-secret-encryption-key --data-file=-
-printf %s "$PLAN_SIGNING_SECRET" | gcloud secrets versions add repofinisher-plan-signing-secret --data-file=-
-```
-
-## Required GitHub repository variables
-
-The deployment workflow expects:
+Expected non-secret repository variables include:
 
 ```text
 GCP_PROJECT_ID
@@ -113,115 +106,201 @@ GCP_DEPLOY_SERVICE_ACCOUNT
 GCP_RUNTIME_SERVICE_ACCOUNT
 ```
 
-Optional public configuration variables may also be set:
+Public build configuration may also include:
 
 ```text
 SUPABASE_URL
 SUPABASE_ANON_KEY
 ```
 
-No Google service-account private key is required.
+The domain automation additionally requires a Cloudflare API token in GitHub secrets and may use a Cloudflare zone ID repository variable.
 
-## First deployment
+## Deployment order
 
-Run GitHub Actions workflow:
+`.github/workflows/deploy-cloud-run.yml` currently performs this sequence:
+
+1. checkout source;
+2. authenticate through WIF;
+3. configure gcloud and Artifact Registry authentication;
+4. build/push immutable API/worker image;
+5. build/push immutable frontend image;
+6. deploy/update `repofinisher-completion-session`;
+7. grant runtime identity the required permission on that Job;
+8. deploy/update `repofinisher-api`;
+9. verify direct API health;
+10. deploy/update `repofinisher-web`;
+11. verify direct frontend response;
+12. audit required API/Job environment-variable names and canonical CORS;
+13. create/reconcile Cloud Run custom-domain mapping;
+14. update Cloudflare DNS to the emitted mapping records;
+15. verify the canonical HTTPS domain;
+16. publish deployment summary.
+
+Do not report the entire release successful if a late domain/DNS step fails after compute services deploy.
+
+## Runtime configuration
+
+Known direct URLs in the current workflow:
 
 ```text
-Deploy Cloud Run
+API:      https://repofinisher-api-z6kubh2jtq-uc.a.run.app
+Frontend: https://repofinisher-web-z6kubh2jtq-uc.a.run.app
 ```
 
-The workflow performs this order:
+Canonical domain:
 
-1. authenticate to Google Cloud using Workload Identity Federation;
-2. build one immutable SHA-tagged container image;
-3. push the image to Artifact Registry;
-4. deploy/update `repofinisher-completion-session` Cloud Run Job;
-5. grant the runtime service account `roles/run.developer` on that specific job so it can execute the job with per-run environment overrides;
-6. deploy/update `repofinisher-api` Cloud Run service;
-7. verify the direct Cloud Run `/api/healthz` endpoint.
+```text
+https://repofinisher.donmatthews.live
+```
 
-Do not cut over Netlify merely because the deployment step completed. Record the emitted Cloud Run API URL and test it directly first.
+Current starting resources:
 
-## Worker sizing
+```text
+API:
+  1 CPU
+  1 GiB
+  concurrency 20
+  min instances 0
+  max instances 5
 
-Initial deployment intentionally separates control and work:
+Frontend:
+  1 CPU
+  512 MiB
+  concurrency 80
+  min instances 0
+  max instances 3
 
-- API service: 1 CPU / 1 GiB, concurrency 20, min instances 0, max instances 5.
-- Completion-session Job: 2 CPU / 2 GiB, task timeout 30 minutes, max retries 1.
+Completion-session Job:
+  2 CPU
+  2 GiB
+  task timeout 30m
+  max retries 1
+```
 
-These are starting values, not permanent promises. Adjust from measured memory, CPU, duration, job failure, and queue behavior.
+Tune from measured resource/latency/error data rather than assumptions.
 
-Because the job exists only while work is running, increasing worker memory later does not require paying for a large always-on API instance.
+## Completion-session execution contract
 
-## Cloud Run Job execution contract
+The API calls the Cloud Run Jobs v2 API using its attached runtime identity.
 
-The API calls the Cloud Run v2 Jobs API using its attached runtime service-account identity. It passes only two per-execution values:
+Per execution, pass only minimal non-secret identifiers such as:
 
 ```text
 REPOFINISHER_USER_ID
 REPOFINISHER_SESSION_ID
 ```
 
-The worker loads all durable state from Supabase. It does not accept repository code, provider secrets, or GitHub tokens through the job-dispatch payload.
+The worker loads repository state, GitHub credentials, AI credentials, approvals, CI state, iteration progress, budgets, and repair history from trusted durable storage.
 
-The completion-session row retains the existing lease/heartbeat guard against duplicate branch writes. The API scheduler also suppresses duplicate dispatch while a recent worker lease/heartbeat exists.
+The session row retains lease/heartbeat protections. API scheduling also suppresses duplicate dispatch while a recent worker is active. A retried Job must resume state rather than repeat completed repository writes.
 
-A worker execution stays alive through ordinary CI verification and bounded repair cycles for up to roughly 27 minutes. If the Cloud Run task budget is reached while the durable session remains active, it exits cleanly; the session can be re-dispatched without replaying completed branch writes.
+## Current cutover state — 2026-08-30
 
-## Netlify cutover
+Current `main` snapshot when this runbook was reconciled:
 
-Keep the existing Netlify frontend.
+```text
+6ae2324e081f03dab59221c7c27b89fcb7eee929
+PR #99 — fix: complete Cloud Run custom-domain cutover
+```
 
-Only after direct Cloud Run API health and authenticated API behavior succeed:
+Latest deployment workflow examined:
 
-1. set Netlify `VITE_API_BASE_URL` to the new Cloud Run API URL;
-2. redeploy the frontend from current `main`;
-3. verify `https://repofinisher.donmatthews.live` loads the new bundle;
-4. verify CORS preflight from the canonical frontend origin;
-5. verify authenticated Settings/BYOK save, reload, provider test, and remove;
-6. create a real bounded completion session and confirm `workerMode` reports `cloud-run-job` on initial dispatch;
-7. confirm the Cloud Run Job produces session/iteration events and draft-PR/CI progress;
-8. run `.github/workflows/production-smoke.yml` with the Cloud Run API URL.
+```text
+run 33326728811
+conclusion: failure
+```
 
-Do not delete or disable Render until those checks pass.
+Successful stages in that run:
+
+- API/worker image built/pushed;
+- frontend image built/pushed;
+- completion-session Job deployed;
+- Job invocation IAM binding applied;
+- API deployed;
+- direct API health passed;
+- frontend deployed;
+- direct frontend verification passed;
+- API/Job environment-contract audit passed.
+
+Failure stage:
+
+```text
+Ensure custom domain mapping and update Cloudflare DNS
+```
+
+Observed root cause:
+
+`gcloud beta run domain-mappings` attempted an interactive beta-component installation inside GitHub Actions, despite an earlier beta install step. GitHub Actions cannot answer that prompt, so the step exited with code 1. The canonical-domain verification step was consequently skipped.
+
+Therefore the correct state is:
+
+- **Cloud Run compute surfaces deployed/directly verified:** yes for this SHA;
+- **canonical domain/DNS cutover verified:** no;
+- **full production cutover complete:** no.
+
+Fix the domain command non-interactive behavior, rerun deployment, and verify the canonical domain before changing this state.
+
+## Custom-domain and Cloudflare contract
+
+The deployment workflow may manage `repofinisher.donmatthews.live` only after direct frontend/API checks pass.
+
+Safe order:
+
+1. ensure/inspect Cloud Run mapping for `repofinisher-web`;
+2. wait for Cloud Run to emit required DNS records;
+3. resolve Cloudflare zone;
+4. replace only the intended hostname records;
+5. keep records DNS-only if required by the Cloud Run mapping/certificate path;
+6. verify DNS resolution and HTTPS/certificate readiness;
+7. fetch canonical frontend and confirm it serves the intended deployment marker/revision.
+
+Do not delete working DNS before a replacement mapping has produced usable records.
 
 ## Production acceptance
 
-The migration is complete only when all of the following are true:
+The Cloud Run cutover is complete only when all applicable gates are satisfied:
 
-- CI on the migration commit is green.
-- Cloud Run API direct health is green.
-- Cloud Run API authenticated routes work with existing Supabase sessions.
-- Existing stored GitHub credentials remain readable.
-- Existing Vault-backed AI provider credentials remain usable.
-- Netlify production bundle calls Cloud Run rather than Render.
-- CORS succeeds for the canonical frontend.
-- At least one real completion session executes through the Cloud Run Job worker.
-- CI verification/repair state survives worker polling and no duplicate branch write occurs.
-- Production smoke passes against Netlify + Cloud Run + Supabase.
-- Sentry/Cloud logs contain no new material runtime failure.
+- required CI is green;
+- immutable images map to intended Git SHA;
+- Cloud Run Job deployed;
+- API direct health passes;
+- frontend direct verification passes;
+- environment/secret/CORS contract passes;
+- existing sealed GitHub credentials remain usable;
+- Vault-backed AI BYOK remains usable;
+- domain mapping targets `repofinisher-web`;
+- Cloudflare DNS matches mapping records;
+- canonical HTTPS domain serves the intended frontend;
+- production smoke passes;
+- Settings/BYOK authenticated flow works;
+- at least one real completion session executes through the Cloud Run Job worker;
+- worker retry/lease behavior does not duplicate writes;
+- logs/Sentry show no new material release failure.
 
 ## Rollback
 
-Before final cutover, Render remains the rollback target.
+Prefer rolling a Cloud Run service/Job back to a known-good immutable revision/image over speculative production edits.
 
-If Cloud Run fails acceptance:
+Before application rollback, confirm database migrations are compatible with the older revision. Prefer forward corrective migrations over destructive database rollback.
 
-1. restore Netlify `VITE_API_BASE_URL` to the known-good Render API URL;
-2. redeploy Netlify;
-3. run production smoke against Render;
-4. leave Cloud Run resources intact for diagnosis rather than deleting evidence;
-5. fix the Cloud Run branch/workflow and repeat direct-host verification.
+If direct Cloud Run frontend is healthy but canonical domain is not, repair mapping/DNS instead of rolling back healthy application code.
 
-Supabase does not need to be rolled back merely because the compute host changes. No database migration is required for this infrastructure split.
+Legacy Netlify/Render infrastructure may only be used as an explicit emergency rollback if it remains available, secure, and demonstrably known-good. Record the rollback and follow-up retirement plan in `docs/PROJECT_STATE.md`.
+
+**Never roll back to Vercel.**
 
 ## Cost controls
 
-The architecture is intentionally usage-oriented:
+The architecture is usage-oriented:
 
-- Cloud Run API can scale to zero.
-- Heavy completion workers exist only while a session is actively running.
-- GitHub Actions performs repository CI/build/test work instead of requiring a large permanent worker fleet.
-- OpenRouter/provider usage remains independent of compute hosting.
+- API/frontend can scale to zero;
+- heavier workers exist only while completion work runs;
+- target-repository CI/build/test remains in GitHub Actions where appropriate;
+- provider usage remains independently bounded;
+- RepoFinisher's own concurrency/iteration/cost/risk limits remain necessary even when Google billing alerts exist.
 
-Set Google Cloud billing budgets/alerts at the project level before enabling broad portfolio automation. A budget alert is not a hard spending cap, so RepoFinisher's own concurrency, iteration, and AI-cost limits remain important.
+Set project billing budgets/alerts, but do not mistake an alert for a hard application spending cap.
+
+## Updating this runbook
+
+When the current domain blocker is resolved, update both this file and `docs/PROJECT_STATE.md` with the successful workflow run/commit and the exact runtime gates that passed. Remove obsolete transitional language instead of accumulating contradictory topologies.
