@@ -229,15 +229,21 @@ describe("Google structured-output compatibility", () => {
       }),
     );
 
-    const error = await callAI(
-      request("bad structured request", { timeoutMs: 1000 }),
-      { provider: "google", model: "gemini-3.7-flash", apiKey: "test-gemini-key" },
-    ).catch((caught) => caught as Error & { status?: number; code?: string; publicMessage?: string });
+    let error: (Error & { status?: number; code?: string; publicMessage?: string }) | null = null;
+    try {
+      await callAI(
+        request("bad structured request", { timeoutMs: 1000 }),
+        { provider: "google", model: "gemini-3.7-flash", apiKey: "test-gemini-key" },
+      );
+    } catch (caught) {
+      error = caught as Error & { status?: number; code?: string; publicMessage?: string };
+    }
 
-    expect(error.message).toMatch(/Google Gemini API error 400 for model "gemini-3\.7-flash"/);
-    expect(error.status).toBe(502);
-    expect(error.code).toBe("AI_PROVIDER_ERROR");
-    expect(error.publicMessage).toMatch(/gemini-3\.7-flash/);
-    expect(error.publicMessage).not.toMatch(/schema rejected/);
+    expect(error).not.toBeNull();
+    expect(error!.message).toMatch(/Google Gemini API error 400 for model "gemini-3\.7-flash"/);
+    expect(error!.status).toBe(502);
+    expect(error!.code).toBe("AI_PROVIDER_ERROR");
+    expect(error!.publicMessage).toMatch(/gemini-3\.7-flash/);
+    expect(error!.publicMessage).not.toMatch(/schema rejected/);
   });
 });
