@@ -22,9 +22,7 @@ function env(...names: string[]): string {
 
 const KNOWN_FRONTEND_ORIGINS = [
   "https://repofinisher-web-z6kubh2jtq-uc.a.run.app",
-  "https://repofinish.donmatthews.live",
   "https://repofinisher.donmatthews.live",
-  "https://repofinisher.netlify.app",
 ] as const;
 
 function corsAllowedOrigins(): string[] {
@@ -33,10 +31,9 @@ function corsAllowedOrigins(): string[] {
     .map((s) => s.trim())
     .filter(Boolean);
 
-  // These are first-party RepoFinisher frontends, not a wildcard. Keeping them
-  // in the application-level allowlist prevents a missing hosting env var from
-  // breaking authenticated API calls during a frontend hosting cutover while
-  // still rejecting arbitrary third-party origins.
+  // These are exact first-party RepoFinisher frontends, not a wildcard. Keeping
+  // the direct Cloud Run URL and canonical custom domain here means a malformed
+  // hosting env var cannot silently lock the SPA out of its API.
   return [...new Set([...KNOWN_FRONTEND_ORIGINS, ...configured])];
 }
 
