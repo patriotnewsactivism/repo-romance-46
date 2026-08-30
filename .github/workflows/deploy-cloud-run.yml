@@ -144,7 +144,7 @@ jobs:
             NODE_ENV=production
             SUPABASE_URL=${{ env.SUPABASE_URL }}
             SUPABASE_ANON_KEY=${{ env.SUPABASE_ANON_KEY }}
-            CORS_ALLOWED_ORIGINS=${{ env.WEB_PUBLIC_URL }},https://repofinish.donmatthews.live,https://repofinisher.donmatthews.live,https://repofinisher.netlify.app
+            CORS_ALLOWED_ORIGINS=${{ env.WEB_PUBLIC_URL }}
             LOG_LEVEL=info
             AI_PROVIDER=openrouter
             OPENROUTER_MODEL=deepseek/deepseek-v4-flash-0731
