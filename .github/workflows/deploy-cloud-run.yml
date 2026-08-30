@@ -7,11 +7,14 @@ on:
       - main
     paths:
       - "artifacts/api-server/**"
+      - "artifacts/repo-finisher/**"
       - "lib/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "package.json"
       - "Dockerfile.apiserver"
+      - "Dockerfile.frontend"
+      - "netlify.toml"
       - ".github/workflows/deploy-cloud-run.yml"
 
 permissions:
@@ -30,8 +33,12 @@ env:
   RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT || 'repofinisher-runtime@repofinish.iam.gserviceaccount.com' }}
   ARTIFACT_REPOSITORY: repofinisher
   IMAGE_NAME: repofinisher-api
+  WEB_IMAGE_NAME: repofinisher-web
   API_SERVICE: repofinisher-api
+  WEB_SERVICE: repofinisher-web
   COMPLETION_JOB: repofinisher-completion-session
+  API_PUBLIC_URL: https://repofinisher-api-z6kubh2jtq-uc.a.run.app
+  WEB_PUBLIC_URL: https://repofinisher-web-z6kubh2jtq-uc.a.run.app
   SUPABASE_URL: ${{ vars.SUPABASE_URL || 'https://rdsrxfzahhxbvugyarld.supabase.co' }}
   SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY || 'sb_publishable_95xMusG9KjCGJemIa8dgcw_-8JqzgER' }}
 
@@ -67,6 +74,21 @@ jobs:
           echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
           docker build --file Dockerfile.apiserver --tag "${IMAGE}" .
           docker push "${IMAGE}"
+
+      - name: Build and push immutable frontend image
+        shell: bash
+        run: |
+          set -euo pipefail
+          WEB_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPOSITORY}/${WEB_IMAGE_NAME}:${GITHUB_SHA}"
+          echo "WEB_IMAGE=${WEB_IMAGE}" >> "$GITHUB_ENV"
+          docker build \
+            --file Dockerfile.frontend \
+            --build-arg "VITE_API_BASE_URL=${API_PUBLIC_URL}" \
+            --build-arg "VITE_SUPABASE_URL=${SUPABASE_URL}" \
+            --build-arg "VITE_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}" \
+            --tag "${WEB_IMAGE}" \
+            .
+          docker push "${WEB_IMAGE}"
 
       - name: Deploy completion-session worker job
         id: deploy_job
@@ -122,7 +144,7 @@ jobs:
             NODE_ENV=production
             SUPABASE_URL=${{ env.SUPABASE_URL }}
             SUPABASE_ANON_KEY=${{ env.SUPABASE_ANON_KEY }}
-            CORS_ALLOWED_ORIGINS=https://repofinish.donmatthews.live,https://repofinisher.donmatthews.live,https://repofinisher.netlify.app
+            CORS_ALLOWED_ORIGINS=${{ env.WEB_PUBLIC_URL }},https://repofinish.donmatthews.live,https://repofinisher.donmatthews.live,https://repofinisher.netlify.app
             LOG_LEVEL=info
             AI_PROVIDER=openrouter
             OPENROUTER_MODEL=deepseek/deepseek-v4-flash-0731
@@ -159,16 +181,53 @@ jobs:
           echo "Cloud Run API health check failed." >&2
           exit 1
 
+      - name: Deploy frontend
+        id: deploy_web
+        uses: google-github-actions/deploy-cloudrun@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          region: ${{ env.REGION }}
+          service: ${{ env.WEB_SERVICE }}
+          image: ${{ env.WEB_IMAGE }}
+          timeout: 300s
+          flags: >-
+            --service-account=${{ env.RUNTIME_SERVICE_ACCOUNT }}
+            --cpu=1
+            --memory=512Mi
+            --min-instances=0
+            --max-instances=3
+            --concurrency=80
+            --allow-unauthenticated
+
+      - name: Verify Cloud Run frontend directly
+        shell: bash
+        env:
+          WEB_URL: ${{ steps.deploy_web.outputs.url }}
+        run: |
+          set -euo pipefail
+          echo "Cloud Run frontend: ${WEB_URL}"
+          for attempt in 1 2 3 4 5; do
+            if curl --fail --silent --show-error "${WEB_URL}/" | grep -q 'repofinisher-api-platform.*google-cloud-run-production'; then
+              exit 0
+            fi
+            sleep $((attempt * 3))
+          done
+          echo "Cloud Run frontend verification failed." >&2
+          exit 1
+
       - name: Publish deployment summary
         shell: bash
         env:
           API_URL: ${{ steps.deploy_api.outputs.url }}
+          WEB_URL: ${{ steps.deploy_web.outputs.url }}
         run: |
           {
             echo "## RepoFinisher Cloud Run deployment"
             echo
             echo "- API: ${API_URL}"
+            echo "- Frontend: ${WEB_URL}"
             echo "- Worker job: ${COMPLETION_JOB}"
             echo "- Image: ${IMAGE}"
+            echo "- Frontend image: ${WEB_IMAGE}"
             echo "- Region: ${REGION}"
           } >> "$GITHUB_STEP_SUMMARY"
