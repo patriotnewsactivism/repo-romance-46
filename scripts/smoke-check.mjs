@@ -3,11 +3,12 @@
  *
  * Production topology:
  *   frontend -> Netlify
- *   API      -> persistent Render service
+ *   API      -> Google Cloud Run
  *   auth/db  -> Supabase
  *
- * This deliberately validates the seams between those services instead of
- * assuming one host serves the entire application.
+ * Render may remain available temporarily as a rollback target during cutover.
+ * This deliberately validates the seams between services instead of assuming
+ * one host serves the entire application.
  */
 const apiUrl = process.env.API_URL || process.env.STAGING_URL || process.env.BASE_URL || `http://localhost:${process.env.PORT || 5000}`;
 const frontendUrl = process.env.FRONTEND_URL || null;
@@ -32,7 +33,7 @@ async function request(label, target, init = {}, validate = async (response) => 
 }
 
 async function checkApiHealth() {
-  return request('Render API /api/healthz', new URL('/api/healthz', apiUrl), {}, async (response) => {
+  return request('Persistent API /api/healthz', new URL('/api/healthz', apiUrl), {}, async (response) => {
     if (!response.ok) return false;
     const body = await response.json().catch(() => null);
     return body?.status === 'ok';
@@ -41,7 +42,7 @@ async function checkApiHealth() {
 
 async function checkAiStatusRoute() {
   const target = new URL('/api/preferences/ai-status', apiUrl);
-  return request('Render API /api/preferences/ai-status route', target, {}, async (response) => {
+  return request('Persistent API /api/preferences/ai-status route', target, {}, async (response) => {
     const contentType = (response.headers.get('content-type') || '').toLowerCase();
     const body = await response.text();
 
