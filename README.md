@@ -1,81 +1,87 @@
 # RepoFinisher
 
-RepoFinisher is a repository-completion operating system. Its job is to inspect incomplete or partially working software repositories, determine what the product is intended to do, measure how complete and production-ready it is, reason about the highest-value remaining work, generate an approval-bound implementation plan, execute approved changes on isolated branches, validate the result, repair bounded failures, and learn from measured outcomes.
+RepoFinisher is a repository-completion operating system. It inspects incomplete or partially working software repositories, infers product intent from evidence, measures completion and production readiness, reasons about the highest-value remaining work, produces approval-bound implementation plans, executes approved changes on isolated branches, validates the result, performs bounded repair, rescoring, and operational learning, and can continue iterating until explicit completion targets are reached or a safe stop condition applies.
 
-RepoFinisher is not intended to be a one-shot code generator. The product is designed around evidence, explicit approval boundaries, repeatable verification, durable operational memory, and iterative improvement.
+RepoFinisher is not a one-shot code generator. Its design centers on current evidence, explicit write authority, durable state, measurable outcomes, rollback boundaries, and repeatable verification.
 
-## Production architecture
+## Canonical production architecture
 
-The approved production architecture is:
+The current production architecture in `main` is:
 
-- **Frontend:** React/Vite SPA on **Netlify**.
-- **API / control plane:** Express API on **Google Cloud Run**.
-- **Long-running completion work:** **Google Cloud Run Jobs**, dispatched from the API with durable Supabase session state and per-execution session/user overrides.
-- **Repository CI/build/test evidence:** **GitHub Actions** and GitHub checks.
-- **Database, authentication, RLS, and Vault:** **Supabase**.
-- **Source control, pull requests, checks, and repository evidence:** **GitHub**.
-- **Observability:** Sentry when configured, plus Cloud Run/Cloud Logging runtime logs.
+- **Frontend:** `artifacts/repo-finisher` deployed as Google Cloud Run service `repofinisher-web`.
+- **API / control plane:** `artifacts/api-server` deployed as Google Cloud Run service `repofinisher-api`.
+- **Long-running completion work:** Google Cloud Run Job `repofinisher-completion-session`.
+- **Authentication, database, RLS, durable execution state, and AI BYOK Vault:** Supabase.
+- **Source control, pull requests, repository evidence, CI/build/test evidence, and deployment automation:** GitHub + GitHub Actions.
+- **Container registry and backend secret injection:** Google Artifact Registry + Google Secret Manager.
+- **Canonical custom-domain DNS:** Cloudflare, managed by the Cloud Run deployment workflow during cutover.
+- **Observability:** Sentry when configured, plus Cloud Run/Cloud Logging.
 
-**Vercel is not an approved deployment target for this repository. Do not deploy RepoFinisher to Vercel or reintroduce Vercel hosting artifacts.** CI enforces a subset of this policy.
+The canonical product domain is `https://repofinisher.donmatthews.live`.
 
-During the Render-to-Cloud-Run cutover, the existing Render API is retained strictly as a rollback target until the Cloud Run service has passed direct-host health checks, the Netlify frontend has been rebuilt against the Cloud Run API URL, and production seam smoke passes. See [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md) and [`docs/CLOUD_RUN_MIGRATION.md`](docs/CLOUD_RUN_MIGRATION.md) before changing production DNS or environment variables.
+**Vercel is not an approved deployment target. Do not deploy RepoFinisher to Vercel or reintroduce Vercel hosting artifacts.** The CI workflow contains an explicit non-Vercel hosting guard.
 
-The intended canonical frontend domain is `https://repofinisher.donmatthews.live`.
+`netlify.toml` and the former Render service are legacy migration/rollback artifacts, not the current target topology. Do not route production back to them unless an explicit incident rollback decision is made and verified.
 
-## What RepoFinisher does
+For time-sensitive rollout status, read [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md). For the Cloud Run deployment/cutover contract, read [`docs/CLOUD_RUN_MIGRATION.md`](docs/CLOUD_RUN_MIGRATION.md).
 
-Core capabilities include:
+## Core capabilities
 
-- Full-portfolio repository discovery and scoring.
-- Completion and production-readiness scoring.
-- Current and potential value estimates with confidence adjustment and overlap/duplicate-IP discounts.
-- Tiered repository intelligence for large portfolios.
-- Multi-stage reasoning: evidence analysis, skeptical critique, dynamically selected specialists, and principal-plan synthesis.
-- Durable repo-level and cross-repo operational memory based on measured outcomes.
-- Controlled prompt-strategy experiments. Strategy changes may improve planning technique but cannot weaken safety or approval policy.
-- Exact-plan hashing and approval binding before repository writes.
-- Isolated branches and draft pull requests for generated work.
-- CI and deployment-preview verification.
-- Bounded self-healing CI repair that diagnoses root causes and does not weaken validation to obtain a passing result, including direct completion and Finish Portfolio execution paths.
-- Finish-until-target completion sessions that can reason, implement, verify, repair, rescore, and iterate toward explicit completion/readiness targets.
-- Continuous Repository Mode for re-reasoning after repository events.
-- Portfolio relationship analysis for duplicate/shared IP, frontend/backend pairs, workers, merge candidates, and archive candidates.
-- Product/security assurance checks.
-- External-LLM completion handoffs: a detailed current-state prompt for Codex, Claude Code, Gemini CLI, or a provider-neutral agent. This complements RepoFinisher's own autonomous completion path; it does not replace it.
+RepoFinisher includes or is designed to include:
+
+- full-portfolio repository discovery and prioritization;
+- completion and production-readiness scoring;
+- confidence-adjusted current/potential valuation estimates;
+- duplicate/shared-IP and portfolio relationship analysis;
+- tiered deep analysis for large portfolios;
+- multi-stage reasoning with evidence analysis, competing hypotheses, skeptical critique, evidence-selected specialists, and principal-plan synthesis;
+- durable repo-local and cross-repo operational memory based on measured outcomes;
+- controlled prompt-strategy experiments whose mutable strategy cannot alter immutable safety/approval policy;
+- exact-plan/base-SHA hashing and approval binding before repository writes;
+- isolated branches and draft pull requests;
+- CI and deployment/runtime verification;
+- bounded self-healing CI repair based on fresh failure evidence and root-cause diagnosis;
+- finish-until-target sessions that can reason, implement, verify, repair, rescore, and iterate;
+- continuous repository event reasoning;
+- security/product assurance checks;
+- external-LLM completion handoffs for Codex, Claude Code, Gemini CLI, or a provider-neutral coding agent.
+
+External-LLM handoffs complement RepoFinisher; they do not replace its internal finishing capability.
 
 ## Repository layout
 
 ```text
 artifacts/
-  api-server/             Express API/control plane plus Cloud Run Job entrypoints
+  api-server/             Express control plane + Cloud Run Job entrypoints
   repo-finisher/          Production React/Vite frontend
-  repo-finisher-mobile/   Mobile artifact; excluded from the root production build
+  repo-finisher-mobile/   Mobile artifact; excluded from root production build
   mockup-sandbox/         Non-production sandbox artifact
-infra/gcp/                 One-time Google Cloud/WIF bootstrap tooling
-lib/                       Shared workspace libraries, including repo intelligence
-scripts/                   Smoke checks and repository tooling
-supabase/migrations/       Forward-only database migrations
-docs/                      Architecture, operations, project state, and subsystem docs
-.github/workflows/         CI, Cloud Run deployment, and production smoke workflows
-netlify.toml               Netlify frontend build configuration
-Dockerfile.apiserver       Cloud Run API/worker container
+infra/gcp/                Google Cloud bootstrap/IAM/WIF tooling
+lib/                      Shared workspace libraries and repo intelligence
+scripts/                  Smoke checks, documentation guards, tooling
+supabase/migrations/      Forward-only production database migrations
+docs/                     Architecture, operations, state, policy, runbooks
+.github/workflows/        CI, Cloud Run deploy, production smoke
+Dockerfile.apiserver      API/worker image
+Dockerfile.frontend       Frontend image
+netlify.toml               Legacy frontend-host configuration; not canonical production
 ```
 
 ## Development
 
 Requirements:
 
-- Node.js 20+ for local/CI compatibility. Netlify currently declares Node 24 for its frontend build.
+- Node.js 20+ for local/CI compatibility.
 - pnpm `9.15.9`.
-- A Supabase project when exercising authenticated/server features.
+- Supabase configuration for authenticated/server-side features.
 
-Install dependencies:
+Install:
 
 ```bash
 pnpm install --frozen-lockfile
 ```
 
-Run the complete test suite:
+Run tests:
 
 ```bash
 pnpm test
@@ -87,132 +93,124 @@ Run typechecks and production builds:
 pnpm build
 ```
 
-Run the frontend locally:
+Run frontend locally:
 
 ```bash
 pnpm --filter @workspace/repo-finisher dev
 ```
 
-Run the API locally:
+Run API locally:
 
 ```bash
 pnpm --filter @workspace/api-server dev
 ```
 
-Run the seam smoke test:
+Run production-seam smoke logic:
 
 ```bash
 pnpm test:smoke
 ```
 
-## Environment configuration
+## Environment and secrets
 
 Use [`.env.example`](.env.example) as the canonical variable inventory.
 
-Important rules:
+Security rules:
 
-1. `VITE_*` values are browser-visible. Never put service-role keys, AI provider secrets, GitHub tokens, signing secrets, or encryption keys in a `VITE_*` variable.
-2. The frontend needs `VITE_API_BASE_URL`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_ANON_KEY`.
-3. The API needs `SUPABASE_URL`, `SUPABASE_ANON_KEY`, a trusted Supabase backend key (`SUPABASE_SECRET_KEY` preferred), `PLAN_SIGNING_SECRET`, and `SECRET_ENCRYPTION_KEY` for the features that depend on them.
-4. User-supplied AI provider keys are stored through **Supabase Vault**. The browser never receives the decrypted credential.
-5. `SECRET_ENCRYPTION_KEY` remains relevant to legacy/server-sealed credentials such as stored GitHub connections. It is not the primary storage mechanism for new AI BYOK credentials.
-6. In production, `CLOUD_RUN_JOBS_ENABLED=true` makes the API dispatch finish-until-target sessions to the named Cloud Run Job instead of depending on request-lifetime background CPU.
-7. Google Cloud authentication from GitHub Actions uses Workload Identity Federation. Do not add a long-lived service-account JSON key to GitHub secrets.
+1. `VITE_*` variables are browser-visible. Never put service-role keys, AI provider secrets, GitHub tokens, signing secrets, Sentry auth tokens, private keys, or encryption keys in them.
+2. Browser configuration requires `VITE_API_BASE_URL`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_ANON_KEY`.
+3. Trusted backend features require Supabase public config plus a trusted backend key (`SUPABASE_SECRET_KEY` preferred), `PLAN_SIGNING_SECRET`, and `SECRET_ENCRYPTION_KEY` where applicable.
+4. User-supplied AI provider credentials are stored in **Supabase Vault** and are only decrypted through the trusted backend path.
+5. `SECRET_ENCRYPTION_KEY` still protects server-sealed credentials such as stored GitHub connections; rotating it without a migration can make prior envelopes unreadable.
+6. GitHub Actions authenticates to Google Cloud using Workload Identity Federation. Do not add a long-lived Google service-account JSON key.
+7. Cloud Run receives backend secrets from Google Secret Manager. Do not embed them in workflow YAML or container images.
 
-See [`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md) for provider/model behavior and [`docs/CLOUD_RUN_MIGRATION.md`](docs/CLOUD_RUN_MIGRATION.md) for deployment setup.
+See [`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md), [`SECURITY.md`](SECURITY.md), and [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 
-## Autonomous completion contract
+## Autonomous repository-write contract
 
-Repository-writing behavior must preserve these boundaries:
+Normal generated repository work must preserve these boundaries:
 
-- The exact plan and base commit are bound to an approval hash before execution, unless the user has explicitly selected an already-defined bounded higher-autonomy mode.
-- Generated work goes to an isolated branch and draft PR.
-- Automatic merge is disabled unless product policy is deliberately changed and separately reviewed.
-- Self-healing may fix source/configuration defects but may not weaken, delete, skip, mute, or rewrite tests/security/CI acceptance criteria merely to turn a failure green.
-- Secrets may not be requested for inclusion in repository content or written into generated source.
-- If the repository changes after planning, the plan is stale and must be regenerated.
-- Passing CI alone is not proof that a repository is fully finished. Completion/readiness must be re-measured and unresolved product blockers must remain visible.
-- Cloud Run worker retries must reuse durable session/lease state; they may not duplicate branch writes simply because an execution is retried.
+1. Resolve the exact repository and base SHA.
+2. Gather current evidence and operational learning.
+3. Produce an exact bounded implementation plan.
+4. Bind the plan to the base commit with a plan hash/signature.
+5. Require exact-plan approval unless the user explicitly selected a product-defined bounded higher-autonomy mode.
+6. Re-check stale-base state before writing.
+7. Write to an isolated branch.
+8. Open a draft PR.
+9. Verify CI and applicable deployment/runtime evidence.
+10. Perform only bounded, evidence-driven repair.
+11. Re-score completion/readiness and persist outcome telemetry.
+12. Continue another bounded iteration only when policy, budget, risk, and no-progress rules permit it.
 
-The evidence threshold for calling a target repository materially complete is defined in [`docs/DEFINITION_OF_DONE.md`](docs/DEFINITION_OF_DONE.md). Internal finishing and external-LLM handoffs must use the same substantive completion standard.
+Automatic merge is not the default policy.
 
-See [`AGENTS.md`](AGENTS.md) for the rules that automated coding agents must follow.
+Passing CI alone is not proof that a target repository is finished. The default evidence threshold is defined in [`docs/DEFINITION_OF_DONE.md`](docs/DEFINITION_OF_DONE.md).
 
 ## Learning model
 
-"Learning" in RepoFinisher means measured operational learning, not silent model-weight retraining.
+RepoFinisher's "learning" is measured operational learning, not silent model-weight retraining.
 
-The system records outcomes such as completion delta, production-readiness delta, outcome score, failures, repair evidence, prompt strategy, selected specialists, and supporting evidence. High-confidence patterns become reusable operational guidance. Failed patterns reduce confidence and should not be repeated unchanged.
+The system can persist outcome score, completion/readiness deltas, failure modes, repair diagnoses, prompt strategy/version, specialists, evidence confidence, deployment/CI outcomes, and cross-repository patterns. A failed strategy should become less likely to be repeated unchanged; a successful strategy should only become reusable guidance when supported by measurable evidence.
 
-Controlled prompt experiments can promote a challenger strategy only after measured evidence clears configured sample, practical-lift, and regression gates. The immutable safety/approval policy is outside the experiment surface.
+Prompt experimentation may change planning/reasoning technique, but it cannot alter immutable security, approval, permission, rollback, or validation policy.
 
 See [`docs/REASONING_AND_LEARNING.md`](docs/REASONING_AND_LEARNING.md).
 
 ## External coding-agent handoffs
 
-RepoFinisher can generate a current-state completion prompt for an external coding agent without giving up its own autonomous finishing capability. The handoff is bound to the assessed repository state and should carry the same evidence, remaining-work order, security boundaries, validation requirements, and Definition of Done used internally.
+For each repository, RepoFinisher can produce a separate detailed completion prompt for an external coding agent. A handoff should include the assessed SHA, current completion/readiness state, evidence-backed blockers, ordered work, specialist concerns, validation requirements, security boundaries, and the same Definition of Done used internally. If the repository HEAD changed after assessment, the external agent must re-assess before editing.
 
 See [`docs/EXTERNAL_LLM_HANDOFFS.md`](docs/EXTERNAL_LLM_HANDOFFS.md).
 
 ## Database migrations
 
-All schema changes belong in `supabase/migrations/` and should be forward-only, reviewable, and safe for production data.
+All production schema changes belong in `supabase/migrations/`.
 
-For every migration:
+Migrations should be forward-only, deterministic, safe for existing data, explicit about destructive behavior, RLS-aware, and least-privilege. Service-role-only Vault functions must never be granted to normal browser roles.
 
-- Preserve RLS where user-owned data is involved.
-- Add only the minimum grants required.
-- Never grant service-role-only Vault functions to `anon` or `authenticated`.
-- Avoid generated-ID assumptions in migration data changes.
-- Document destructive or irreversible behavior.
-- Apply and verify the migration before claiming a dependent feature is production-ready.
+Do not call a migration-dependent feature production-ready until the migration has been applied and the expected schema/policies/functions have been verified.
 
-## CI and release gates
+## CI and production release
 
-`.github/workflows/ci.yml` runs on pull requests and pushes to `main` and currently requires:
+`.github/workflows/ci.yml` is the required code gate. It verifies the non-Vercel hosting policy, frozen-lockfile install, tests, documentation consistency, typecheck, and build.
 
-- no forbidden Vercel hosting artifacts,
-- frozen-lockfile install,
-- package tests,
-- typecheck,
-- production build.
+`.github/workflows/deploy-cloud-run.yml` builds immutable API/worker and frontend images, deploys the completion-session Job, API service, and frontend service, audits the runtime environment contract, manages the custom-domain mapping/DNS cutover, and verifies the deployed surfaces.
 
-`.github/workflows/deploy-cloud-run.yml` builds an immutable container image, deploys the completion-session Cloud Run Job, grants the runtime identity permission to invoke that specific job with overrides, deploys the API service, and verifies `/api/healthz`. It authenticates through GitHub OIDC/Google Workload Identity Federation rather than a service-account key.
+`.github/workflows/production-smoke.yml` verifies the production seams.
 
-`.github/workflows/production-smoke.yml` verifies the production seams among Netlify, the selected persistent API endpoint, and Supabase when manually dispatched.
-
-Do not merge a feature merely because local code looks correct. A normal release should have green CI, a successful target-host deployment, and relevant runtime smoke evidence. Use [`docs/RELEASE-CHECKLIST.md`](docs/RELEASE-CHECKLIST.md) for production-impacting work and [`docs/INCIDENT_RESPONSE.md`](docs/INCIDENT_RESPONSE.md) when production is degraded or unsafe.
+A commit being merged is not equivalent to a production release. Use [`docs/RELEASE-CHECKLIST.md`](docs/RELEASE-CHECKLIST.md) and report `merged`, `deployed`, `runtime verified`, and `user-flow verified` precisely.
 
 ## Documentation map
 
-- [`docs/README.md`](docs/README.md) — documentation index.
-- [`AGENTS.md`](AGENTS.md) — canonical instructions for AI/coding agents.
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — contribution and PR workflow.
-- [`SECURITY.md`](SECURITY.md) — security and secret-handling requirements.
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system architecture and data/control flow.
-- [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — deployment, environment, smoke, incident, and rollback procedures.
-- [`docs/CLOUD_RUN_MIGRATION.md`](docs/CLOUD_RUN_MIGRATION.md) — Google Cloud Run/Jobs bootstrap, deployment, cutover, and rollback plan.
-- [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md) — current operational checkpoint and known remaining work.
-- [`docs/DEFINITION_OF_DONE.md`](docs/DEFINITION_OF_DONE.md) — evidence standard for declaring a target repository materially complete.
-- [`docs/REASONING_AND_LEARNING.md`](docs/REASONING_AND_LEARNING.md) — reasoning, memory, experiments, and self-healing behavior.
+Start with [`docs/README.md`](docs/README.md). Key files:
+
+- [`AGENTS.md`](AGENTS.md) — canonical coding-agent operating rules.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — branch/PR/contribution workflow.
+- [`SECURITY.md`](SECURITY.md) — security and secret handling.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — stable system design.
+- [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — production runbook.
+- [`docs/CLOUD_RUN_MIGRATION.md`](docs/CLOUD_RUN_MIGRATION.md) — Cloud Run deployment/cutover contract and rollback history.
+- [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md) — time-sensitive status and remaining work.
+- [`docs/DEFINITION_OF_DONE.md`](docs/DEFINITION_OF_DONE.md) — completion evidence standard.
+- [`docs/REASONING_AND_LEARNING.md`](docs/REASONING_AND_LEARNING.md) — reasoning, memory, experiments, repair, iterative sessions.
 - [`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md) — provider/model/BYOK behavior.
-- [`docs/EXTERNAL_LLM_HANDOFFS.md`](docs/EXTERNAL_LLM_HANDOFFS.md) — external coding-agent completion handoff contract.
-- [`docs/RELEASE-CHECKLIST.md`](docs/RELEASE-CHECKLIST.md) — production release and verification gates.
-- [`docs/INCIDENT_RESPONSE.md`](docs/INCIDENT_RESPONSE.md) — production incident triage, containment, recovery, and closure.
+- [`docs/EXTERNAL_LLM_HANDOFFS.md`](docs/EXTERNAL_LLM_HANDOFFS.md) — external-agent handoff contract.
+- [`docs/RELEASE-CHECKLIST.md`](docs/RELEASE-CHECKLIST.md) — release gates.
+- [`docs/INCIDENT_RESPONSE.md`](docs/INCIDENT_RESPONSE.md) — incident response.
 - [`docs/DECISIONS.md`](docs/DECISIONS.md) — durable architecture/product decisions.
-- [`docs/GOVERNANCE.md`](docs/GOVERNANCE.md) — repository governance and control gaps.
-- [`docs/sentry-observability.md`](docs/sentry-observability.md) — Sentry-specific notes.
+- [`docs/GOVERNANCE.md`](docs/GOVERNANCE.md) — repository governance.
 
 ## Source of truth
 
-The hierarchy for decisions is:
+When sources disagree, use this order:
 
-1. Current code and migrations on `main`.
-2. `AGENTS.md` for repository-working rules.
-3. `README.md`, `docs/DECISIONS.md`, and the architecture/operations documentation.
-4. `docs/PROJECT_STATE.md` for time-sensitive operational status.
+1. Current code/migrations/workflows on `main`.
+2. `AGENTS.md` for agent operating rules.
+3. `README.md`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`, and `docs/OPERATIONS.md` for stable architecture/policy.
+4. `docs/PROJECT_STATE.md` for time-sensitive rollout state.
 5. `docs/DEFINITION_OF_DONE.md` for completion claims.
-6. Model-specific instruction files are compatibility entrypoints only and must defer to `AGENTS.md`.
-7. Old experiment notes, backup metadata, and archived branches are historical only unless explicitly promoted back into the canonical docs.
+6. Model-specific instruction files only as pointers to `AGENTS.md`.
 
-When code and documentation disagree, do not guess. Verify the implementation, fix the discrepancy, and update the documentation in the same PR.
+When code and documentation disagree, do not choose whichever text is convenient. Verify the implementation and update the documentation in the same PR.
