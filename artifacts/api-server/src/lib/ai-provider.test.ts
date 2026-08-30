@@ -78,3 +78,75 @@ describe("OpenRouter routing", () => {
     expect(body.model).toBe("request/model");
   });
 });
+
+describe("credential normalization", () => {
+  // Production regression: a blank-but-present OpenRouter credential was sent as
+  // `Authorization: Bearer `, and OpenRouter answered
+  // `401 {"error":{"message":"Missing Authentication header","code":401}}`.
+  // That surfaced in the UI as a provider integration failure rather than the
+  // real problem, which was that no usable key was configured.
+  it.each([" ", "   ", "\t", "\n", ""])(
+    "treats a blank credential (%j) as no credential instead of sending an empty bearer",
+    async (blank) => {
+      const fetchMock = vi.spyOn(globalThis, "fetch");
+
+      await expect(
+        callAI(request("blank credential", { timeoutMs: 1000 }), {
+          provider: "openrouter",
+          model: "example/vendor-model",
+          apiKey: blank,
+        }),
+      ).rejects.toThrow(/No usable credential is configured for "openrouter"/);
+
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not reach any provider with a blank key, whichever provider is selected", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    for (const provider of ["google", "openai", "anthropic", "openrouter", "custom"]) {
+      await expect(
+        callAI(request("blank credential", { timeoutMs: 1000 }), { provider, model: "m", apiKey: " " }),
+      ).rejects.toThrow(/No usable credential is configured/);
+    }
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("trims surrounding whitespace so a key stored with stray padding still authenticates", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ choices: [{ message: { content: "ready" } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await callAI(request("padded credential", { timeoutMs: 1000 }), {
+      provider: "openrouter",
+      model: "example/vendor-model",
+      apiKey: "  test-api-key\t",
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(new Headers(init?.headers).get("authorization")).toBe("Bearer test-api-key");
+  });
+
+  it("trims the key for header-authenticated providers too", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ content: [{ type: "text", text: "ready" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await callAI(request("padded credential", { timeoutMs: 1000 }), {
+      provider: "anthropic",
+      model: "claude-sonnet-4-20250514",
+      apiKey: " test-api-key ",
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(new Headers(init?.headers).get("x-api-key")).toBe("test-api-key");
+  });
+});
