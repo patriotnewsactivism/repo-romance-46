@@ -1,195 +1,218 @@
 # RepoFinisher Architecture
 
-This document describes the intended production architecture and the major control/data flows. It is more stable than `docs/PROJECT_STATE.md`; use the project-state document for time-sensitive deployment status.
+This document describes the stable production architecture and major control/data flows. Use `docs/PROJECT_STATE.md` for time-sensitive deployment status.
 
-## System boundaries
+## Runtime topology
 
-RepoFinisher is a pnpm/TypeScript monorepo with five primary runtime concerns:
+RepoFinisher is a pnpm/TypeScript monorepo with these primary runtime concerns:
 
 1. **Frontend SPA** — `artifacts/repo-finisher`
 2. **API/control plane** — `artifacts/api-server`
 3. **Long-running completion workers** — Cloud Run Jobs using the API-server worker entrypoint
 4. **Shared repository-intelligence logic** — `lib/`
-5. **Persistent state/security boundary** — Supabase schema in `supabase/migrations/`
+5. **Persistent state/security boundary** — Supabase schema and Vault
 
-The approved production hosting contract is:
+Canonical production topology:
 
 ```text
 Browser
   |
   v
-Netlify (React/Vite SPA)
+Cloudflare DNS -> repofinisher.donmatthews.live
+  |
+  v
+Google Cloud Run: repofinisher-web
   |
   | HTTPS + Supabase bearer token
   v
-Google Cloud Run (Express API / control plane)
+Google Cloud Run: repofinisher-api
   |                    \
-  |                     \-> Cloud Run Jobs (long-running completion work)
+  |                     \-> Cloud Run Job: repofinisher-completion-session
   |                              |
   |                              +-> GitHub REST / Actions / PRs / checks
   |                              +-> configured AI provider
   |
-  +-> Supabase (Auth/RLS/DB/Vault/durable job state)
-  +-> GitHub (repository evidence and writes)
+  +-> Supabase: Auth / RLS / DB / Vault / durable execution state
+  +-> GitHub: repository evidence and writes
+
+GitHub Actions
+  +-> CI/build/test
+  +-> Workload Identity Federation -> Google Cloud deploy
+  +-> Artifact Registry image publication
+  +-> Cloud Run service/job deploy
+  +-> custom-domain/DNS verification
 ```
 
-GitHub Actions provides repository CI/build/test evidence and deploys the RepoFinisher Cloud Run service/job through Google Workload Identity Federation.
-
-**Vercel is not an approved production target.** Render is retained only as a temporary rollback target during the Cloud Run cutover and is not the target architecture.
+**Vercel is not an approved production target.** Former Netlify/Render assets are legacy rollback/migration artifacts, not the canonical runtime.
 
 ## Frontend
 
-The production web app lives in `artifacts/repo-finisher`.
+The production web app lives in `artifacts/repo-finisher` and is built into a container with `Dockerfile.frontend`, then deployed as Cloud Run service `repofinisher-web`.
 
-Responsibilities:
+Responsibilities include:
 
-- Supabase user authentication/session handling.
-- Portfolio and repository analysis UI.
-- Settings and AI provider/model management.
-- Exact-plan approval UX.
-- Per-repo finishing controls.
-- Finish Portfolio orchestration controls.
-- External-LLM prompt generation/copy UX.
-- Learning/audit/assurance visibility where surfaced.
+- Supabase user authentication/session handling;
+- portfolio/repository analysis UI;
+- Settings and AI provider/model management;
+- exact-plan approval UX;
+- per-repository finishing controls;
+- Finish Portfolio orchestration;
+- finish-until-target session controls/status;
+- external-LLM prompt generation/copy UX;
+- learning/audit/assurance visibility where surfaced.
 
-The frontend communicates with the persistent API through `VITE_API_BASE_URL`. The target is the deployed Cloud Run API URL. During the migration only, the existing Render API remains the known-good rollback endpoint until Cloud Run passes direct health/authentication/CORS checks and the Netlify frontend is deliberately cut over.
+The frontend communicates with the API through `VITE_API_BASE_URL`. Production builds must point at the verified `repofinisher-api` Cloud Run endpoint. The frontend also communicates directly with Supabase for user-scoped auth/data paths; RLS remains the authorization boundary for those browser operations.
 
-The frontend also communicates directly with Supabase for user-scoped auth/data paths as designed. RLS remains the authorization boundary for direct browser database access.
+Critical UI reliability requirements include readable theme contrast, working mobile navigation, explicit Settings save/error states, and no accidental fallback of API calls to the static frontend host.
 
 ## API / control plane
 
-The API lives in `artifacts/api-server` and is an Express application built to `dist/index.mjs`.
+The API lives in `artifacts/api-server` and is an Express application built to `dist/index.mjs`, deployed as Cloud Run service `repofinisher-api`.
 
 The API owns trusted control-plane operations including:
 
-- request authentication and authorization,
-- GitHub credential use,
-- repository inspection and metadata access,
-- multi-agent reasoning/orchestration,
-- exact-plan creation,
-- repository-write authorization,
-- draft PR orchestration,
-- portfolio completion orchestration,
-- post-run re-scoring,
-- operational-learning persistence,
-- Supabase Vault AI credential access,
-- service-role-only operations,
+- request authentication/authorization;
+- GitHub credential use;
+- repository inspection and metadata access;
+- multi-agent reasoning/orchestration;
+- exact-plan creation/signing;
+- repository-write authorization;
+- isolated branch/commit/draft-PR orchestration;
+- portfolio completion orchestration;
+- post-run re-scoring;
+- operational-learning persistence;
+- Supabase Vault AI credential access through trusted backend privilege;
+- service-role-only operations;
 - dispatch of long-running completion sessions to Cloud Run Jobs.
 
-The API validates user identity with Supabase before trusting authenticated requests.
-
-The API is intentionally not the permanent home for heavy or long-lived execution. Work that may outlive an HTTP request or materially benefit from independent CPU/memory allocation should move to the worker plane while preserving durable state in Supabase.
+The API is intentionally not the permanent home for heavy or long-lived work. Tasks that may outlive an HTTP request should move to the worker plane while authoritative state remains durable in Supabase.
 
 ## Cloud Run worker plane
 
-Finish-until-target completion sessions execute through the `completion-session-job` entrypoint built from the same immutable container image as the API.
+Finish-until-target sessions execute through the `completion-session-job` entrypoint using the same immutable API/worker image.
 
-The API dispatches the Cloud Run Job using its attached Google runtime service-account identity and the Cloud Run v2 Jobs API. Per execution, it passes only:
+Target Job:
+
+```text
+repofinisher-completion-session
+```
+
+The API dispatches the Cloud Run Jobs v2 API with the attached runtime service-account identity. Per execution it passes only minimal identifiers such as:
 
 ```text
 REPOFINISHER_USER_ID
 REPOFINISHER_SESSION_ID
 ```
 
-Repository state, approval state, progress, GitHub credentials, AI credentials, CI state, and repair history are loaded from durable trusted storage rather than serialized into the job request.
+Repository state, approval state, progress, GitHub credentials, AI credentials, CI state, repair history, and stop conditions are loaded from durable trusted storage rather than serialized into job overrides.
 
-The worker reuses the existing completion-session lease/heartbeat mechanism and the API scheduler suppresses duplicate dispatch while a live/recent worker is detected. This prevents ordinary UI polling or retries from producing duplicate paid executions or duplicate branch writes.
+The worker reuses completion-session lease/heartbeat guards. Scheduler/worker retries must not duplicate branch writes or re-run completed iterations merely because an execution retried.
 
-The worker can progress a durable session through planning, execution, CI verification, bounded repair, re-scoring, and subsequent bounded iterations. If its execution budget is reached, it yields without fabricating completion; the same durable session can be dispatched again.
+The worker can progress a durable session through:
 
-The initial worker allocation is larger than the control plane and exists only while work is running. Resource sizing should be tuned from measured CPU, memory, duration, failure, and queue data rather than by keeping an oversized API instance permanently alive.
+```text
+reason
+  -> implement
+  -> verify
+  -> bounded repair when justified
+  -> rescore completion/readiness
+  -> still below target and safe to continue?
+  -> next bounded iteration
+```
+
+If a task execution reaches its budget/time limit while the session remains active, it should yield without fabricating success; the durable session can be dispatched again.
+
+## Google Cloud deployment and identity
+
+`.github/workflows/deploy-cloud-run.yml` is the production deployment workflow.
+
+It builds immutable SHA-tagged frontend/API images, pushes them to Artifact Registry, deploys the completion-session Job, API service, and frontend service, audits environment-variable presence, verifies direct surfaces, and handles custom-domain/DNS cutover steps.
+
+GitHub Actions authenticates to Google Cloud with GitHub OIDC + Workload Identity Federation. A long-lived Google service-account JSON private key is not part of the design.
+
+Separate deploy/runtime service accounts should retain least privilege. The runtime identity receives only the permissions needed to invoke the specific completion-session Job and read required backend secrets.
+
+Sensitive compute-host values are injected from Google Secret Manager. User AI BYOK credentials remain in Supabase Vault.
 
 ## Supabase
 
 Supabase provides:
 
-- authentication,
-- user-owned application data,
-- Row Level Security,
-- completion-run persistence,
-- analysis and portfolio intelligence,
-- reasoning traces,
-- operational learning memories,
-- prompt-strategy experiments,
-- CI repair attempts,
-- continuous-repository settings/event queue,
-- portfolio relationships,
-- product-readiness results,
-- completion-session state and worker leases,
-- encrypted AI BYOK storage through Supabase Vault.
+- authentication;
+- user-owned application data;
+- Row Level Security;
+- analyses and portfolio intelligence;
+- completion runs/steps/events/approvals;
+- reasoning traces;
+- operational learning memories;
+- prompt-strategy experiments;
+- CI repair attempts;
+- continuous repository state/event queue;
+- portfolio relationships;
+- product-readiness results;
+- completion-session state/leases;
+- AI BYOK storage through Supabase Vault.
 
 Schema changes are represented by forward-only SQL files in `supabase/migrations/`.
 
-### User-scoped vs service-role clients
+### User-scoped and trusted clients
 
-Normal authenticated requests use a user/RLS-scoped Supabase client.
+Normal authenticated requests use user/RLS-scoped Supabase access.
 
-A separate service-role client exists only for backend operations that require trusted privilege, including Vault credential operations. The service-role key must never enter the browser or a `VITE_*` variable.
+A separate trusted backend client exists for operations that require service privilege, such as Vault store/read/delete RPCs. Trusted backend keys must never enter frontend code, `VITE_*` variables, browser responses, or logs.
 
-### AI BYOK secret storage
+### AI BYOK
 
-User-supplied provider credentials are stored in Supabase Vault.
+User-supplied provider keys are stored in Supabase Vault. The preferences row stores safe provider/model metadata and an opaque secret reference. Decrypted keys are available only to trusted server code for provider invocation.
 
-The `user_preferences` row stores an opaque Vault secret identifier, not the decrypted provider key. Server-side service-role RPCs store/read/delete the corresponding Vault secret. `anon` and `authenticated` roles must not receive execute permission on those privileged Vault functions.
-
-The legacy `custom_ai_key` column remains a compatibility fallback for old encrypted rows but is not the intended destination for new AI BYOK credentials.
-
-## Google Cloud identity and secrets
-
-GitHub Actions authenticates to Google Cloud with GitHub OIDC + Google Workload Identity Federation. A long-lived Google service-account JSON key is not part of the deployment design.
-
-The Cloud Run API and Job use a dedicated runtime service account. Backend secrets required by the compute host are injected from Google Secret Manager. During migration, the existing production `SECRET_ENCRYPTION_KEY` and `PLAN_SIGNING_SECRET` must be preserved so stored credentials and in-flight approved plans are not invalidated simply because the compute host changed.
-
-AI BYOK values remain in Supabase Vault and are not copied into browser configuration or job-dispatch payloads.
+Legacy encrypted key columns may exist for compatibility but are not the destination for new BYOK values.
 
 ## GitHub integration
 
-GitHub is both an evidence source and the repository-write target.
+GitHub is both an evidence source and repository-write target.
 
 RepoFinisher uses GitHub for:
 
-- repository metadata,
-- trees and file contents,
-- commit/base SHA verification,
-- checks and Actions evidence,
-- deployment/status evidence,
-- isolated branches,
-- commits,
+- repository metadata;
+- trees/file contents;
+- base SHA verification;
+- checks and Actions evidence;
+- deployment/status evidence;
+- isolated branches;
+- commits;
 - draft pull requests.
 
-GitHub Actions remains the normal source of truth for target-repository CI/build/test evidence. RepoFinisher does not need to keep every possible repository build toolchain permanently installed in the control-plane service.
-
-Generated work should never land directly on a target repository's default branch through the normal autonomous flow.
+GitHub Actions remains the normal source of truth for target-repository build/test/check evidence. Generated work should not land directly on a target repository's default branch through the normal autonomous path.
 
 ## Repository-completion flow
 
-A normal per-repository completion run follows this control flow:
+A normal per-repository completion run follows:
 
 ```text
 Repository selection
   -> current evidence snapshot
-  -> operational memory retrieval
+  -> operational-memory retrieval
   -> prompt-strategy resolution
-  -> evidence analyst
+  -> evidence analyst / competing hypotheses
   -> skeptical critic
   -> evidence-selected specialists
-  -> principal plan synthesis
-  -> coding plan generation
+  -> principal-plan synthesis
+  -> exact coding-plan generation
   -> safety/path/content validation
-  -> exact plan hash + base SHA binding
+  -> plan hash + base SHA binding
   -> approval
   -> stale-base check
   -> isolated branch + commit
   -> draft PR
-  -> CI + deployment-preview verification
-  -> bounded repair if needed
+  -> CI + deployment/runtime verification
+  -> bounded repair if justified
   -> measured post-run rescore
-  -> operational memory update
+  -> operational-memory update
 ```
 
-For a finish-until-target session, the control plane creates durable session state and dispatches the Cloud Run worker. The worker repeats the bounded `reason -> implement -> verify -> repair -> rescore` cycle until targets are met or a policy, risk, budget, no-progress, or execution stop condition applies.
+Finish Portfolio coordinates many such repository boundaries without collapsing them into one all-or-nothing write transaction.
 
-The key property is that reasoning and repository writes are separate phases. An agent may reason broadly, but only a validated bounded exact plan becomes write authority.
+Finish-until-target sessions persist durable state and can repeat bounded iterations through the Cloud Run Job worker.
 
 ## Reasoning architecture
 
@@ -198,117 +221,84 @@ The reasoning system is designed to reduce one-shot hallucination and shallow pl
 Major stages:
 
 1. **Evidence collection** — current repo metadata/tree and selected source/config/test/deployment files.
-2. **Learning retrieval** — repo-local and cross-repo measured operational memories.
-3. **Prompt strategy** — incumbent/challenger strategy selection under controlled experimentation.
-4. **Evidence analyst** — identifies blockers and root causes with confidence/evidence.
-5. **Critic** — rejects unsupported findings, identifies missing evidence and regression risk.
+2. **Learning retrieval** — repo-local and cross-repo measured operational memory.
+3. **Prompt strategy** — controlled incumbent/challenger strategy assignment.
+4. **Evidence analyst** — blockers/root causes with confidence/evidence.
+5. **Critic** — rejects unsupported findings and identifies missing evidence/regression risk.
 6. **Specialists** — selected from repository evidence rather than always spawning every role.
-7. **Principal planner** — synthesizes the smallest ordered completion plan with validation and stop conditions.
-8. **Coding agent** — turns the approved reasoning plan into exact file changes.
+7. **Principal planner** — smallest ordered completion plan with validation/stop conditions.
+8. **Coding agent** — exact file changes constrained by the reasoning plan and write policy.
 
-See `docs/REASONING_AND_LEARNING.md` for details.
+Immutable safety/approval policy sits outside prompt experimentation.
+
+See `docs/REASONING_AND_LEARNING.md`.
 
 ## Approval and rollback boundary
 
-The exact implementation plan includes the repository, default branch, base SHA, ordered changes, and plan hash.
+The implementation plan is bound to repository, default branch, base SHA, ordered changes, and plan hash/signature.
 
-Execution must fail closed when:
+Execution fails closed when:
 
-- the plan hash does not match,
-- the approved hash does not match the stored plan,
-- the repository base SHA moved after planning,
-- generated paths/content violate safety rules,
-- write limits are exceeded.
+- plan hash/signature does not match;
+- approval does not match the stored plan;
+- base SHA moved after planning;
+- generated paths/content violate safety rules;
+- write limits/budgets are exceeded.
 
-Generated work is committed on an isolated branch and opened as a draft pull request. Automatic merge is not the default policy.
+Generated work lands on an isolated branch and draft PR. Automatic merge is not the default policy.
 
-## Self-healing CI
+## Bounded self-healing CI
 
-If a generated commit fails required verification and the run permits bounded repair, RepoFinisher can:
+When an allowed generated commit fails verification, RepoFinisher can:
 
-- collect failed check/job/log evidence,
-- redact likely secret material,
-- retrieve prior repair/failure memories,
-- diagnose a root cause separately from patch generation,
-- reject low-confidence guessing,
-- generate a minimal source/config repair,
-- reject identical repeat repairs,
-- advance the existing RepoFinisher branch,
-- re-run verification,
-- persist repair evidence and outcomes.
+- collect failed check/job/log evidence;
+- redact likely secret material;
+- retrieve prior repair/failure memory;
+- diagnose root cause separately from patch generation;
+- reject low-confidence guessing;
+- generate a minimal safe source/config repair;
+- reject identical repeat repairs;
+- advance the existing branch;
+- re-run verification;
+- persist repair evidence/outcomes.
 
 Repairs cannot weaken tests, workflows, security governance, lockfiles, or existing test/lint/typecheck acceptance scripts just to pass.
 
-## Deployment verification
+## Deployment and product verification
 
-`verifyCommitChecks` combines GitHub check/status evidence with isolated deployment-preview evidence when available.
+`verifyCommitChecks` combines GitHub checks/statuses with deployment-preview evidence when available. Preview probing must preserve SSRF protections. Database/schema changes are only partially validated when no disposable migration/database acceptance signal exists.
 
-Preview probing applies SSRF protections and recognizes supported hosted-preview providers. Database/schema changes are explicitly marked as only partially validated when no disposable database/migration check is present.
+For RepoFinisher's own production release, the deploy workflow should verify direct Cloud Run surfaces before custom-domain/DNS cutover. Canonical-domain success is separate evidence from image deployment success.
 
-A passing check suite without a real runtime surface is useful evidence but should not be overstated as complete product validation.
+A green check suite without real runtime evidence is useful but must not be overstated as complete product validation.
 
 ## Portfolio intelligence
 
-RepoFinisher supports full-portfolio scoring and deeper cohorts.
+RepoFinisher supports full-portfolio and deeper cohort analysis, including:
 
-The intelligence system includes:
-
-- deterministic completion/readiness scoring,
-- evidence confidence,
-- current/potential valuation ranges,
-- commercialization probability heuristics,
-- replacement-cost planning estimates,
-- confidence-adjusted portfolio totals,
-- duplicate-IP overlap discounting,
-- bounded synergy adjustments,
-- tiered deep analysis for selected cohorts,
+- completion/readiness scoring;
+- evidence confidence;
+- current/potential valuation ranges;
+- commercialization heuristics;
+- replacement-cost planning estimates;
+- confidence-adjusted portfolio totals;
+- duplicate-IP overlap discounts;
+- bounded synergy adjustments;
+- tiered deeper analysis;
 - portfolio relationship graph signals.
 
-Commercial/market estimates must remain clearly labeled as estimates unless independently verified evidence exists.
+Commercial/market values remain estimates unless independently verified evidence exists.
 
 ## External LLM handoff
 
-For each repository, RepoFinisher can create a provider-neutral completion handoff and optional provider-specific formatting for external coding agents.
+RepoFinisher can generate a provider-neutral completion handoff and optional provider-specific formatting for external coding agents.
 
-The handoff is generated from the same current repository assessment and should include:
+The handoff should contain the assessed SHA, current state, evidence-backed blockers, ordered work, risks, validation requirements, security/approval boundaries, and the same Definition of Done used internally. If HEAD moved, the external agent must reassess.
 
-- assessed SHA,
-- current completion/readiness state,
-- root-cause blockers,
-- ordered plan,
-- risks,
-- validation requirements,
-- definition of done,
-- instruction to re-assess when the repository has moved.
+See `docs/EXTERNAL_LLM_HANDOFFS.md`.
 
-This path complements the internal completion engine; it is not allowed to become a reason to weaken the internal engine.
+## Source of truth
 
-## Continuous Repository Mode
+Stable architecture is defined by current `main`, this file, `README.md`, `AGENTS.md`, `docs/DECISIONS.md`, and `docs/OPERATIONS.md`. Time-sensitive rollout state belongs in `docs/PROJECT_STATE.md`.
 
-Continuous Repository Mode maintains per-repository watch settings and a durable event queue.
-
-Repository events are deduplicated and can trigger re-reasoning. Bounded autonomous finishing requires an explicit higher-autonomy acknowledgement. Continuous mode does not imply automatic merge permission.
-
-## Observability
-
-Sentry is optional but recommended for production frontend/API exception visibility and source-mapped diagnostics. Google Cloud Run/Job logs provide compute-plane runtime evidence. See `docs/sentry-observability.md`.
-
-Completion runs also have product-level observability through persisted:
-
-- run events,
-- steps,
-- reasoning traces,
-- repair attempts,
-- outcome metrics,
-- learning memories,
-- assurance/readiness results.
-
-## Known architectural debt and migration state
-
-Track current implementation gaps in `docs/PROJECT_STATE.md` rather than hiding them.
-
-A residual `@vercel/functions` dependency may remain in the API solely for compatibility/background-lifecycle behavior. It is not part of the approved hosting architecture and should be removed once its behavior is replaced safely.
-
-During the Cloud Run migration, Render remains intentionally available as a rollback endpoint until direct Cloud Run health/auth/CORS, Netlify cutover, production smoke, and at least one real completion-session Job have been verified. Do not interpret that temporary rollback endpoint as the architecture reverting to Render.
-
-The long-term goal is a provider-neutral application/control layer with explicit ephemeral worker boundaries and no Vercel runtime dependency.
+When code/workflows and documentation disagree, verify current `main` and fix the documentation rather than preserving architecture drift.
