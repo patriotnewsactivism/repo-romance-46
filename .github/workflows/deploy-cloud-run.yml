@@ -271,7 +271,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          if gcloud beta run domain-mappings describe --domain="${CUSTOM_DOMAIN}" --project="${PROJECT_ID}" --region="${REGION}" --format=json >/tmp/repofinisher-domain.json 2>/dev/null; then
+          # Fully managed Cloud Run custom domains currently use the beta command
+          # group. Every invocation is explicitly quiet so a runner can install
+          # the component on demand without an interactive prompt.
+          if gcloud beta run domain-mappings describe --domain="${CUSTOM_DOMAIN}" --project="${PROJECT_ID}" --region="${REGION}" --format=json --quiet >/tmp/repofinisher-domain.json 2>/dev/null; then
             mapped_service="$(jq -r '.spec.routeName // ""' /tmp/repofinisher-domain.json)"
             if [[ "${mapped_service}" != "${WEB_SERVICE}" ]]; then
               gcloud beta run domain-mappings create --service="${WEB_SERVICE}" --domain="${CUSTOM_DOMAIN}" --project="${PROJECT_ID}" --region="${REGION}" --force-override --quiet
@@ -283,7 +286,7 @@ jobs:
           record_types=()
           record_values=()
           for attempt in 1 2 3 4 5 6; do
-            gcloud beta run domain-mappings describe --domain="${CUSTOM_DOMAIN}" --project="${PROJECT_ID}" --region="${REGION}" --format=json >/tmp/repofinisher-domain.json
+            gcloud beta run domain-mappings describe --domain="${CUSTOM_DOMAIN}" --project="${PROJECT_ID}" --region="${REGION}" --format=json --quiet >/tmp/repofinisher-domain.json
             mapfile -t record_types < <(jq -r '.status.resourceRecords[]?.type' /tmp/repofinisher-domain.json)
             mapfile -t record_values < <(jq -r '.status.resourceRecords[]?.rrdata' /tmp/repofinisher-domain.json)
             [[ ${#record_types[@]} -gt 0 ]] && break
