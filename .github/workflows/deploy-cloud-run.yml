@@ -93,7 +93,7 @@ jobs:
             --max-retries=1
             --task-timeout=30m
             --command=node
-            "--args=--enable-source-maps,./dist/completion-session-job.mjs"
+            --args=--enable-source-maps,./dist/completion-session-job.mjs
 
       - name: Allow API runtime to execute worker job with per-run overrides
         shell: bash
