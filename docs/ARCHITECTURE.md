@@ -4,14 +4,15 @@ This document describes the intended production architecture and the major contr
 
 ## System boundaries
 
-RepoFinisher is a pnpm/TypeScript monorepo with four primary runtime concerns:
+RepoFinisher is a pnpm/TypeScript monorepo with five primary runtime concerns:
 
 1. **Frontend SPA** — `artifacts/repo-finisher`
-2. **Persistent API and agent orchestration** — `artifacts/api-server`
-3. **Shared repository-intelligence logic** — `lib/`
-4. **Persistent state/security boundary** — Supabase schema in `supabase/migrations/`
+2. **API/control plane** — `artifacts/api-server`
+3. **Long-running completion workers** — Cloud Run Jobs using the API-server worker entrypoint
+4. **Shared repository-intelligence logic** — `lib/`
+5. **Persistent state/security boundary** — Supabase schema in `supabase/migrations/`
 
-The production hosting contract is:
+The approved production hosting contract is:
 
 ```text
 Browser
@@ -21,15 +22,20 @@ Netlify (React/Vite SPA)
   |
   | HTTPS + Supabase bearer token
   v
-Render (Express API / long-running reasoning)
-  |             \
-  |              \ GitHub REST / Actions / PRs / deployment evidence
-  v               v
-Supabase           GitHub
-(Auth/RLS/DB/Vault)
+Google Cloud Run (Express API / control plane)
+  |                    \
+  |                     \-> Cloud Run Jobs (long-running completion work)
+  |                              |
+  |                              +-> GitHub REST / Actions / PRs / checks
+  |                              +-> configured AI provider
+  |
+  +-> Supabase (Auth/RLS/DB/Vault/durable job state)
+  +-> GitHub (repository evidence and writes)
 ```
 
-Vercel is not an approved production target.
+GitHub Actions provides repository CI/build/test evidence and deploys the RepoFinisher Cloud Run service/job through Google Workload Identity Federation.
+
+**Vercel is not an approved production target.** Render is retained only as a temporary rollback target during the Cloud Run cutover and is not the target architecture.
 
 ## Frontend
 
@@ -46,31 +52,52 @@ Responsibilities:
 - External-LLM prompt generation/copy UX.
 - Learning/audit/assurance visibility where surfaced.
 
-The frontend communicates with the persistent API through `VITE_API_BASE_URL`. Production currently targets `https://repofinisher-api-live.onrender.com`.
+The frontend communicates with the persistent API through `VITE_API_BASE_URL`. The target is the deployed Cloud Run API URL. During the migration only, the existing Render API remains the known-good rollback endpoint until Cloud Run passes direct health/authentication/CORS checks and the Netlify frontend is deliberately cut over.
 
 The frontend also communicates directly with Supabase for user-scoped auth/data paths as designed. RLS remains the authorization boundary for direct browser database access.
 
-## Persistent API
+## API / control plane
 
 The API lives in `artifacts/api-server` and is an Express application built to `dist/index.mjs`.
 
-The API owns operations that require trusted server authority or may run longer than a short frontend request:
+The API owns trusted control-plane operations including:
 
-- GitHub credential use.
-- repository inspection,
-- multi-agent reasoning,
+- request authentication and authorization,
+- GitHub credential use,
+- repository inspection and metadata access,
+- multi-agent reasoning/orchestration,
 - exact-plan creation,
-- repository writes,
-- draft PR creation,
-- CI/deployment verification,
-- CI self-healing,
+- repository-write authorization,
+- draft PR orchestration,
 - portfolio completion orchestration,
 - post-run re-scoring,
 - operational-learning persistence,
 - Supabase Vault AI credential access,
-- service-role-only operations.
+- service-role-only operations,
+- dispatch of long-running completion sessions to Cloud Run Jobs.
 
 The API validates user identity with Supabase before trusting authenticated requests.
+
+The API is intentionally not the permanent home for heavy or long-lived execution. Work that may outlive an HTTP request or materially benefit from independent CPU/memory allocation should move to the worker plane while preserving durable state in Supabase.
+
+## Cloud Run worker plane
+
+Finish-until-target completion sessions execute through the `completion-session-job` entrypoint built from the same immutable container image as the API.
+
+The API dispatches the Cloud Run Job using its attached Google runtime service-account identity and the Cloud Run v2 Jobs API. Per execution, it passes only:
+
+```text
+REPOFINISHER_USER_ID
+REPOFINISHER_SESSION_ID
+```
+
+Repository state, approval state, progress, GitHub credentials, AI credentials, CI state, and repair history are loaded from durable trusted storage rather than serialized into the job request.
+
+The worker reuses the existing completion-session lease/heartbeat mechanism and the API scheduler suppresses duplicate dispatch while a live/recent worker is detected. This prevents ordinary UI polling or retries from producing duplicate paid executions or duplicate branch writes.
+
+The worker can progress a durable session through planning, execution, CI verification, bounded repair, re-scoring, and subsequent bounded iterations. If its execution budget is reached, it yields without fabricating completion; the same durable session can be dispatched again.
+
+The initial worker allocation is larger than the control plane and exists only while work is running. Resource sizing should be tuned from measured CPU, memory, duration, failure, and queue data rather than by keeping an oversized API instance permanently alive.
 
 ## Supabase
 
@@ -88,7 +115,7 @@ Supabase provides:
 - continuous-repository settings/event queue,
 - portfolio relationships,
 - product-readiness results,
-- completion-session state,
+- completion-session state and worker leases,
 - encrypted AI BYOK storage through Supabase Vault.
 
 Schema changes are represented by forward-only SQL files in `supabase/migrations/`.
@@ -107,6 +134,14 @@ The `user_preferences` row stores an opaque Vault secret identifier, not the dec
 
 The legacy `custom_ai_key` column remains a compatibility fallback for old encrypted rows but is not the intended destination for new AI BYOK credentials.
 
+## Google Cloud identity and secrets
+
+GitHub Actions authenticates to Google Cloud with GitHub OIDC + Google Workload Identity Federation. A long-lived Google service-account JSON key is not part of the deployment design.
+
+The Cloud Run API and Job use a dedicated runtime service account. Backend secrets required by the compute host are injected from Google Secret Manager. During migration, the existing production `SECRET_ENCRYPTION_KEY` and `PLAN_SIGNING_SECRET` must be preserved so stored credentials and in-flight approved plans are not invalidated simply because the compute host changed.
+
+AI BYOK values remain in Supabase Vault and are not copied into browser configuration or job-dispatch payloads.
+
 ## GitHub integration
 
 GitHub is both an evidence source and the repository-write target.
@@ -121,6 +156,8 @@ RepoFinisher uses GitHub for:
 - isolated branches,
 - commits,
 - draft pull requests.
+
+GitHub Actions remains the normal source of truth for target-repository CI/build/test evidence. RepoFinisher does not need to keep every possible repository build toolchain permanently installed in the control-plane service.
 
 Generated work should never land directly on a target repository's default branch through the normal autonomous flow.
 
@@ -149,6 +186,8 @@ Repository selection
   -> measured post-run rescore
   -> operational memory update
 ```
+
+For a finish-until-target session, the control plane creates durable session state and dispatches the Cloud Run worker. The worker repeats the bounded `reason -> implement -> verify -> repair -> rescore` cycle until targets are met or a policy, risk, budget, no-progress, or execution stop condition applies.
 
 The key property is that reasoning and repository writes are separate phases. An agent may reason broadly, but only a validated bounded exact plan becomes write authority.
 
@@ -252,7 +291,7 @@ Repository events are deduplicated and can trigger re-reasoning. Bounded autonom
 
 ## Observability
 
-Sentry is optional but recommended for production frontend/API exception visibility and source-mapped diagnostics. See `docs/sentry-observability.md`.
+Sentry is optional but recommended for production frontend/API exception visibility and source-mapped diagnostics. Google Cloud Run/Job logs provide compute-plane runtime evidence. See `docs/sentry-observability.md`.
 
 Completion runs also have product-level observability through persisted:
 
@@ -264,10 +303,12 @@ Completion runs also have product-level observability through persisted:
 - learning memories,
 - assurance/readiness results.
 
-## Known architectural debt
+## Known architectural debt and migration state
 
 Track current implementation gaps in `docs/PROJECT_STATE.md` rather than hiding them.
 
-As of the current baseline, a residual `@vercel/functions` dependency may remain in the API solely for compatibility/background-lifecycle behavior. It is not part of the approved hosting architecture and should be removed once its behavior is replaced safely.
+A residual `@vercel/functions` dependency may remain in the API solely for compatibility/background-lifecycle behavior. It is not part of the approved hosting architecture and should be removed once its behavior is replaced safely.
 
-The long-term goal is a provider-neutral persistent API with no Vercel runtime dependency at all.
+During the Cloud Run migration, Render remains intentionally available as a rollback endpoint until direct Cloud Run health/auth/CORS, Netlify cutover, production smoke, and at least one real completion-session Job have been verified. Do not interpret that temporary rollback endpoint as the architecture reverting to Render.
+
+The long-term goal is a provider-neutral application/control layer with explicit ephemeral worker boundaries and no Vercel runtime dependency.
