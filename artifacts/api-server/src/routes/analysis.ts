@@ -558,13 +558,31 @@ interface StageModels {
   thinkingBudget: number;
 }
 
-/** Returns the best models for each analysis stage based on provider and tier. */
-function getStageModels(provider: string, tier: string): StageModels {
+/**
+ * Returns the models for each analysis stage.
+ *
+ * `exactModel` is the identifier resolved by `loadAiCredential` — the user's
+ * saved model, or the platform default for the provider. docs/AI_PROVIDERS.md
+ * makes it authoritative: RepoFinisher must run the model that was configured
+ * rather than substituting one of its own. Without it, an OpenRouter account
+ * fell through to the stage defaults below and was asked for `gpt-4o-mini`,
+ * which is not an OpenRouter model identifier at all.
+ */
+export function getStageModels(provider: string, tier: string, exactModel?: string | null): StageModels {
+  const stages = defaultStageModels(provider, tier);
+  const pinned = exactModel?.trim();
+  if (!pinned) return stages;
+  return { ...stages, profilerModel: pinned, critiqueModel: pinned, synthesisModel: pinned };
+}
+
+/** Per-stage fallbacks used only when no exact model identifier is configured. */
+function defaultStageModels(provider: string, tier: string): StageModels {
   const DEFAULT: Record<string, string> = {
     github_models: "gpt-4o-mini",
     openai: "gpt-4o",
     anthropic: "claude-sonnet-4-20250514",
     google: "gemini-3.7-flash",
+    openrouter: "deepseek/deepseek-v4-flash-0731",
     custom: "gpt-4o",
   };
   const base = DEFAULT[provider] ?? "gemini-3.7-flash";
@@ -588,7 +606,7 @@ function getStageModels(provider: string, tier: string): StageModels {
         };
       case "google":
         return { profilerModel: "gemini-3.7-flash", critiqueModel: "gemini-3.7-flash", synthesisModel: "gemini-3.7-flash", useThinking: false, thinkingBudget: 0 };
-      default:
+      default: // openrouter and anything else: the provider's own default model
         return { profilerModel: base, critiqueModel: base, synthesisModel: base, useThinking: false, thinkingBudget: 0 };
     }
   }
@@ -608,8 +626,8 @@ function getStageModels(provider: string, tier: string): StageModels {
       };
     case "google":
       return { profilerModel: "gemini-3.7-flash", critiqueModel: "gemini-3.7-flash", synthesisModel: "gemini-3.7-flash", useThinking: false, thinkingBudget: 0 };
-    default: // github_models — no reasoning models available, use what we have
-      return { profilerModel: "gpt-4o-mini", critiqueModel: "gpt-4o-mini", synthesisModel: "gpt-4o-mini", useThinking: false, thinkingBudget: 0 };
+    default: // openrouter/github_models — no dedicated reasoning tier, use the provider's own default
+      return { profilerModel: base, critiqueModel: base, synthesisModel: base, useThinking: false, thinkingBudget: 0 };
   }
 }
 
@@ -1028,6 +1046,7 @@ interface AnalysisContext {
   token: string;
   prefs: {
     custom_ai_provider: string;
+    custom_ai_model: string | null;
     custom_ai_key: string | null;
     filter_max_repos: number;
     filter_languages: string[] | null;
@@ -1043,7 +1062,7 @@ async function createAnalysisRow(ctx: AnalysisContext): Promise<string> {
   const { supabase, userId, prefs, triggerType } = ctx;
   const provider = prefs?.custom_ai_provider || "google";
   const tier = prefs?.analysis_tier || "balanced";
-  const models = getStageModels(provider, tier);
+  const models = getStageModels(provider, tier, prefs?.custom_ai_model);
   const { data: analysis, error: aErr } = await supabase
     .from("analyses")
     .insert({
@@ -1117,8 +1136,8 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
 
     const provider = prefs?.custom_ai_provider || "google";
     const aiKey = prefs?.custom_ai_key || null;
-    const aiConfig = { provider, apiKey: aiKey };
-    const stageModels = getStageModels(provider, tier);
+    const aiConfig = { provider, model: prefs?.custom_ai_model ?? null, apiKey: aiKey };
+    const stageModels = getStageModels(provider, tier, prefs?.custom_ai_model);
 
     if (!aiKey) {
       throw new Error(`AI provider "${provider}" has no configured API key. Configure a valid server-side or BYOK credential before running analysis.`);
@@ -1463,6 +1482,10 @@ async function getAnalysisContext(supabase: SupabaseClient, userId: string, trig
   const aiCredential = await loadAiCredential(supabase, userId, credential.token);
   const normalizedPrefs: AnalysisContext["prefs"] = {
     custom_ai_provider: aiCredential.provider,
+    // loadAiCredential already resolved the user's saved model, falling back to
+    // the platform default for the provider. Carrying it here keeps the analysis
+    // stages on the configured model instead of a hardcoded per-provider guess.
+    custom_ai_model: aiCredential.model,
     custom_ai_key: aiCredential.apiKey,
     filter_max_repos: prefs?.filter_max_repos ?? 200,
     filter_languages: prefs?.filter_languages ?? null,

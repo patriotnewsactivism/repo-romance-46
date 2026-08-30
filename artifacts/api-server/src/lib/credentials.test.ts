@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { normalizeAiProvider, platformAiProvider } from "./credentials";
+import { normalizeAiProvider, platformAiKey, platformAiProvider, platformAiStatus } from "./credentials";
 
 const AI_ENV_KEYS = [
   "AI_PROVIDER",
@@ -73,5 +73,37 @@ describe("platformAiProvider", () => {
 
   it("uses OpenRouter as the BYOK-oriented default when no platform key exists", () => {
     expect(platformAiProvider()).toBe("openrouter");
+  });
+});
+
+describe("blank platform credentials", () => {
+  // A Render env var that exists but holds only whitespace used to read as a
+  // configured credential all the way to the provider call.
+  it("does not treat a whitespace-only key as a configured platform credential", () => {
+    process.env.OPENROUTER_API_KEY = "   ";
+    expect(platformAiKey("openrouter")).toBeNull();
+    expect(platformAiStatus().providers.openrouter.platformConfigured).toBe(false);
+  });
+
+  it("fails over to a provider that has a real key rather than selecting the blank one", () => {
+    process.env.AI_PROVIDER = "openrouter";
+    process.env.OPENROUTER_API_KEY = " ";
+    process.env.GEMINI_API_KEY = "test-gemini-key";
+    expect(platformAiProvider()).toBe("google");
+  });
+
+  it("trims a padded key so it is usable instead of silently failing to authenticate", () => {
+    process.env.OPENROUTER_API_KEY = "  test-openrouter-key\n";
+    expect(platformAiKey("openrouter")).toBe("test-openrouter-key");
+  });
+
+  it("normalizes blank values for every platform provider", () => {
+    process.env.GEMINI_API_KEY = " ";
+    process.env.GOOGLE_API_KEY = "\t";
+    process.env.OPENAI_API_KEY = "  ";
+    process.env.ANTHROPIC_API_KEY = "\n";
+    expect(platformAiKey("google")).toBeNull();
+    expect(platformAiKey("openai")).toBeNull();
+    expect(platformAiKey("anthropic")).toBeNull();
   });
 });
