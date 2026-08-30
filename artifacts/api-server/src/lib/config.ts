@@ -21,6 +21,8 @@ function env(...names: string[]): string {
 }
 
 const KNOWN_FRONTEND_ORIGINS = [
+  "https://repofinisher-web-z6kubh2jtq-uc.a.run.app",
+  "https://repofinish.donmatthews.live",
   "https://repofinisher.donmatthews.live",
   "https://repofinisher.netlify.app",
 ] as const;
@@ -69,7 +71,9 @@ export const config: AppConfig = loadConfig();
 /** Throw a 500-shaped error when a feature's required configuration is absent. */
 export function requireConfig(value: string, name: string): string {
   if (!value) {
-    throw Object.assign(new Error(`${name} is not configured on the server`), { status: 500 });
+    throw Object.assign(new Error(`${name} is not configured on the server`), {
+      status: 500,
+    });
   }
   return value;
 }
