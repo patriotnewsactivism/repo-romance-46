@@ -6,8 +6,8 @@ import { loadBaselineInvestmentMetrics } from "../lib/post-run-evolution";
 import {
   listCompletionSessionEvents,
   loadCompletionSession,
-  scheduleCompletionSession,
 } from "../lib/completion-session-worker";
+import { scheduleCompletionSession } from "../lib/completion-session-scheduler";
 
 const router: IRouter = Router();
 
@@ -103,8 +103,10 @@ router.post(
       },
     });
 
-    if (!alreadyComplete) scheduleCompletionSession(req.supabase!, userId, String(session.id));
-    res.status(201).json({ session, baseline, scheduled: !alreadyComplete, automaticMerge: false });
+    const workerMode = alreadyComplete
+      ? null
+      : await scheduleCompletionSession(req.supabase!, userId, String(session.id));
+    res.status(201).json({ session, baseline, scheduled: !alreadyComplete, workerMode, automaticMerge: false });
   }),
 );
 
@@ -133,7 +135,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const { sessionId } = z.object({ sessionId: z.string().uuid() }).parse(req.params);
     const session = await loadCompletionSession(req.supabase!, req.userId!, sessionId);
-    if (session.status === "active") scheduleCompletionSession(req.supabase!, req.userId!, sessionId);
+    if (session.status === "active") await scheduleCompletionSession(req.supabase!, req.userId!, sessionId);
     const [events, runs] = await Promise.all([
       listCompletionSessionEvents(req.supabase!, req.userId!, sessionId),
       req.supabase!
@@ -157,8 +159,8 @@ router.post(
     if (session.status !== "active") {
       throw Object.assign(new Error(`Session cannot resume from terminal status ${session.status}.`), { status: 409 });
     }
-    scheduleCompletionSession(req.supabase!, req.userId!, sessionId);
-    res.status(202).json({ sessionId, status: session.status, phase: session.phase, scheduled: true });
+    const workerMode = await scheduleCompletionSession(req.supabase!, req.userId!, sessionId);
+    res.status(202).json({ sessionId, status: session.status, phase: session.phase, scheduled: true, workerMode });
   }),
 );
 
@@ -169,7 +171,7 @@ router.post(
     const { sessionId } = z.object({ sessionId: z.string().uuid() }).parse(req.params);
     const session = await loadCompletionSession(req.supabase!, req.userId!, sessionId);
     if (session.status !== "active") {
-      throw Object.assign(new Error(`Session cannot be cancelled from status ${session.status}.`), { status: 409 });
+      throw Object.assign(new Error(`Session cannot be cancelled from terminal status ${session.status}.`), { status: 409 });
     }
     const now = new Date().toISOString();
     const reason = "Cancelled by user. Existing draft PR/branch is preserved for inspection; nothing is automatically merged or deleted.";
