@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { callAI, resolveAIRequestTimeoutMs, type AIRequest } from "./ai-provider";
+import { callAI, resolveAIRequestTimeoutMs, sanitizeGeminiResponseSchema, type AIRequest } from "./ai-provider";
 
 function request(system: string, extra: Partial<AIRequest> = {}): AIRequest {
   return {
@@ -148,5 +148,96 @@ describe("credential normalization", () => {
 
     const [, init] = fetchMock.mock.calls[0];
     expect(new Headers(init?.headers).get("x-api-key")).toBe("test-api-key");
+  });
+});
+
+describe("Google structured-output compatibility", () => {
+  it("removes redundant numeric min/max constraints recursively without weakening array limits", () => {
+    expect(
+      sanitizeGeminiResponseSchema({
+        type: "object",
+        properties: {
+          confidence: { type: "number", minimum: 0, maximum: 100 },
+          findings: {
+            type: "array",
+            maxItems: 16,
+            items: {
+              type: "object",
+              properties: {
+                score: { type: "number", minimum: 0, maximum: 100 },
+              },
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      type: "object",
+      properties: {
+        confidence: { type: "number" },
+        findings: {
+          type: "array",
+          maxItems: 16,
+          items: {
+            type: "object",
+            properties: {
+              score: { type: "number" },
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it("sends the resolved Gemini model and sanitized schema on the wire", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"confidence":50}' }] } }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    await callAI(
+      request("structured", {
+        timeoutMs: 1000,
+        responseFormat: {
+          type: "json_schema",
+          json_schema: {
+            name: "confidence_test",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: { confidence: { type: "number", minimum: 0, maximum: 100 } },
+              required: ["confidence"],
+            },
+          },
+        },
+      }),
+      { provider: "google", model: "gemini-3.7-flash", apiKey: "test-gemini-key" },
+    );
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent");
+    const body = JSON.parse(String(init?.body));
+    expect(body.generationConfig.responseJsonSchema.properties.confidence).toEqual({ type: "number" });
+  });
+
+  it("attributes upstream failures to the provider and resolved model while exposing only a safe public message", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: "schema rejected" } }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const error = await callAI(
+      request("bad structured request", { timeoutMs: 1000 }),
+      { provider: "google", model: "gemini-3.7-flash", apiKey: "test-gemini-key" },
+    ).catch((caught) => caught as Error & { status?: number; code?: string; publicMessage?: string });
+
+    expect(error.message).toMatch(/Google Gemini API error 400 for model "gemini-3\.7-flash"/);
+    expect(error.status).toBe(502);
+    expect(error.code).toBe("AI_PROVIDER_ERROR");
+    expect(error.publicMessage).toMatch(/gemini-3\.7-flash/);
+    expect(error.publicMessage).not.toMatch(/schema rejected/);
   });
 });

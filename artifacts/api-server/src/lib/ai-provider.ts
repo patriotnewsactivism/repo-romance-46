@@ -28,6 +28,12 @@ export interface AIResponse {
   thinkingContent?: string;
 }
 
+type PublicHttpError = Error & {
+  status?: number;
+  code?: string;
+  publicMessage?: string;
+};
+
 const DEFAULT_MODELS: Record<string, string> = {
   google: "gemini-3.7-flash",
   openai: "gpt-4o",
@@ -67,6 +73,64 @@ export function resolveAIRequestTimeoutMs(request: AIRequest): number {
   return DEFAULT_REQUEST_TIMEOUT_MS;
 }
 
+/**
+ * Gemini's structured-output validator rejects numeric minimum/maximum keywords
+ * used by RepoFinisher's confidence fields even though the application already
+ * clamps those values after parsing. Remove only those redundant wire-level
+ * constraints, recursively, while preserving the rest of the schema.
+ */
+export function sanitizeGeminiResponseSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => sanitizeGeminiResponseSchema(item));
+  if (!value || typeof value !== "object") return value;
+
+  const output: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (key === "minimum" || key === "maximum") continue;
+    output[key] = sanitizeGeminiResponseSchema(child);
+  }
+  return output;
+}
+
+function providerDisplayName(provider: string) {
+  if (provider === "google") return "Google Gemini";
+  if (provider === "openrouter") return "OpenRouter";
+  if (provider === "openai") return "OpenAI";
+  if (provider === "anthropic") return "Anthropic";
+  return provider;
+}
+
+function providerRequestError(provider: string, model: string, status: number, detail: string): PublicHttpError {
+  const display = providerDisplayName(provider);
+  let publicMessage: string;
+  if (status === 400) {
+    publicMessage = `${display} rejected the AI request for model "${model}". Verify that the configured model supports the requested structured-output features, then retry.`;
+  } else if (status === 401 || status === 403) {
+    publicMessage = `${display} rejected the configured credential for model "${model}". Re-save the provider key in Settings or fix the server-side provider credential.`;
+  } else if (status === 429) {
+    publicMessage = `${display} rate-limited model "${model}". Retry shortly or choose another configured model/provider.`;
+  } else {
+    publicMessage = `${display} failed while running model "${model}" (upstream HTTP ${status}). Retry or choose another configured model/provider.`;
+  }
+
+  return Object.assign(
+    new Error(`${display} API error ${status} for model "${model}": ${detail.slice(0, 300)}`),
+    {
+      status: 502,
+      code: "AI_PROVIDER_ERROR",
+      publicMessage,
+    },
+  );
+}
+
+function missingCredentialError(provider: string): PublicHttpError {
+  const message = `No usable credential is configured for "${provider}". Save a BYOK key in Settings or configure the matching server-side provider key.`;
+  return Object.assign(new Error(message), {
+    status: 424,
+    code: "AI_PROVIDER_UNCONFIGURED",
+    publicMessage: message,
+  });
+}
+
 async function fetchWithRetry(
   url: string,
   options: RequestInit,
@@ -86,9 +150,12 @@ async function fetchWithRetry(
       res = await fetch(url, { ...options, signal: controller.signal });
     } catch (error) {
       if (controller.signal.aborted) {
-        throw new Error(
-          `${provider} request exceeded ${Math.round(timeoutMs / 1000)}s and was cancelled to keep the analysis worker responsive.`,
-        );
+        const message = `${providerDisplayName(provider)} request exceeded ${Math.round(timeoutMs / 1000)}s and was cancelled to keep the analysis worker responsive.`;
+        throw Object.assign(new Error(message), {
+          status: 504,
+          code: "AI_PROVIDER_TIMEOUT",
+          publicMessage: `${providerDisplayName(provider)} timed out. Retry or choose another configured model/provider.`,
+        } satisfies Partial<PublicHttpError>);
       }
       throw error;
     } finally {
@@ -117,7 +184,11 @@ async function fetchWithRetry(
       lastError = `Provider remained unavailable after ${maxRetries + 1} attempts. Last response: ${(await res.text()).slice(0, 200)}`;
     }
   }
-  throw new Error(`AI provider retry budget exhausted for ${provider}. ${lastError}`);
+  throw Object.assign(new Error(`AI provider retry budget exhausted for ${provider}. ${lastError}`), {
+    status: 502,
+    code: "AI_PROVIDER_UNAVAILABLE",
+    publicMessage: `${providerDisplayName(provider)} remained unavailable after the retry budget was exhausted. Retry later or choose another configured provider.`,
+  } satisfies Partial<PublicHttpError>);
 }
 
 const PROVIDER_ENDPOINTS: Record<string, string> = {
@@ -175,7 +246,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`Anthropic API error ${res.status}: ${text.slice(0, 300)}`);
+      throw providerRequestError("anthropic", model, res.status, text);
     }
 
     const json = (await res.json()) as { content: Array<{ type: string; text?: string; thinking?: string }> };
@@ -203,7 +274,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     };
     if (request.responseFormat?.json_schema?.schema) {
       generationConfig.responseMimeType = "application/json";
-      generationConfig.responseJsonSchema = request.responseFormat.json_schema.schema;
+      generationConfig.responseJsonSchema = sanitizeGeminiResponseSchema(request.responseFormat.json_schema.schema);
     }
 
     const body: Record<string, unknown> = { contents, generationConfig };
@@ -223,7 +294,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`Google Gemini API error ${res.status}: ${text.slice(0, 300)}`);
+      throw providerRequestError("google", model, res.status, text);
     }
 
     const json = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
@@ -255,7 +326,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`${provider} API error ${res.status}: ${text.slice(0, 300)}`);
+      throw providerRequestError(provider, model, res.status, text);
     }
 
     const json = (await res.json()) as { choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }> };
@@ -266,10 +337,9 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
   }
 
   if (provider === "github_models") {
-    throw new Error("GitHub Models is no longer a supported platform default. Switch the provider to Google Gemini.");
+    const message = "GitHub Models is no longer a supported platform default. Switch the provider to Google Gemini.";
+    throw Object.assign(new Error(message), { status: 422, code: "AI_PROVIDER_UNSUPPORTED", publicMessage: message });
   }
 
-  throw new Error(
-    `No usable credential is configured for "${provider}". Save a BYOK key in Settings or configure the matching server-side provider key.`,
-  );
+  throw missingCredentialError(provider);
 }

@@ -582,7 +582,11 @@ export async function reasonAboutRepositoryPlan(
       resolvePromptStrategy(supabase, userId),
     ]);
     const aiCredential = await loadAiCredential(supabase, userId, github.token);
-    const ai = { provider: aiCredential.provider, apiKey: aiCredential.apiKey };
+    // Preserve the exact provider/model selected in Settings (or the platform
+    // default resolved by loadAiCredential) across every reasoning stage. The
+    // previous object dropped `model`, causing callAI to silently fall back to a
+    // provider default during external-prompt generation and autonomous finish.
+    const ai = { provider: aiCredential.provider, model: aiCredential.model, apiKey: aiCredential.apiKey };
     const memory = memoryGuidance(memories, 14);
     const legacyGuidance = arrayOfStrings(learning.promptGuidance, 12);
     const specialistSelections = selectSpecialists({

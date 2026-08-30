@@ -99,15 +99,21 @@ app.use("/api", router);
 installExpressErrorHandler(app);
 
 // Centralized error handler — thrown errors (via asyncHandler) land here.
-// Attach `.status` to an Error to control the HTTP status code.
-app.use((err: Error & { status?: number }, req: Request, res: Response, _next: NextFunction) => {
+// Attach `.status` to control the HTTP status. A trusted internal subsystem may
+// also attach a pre-sanitized `.publicMessage`; raw upstream/provider bodies are
+// still kept out of the client response.
+app.use((err: Error & { status?: number; code?: string; publicMessage?: string }, req: Request, res: Response, _next: NextFunction) => {
   const status = err.status ?? 500;
   if (status >= 500) {
     req.log?.error({ err }, "Unhandled error");
     runInBackground(flushSentry(), "sentry-flush");
   }
-  // Internal failures must not leak stack details or upstream messages.
-  res.status(status).json({ error: status >= 500 ? "Internal server error" : err.message || "Request failed" });
+
+  const message = err.publicMessage || (status >= 500 ? "Internal server error" : err.message || "Request failed");
+  res.status(status).json({
+    error: message,
+    ...(err.code ? { code: err.code } : {}),
+  });
 });
 
 export default app;
