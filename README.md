@@ -6,17 +6,21 @@ RepoFinisher is not intended to be a one-shot code generator. The product is des
 
 ## Production architecture
 
-The canonical production architecture is:
+The approved production architecture is:
 
 - **Frontend:** React/Vite SPA on **Netlify**.
-- **API / long-running agent work:** Express API on **Render** at `https://repofinisher-api-live.onrender.com`.
+- **API / control plane:** Express API on **Google Cloud Run**.
+- **Long-running completion work:** **Google Cloud Run Jobs**, dispatched from the API with durable Supabase session state and per-execution session/user overrides.
+- **Repository CI/build/test evidence:** **GitHub Actions** and GitHub checks.
 - **Database, authentication, RLS, and Vault:** **Supabase**.
 - **Source control, pull requests, checks, and repository evidence:** **GitHub**.
-- **Observability:** Sentry when configured.
+- **Observability:** Sentry when configured, plus Cloud Run/Cloud Logging runtime logs.
 
 **Vercel is not an approved deployment target for this repository. Do not deploy RepoFinisher to Vercel or reintroduce Vercel hosting artifacts.** CI enforces a subset of this policy.
 
-The intended canonical frontend domain is `https://repofinisher.donmatthews.live`. See [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md) before changing DNS or hosting because the frontend migration may have an outstanding Netlify source-deploy/domain step.
+During the Render-to-Cloud-Run cutover, the existing Render API is retained strictly as a rollback target until the Cloud Run service has passed direct-host health checks, the Netlify frontend has been rebuilt against the Cloud Run API URL, and production seam smoke passes. See [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md) and [`docs/CLOUD_RUN_MIGRATION.md`](docs/CLOUD_RUN_MIGRATION.md) before changing production DNS or environment variables.
+
+The intended canonical frontend domain is `https://repofinisher.donmatthews.live`.
 
 ## What RepoFinisher does
 
@@ -33,6 +37,7 @@ Core capabilities include:
 - Isolated branches and draft pull requests for generated work.
 - CI and deployment-preview verification.
 - Bounded self-healing CI repair that diagnoses root causes and does not weaken validation to obtain a passing result, including direct completion and Finish Portfolio execution paths.
+- Finish-until-target completion sessions that can reason, implement, verify, repair, rescore, and iterate toward explicit completion/readiness targets.
 - Continuous Repository Mode for re-reasoning after repository events.
 - Portfolio relationship analysis for duplicate/shared IP, frontend/backend pairs, workers, merge candidates, and archive candidates.
 - Product/security assurance checks.
@@ -42,17 +47,18 @@ Core capabilities include:
 
 ```text
 artifacts/
-  api-server/             Persistent Express API and autonomous orchestration
+  api-server/             Express API/control plane plus Cloud Run Job entrypoints
   repo-finisher/          Production React/Vite frontend
   repo-finisher-mobile/   Mobile artifact; excluded from the root production build
   mockup-sandbox/         Non-production sandbox artifact
-lib/                      Shared workspace libraries, including repo intelligence
-scripts/                  Smoke checks and repository tooling
-supabase/migrations/      Forward-only database migrations
-docs/                     Architecture, operations, project state, and subsystem docs
-.github/workflows/        CI and production smoke workflows
+infra/gcp/                 One-time Google Cloud/WIF bootstrap tooling
+lib/                       Shared workspace libraries, including repo intelligence
+scripts/                   Smoke checks and repository tooling
+supabase/migrations/       Forward-only database migrations
+docs/                      Architecture, operations, project state, and subsystem docs
+.github/workflows/         CI, Cloud Run deployment, and production smoke workflows
 netlify.toml               Netlify frontend build configuration
-Dockerfile.apiserver      Persistent API container/build support
+Dockerfile.apiserver       Cloud Run API/worker container
 ```
 
 ## Development
@@ -107,11 +113,13 @@ Important rules:
 
 1. `VITE_*` values are browser-visible. Never put service-role keys, AI provider secrets, GitHub tokens, signing secrets, or encryption keys in a `VITE_*` variable.
 2. The frontend needs `VITE_API_BASE_URL`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_ANON_KEY`.
-3. The API needs `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and `PLAN_SIGNING_SECRET` for the features that depend on them.
+3. The API needs `SUPABASE_URL`, `SUPABASE_ANON_KEY`, a trusted Supabase backend key (`SUPABASE_SECRET_KEY` preferred), `PLAN_SIGNING_SECRET`, and `SECRET_ENCRYPTION_KEY` for the features that depend on them.
 4. User-supplied AI provider keys are stored through **Supabase Vault**. The browser never receives the decrypted credential.
 5. `SECRET_ENCRYPTION_KEY` remains relevant to legacy/server-sealed credentials such as stored GitHub connections. It is not the primary storage mechanism for new AI BYOK credentials.
+6. In production, `CLOUD_RUN_JOBS_ENABLED=true` makes the API dispatch finish-until-target sessions to the named Cloud Run Job instead of depending on request-lifetime background CPU.
+7. Google Cloud authentication from GitHub Actions uses Workload Identity Federation. Do not add a long-lived service-account JSON key to GitHub secrets.
 
-See [`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md) for provider/model behavior.
+See [`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md) for provider/model behavior and [`docs/CLOUD_RUN_MIGRATION.md`](docs/CLOUD_RUN_MIGRATION.md) for deployment setup.
 
 ## Autonomous completion contract
 
@@ -124,6 +132,7 @@ Repository-writing behavior must preserve these boundaries:
 - Secrets may not be requested for inclusion in repository content or written into generated source.
 - If the repository changes after planning, the plan is stale and must be regenerated.
 - Passing CI alone is not proof that a repository is fully finished. Completion/readiness must be re-measured and unresolved product blockers must remain visible.
+- Cloud Run worker retries must reuse durable session/lease state; they may not duplicate branch writes simply because an execution is retried.
 
 The evidence threshold for calling a target repository materially complete is defined in [`docs/DEFINITION_OF_DONE.md`](docs/DEFINITION_OF_DONE.md). Internal finishing and external-LLM handoffs must use the same substantive completion standard.
 
@@ -168,7 +177,9 @@ For every migration:
 - typecheck,
 - production build.
 
-`.github/workflows/production-smoke.yml` verifies the production seams among Netlify, Render, and Supabase when manually dispatched.
+`.github/workflows/deploy-cloud-run.yml` builds an immutable container image, deploys the completion-session Cloud Run Job, grants the runtime identity permission to invoke that specific job with overrides, deploys the API service, and verifies `/api/healthz`. It authenticates through GitHub OIDC/Google Workload Identity Federation rather than a service-account key.
+
+`.github/workflows/production-smoke.yml` verifies the production seams among Netlify, the selected persistent API endpoint, and Supabase when manually dispatched.
 
 Do not merge a feature merely because local code looks correct. A normal release should have green CI, a successful target-host deployment, and relevant runtime smoke evidence. Use [`docs/RELEASE-CHECKLIST.md`](docs/RELEASE-CHECKLIST.md) for production-impacting work and [`docs/INCIDENT_RESPONSE.md`](docs/INCIDENT_RESPONSE.md) when production is degraded or unsafe.
 
@@ -180,6 +191,7 @@ Do not merge a feature merely because local code looks correct. A normal release
 - [`SECURITY.md`](SECURITY.md) — security and secret-handling requirements.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system architecture and data/control flow.
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — deployment, environment, smoke, incident, and rollback procedures.
+- [`docs/CLOUD_RUN_MIGRATION.md`](docs/CLOUD_RUN_MIGRATION.md) — Google Cloud Run/Jobs bootstrap, deployment, cutover, and rollback plan.
 - [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md) — current operational checkpoint and known remaining work.
 - [`docs/DEFINITION_OF_DONE.md`](docs/DEFINITION_OF_DONE.md) — evidence standard for declaring a target repository materially complete.
 - [`docs/REASONING_AND_LEARNING.md`](docs/REASONING_AND_LEARNING.md) — reasoning, memory, experiments, and self-healing behavior.

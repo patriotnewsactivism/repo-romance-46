@@ -1,0 +1,173 @@
+name: Deploy Cloud Run
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "artifacts/api-server/**"
+      - "lib/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+      - "Dockerfile.apiserver"
+      - ".github/workflows/deploy-cloud-run.yml"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: repofinisher-cloud-run-production
+  cancel-in-progress: false
+
+env:
+  REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  ARTIFACT_REPOSITORY: repofinisher
+  IMAGE_NAME: repofinisher-api
+  API_SERVICE: repofinisher-api
+  COMPLETION_JOB: repofinisher-completion-session
+  SUPABASE_URL: ${{ vars.SUPABASE_URL || 'https://rdsrxfzahhxbvugyarld.supabase.co' }}
+  SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY || 'sb_publishable_95xMusG9KjCGJemIa8dgcw_-8JqzgER' }}
+
+jobs:
+  deploy:
+    if: ${{ vars.GCP_PROJECT_ID != '' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_DEPLOY_SERVICE_ACCOUNT != '' && vars.GCP_RUNTIME_SERVICE_ACCOUNT != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Configure Artifact Registry authentication
+        shell: bash
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - name: Build and push immutable API image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPOSITORY}/${IMAGE_NAME}:${GITHUB_SHA}"
+          echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
+          docker build --file Dockerfile.apiserver --tag "${IMAGE}" .
+          docker push "${IMAGE}"
+
+      - name: Deploy completion-session worker job
+        id: deploy_job
+        uses: google-github-actions/deploy-cloudrun@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          region: ${{ env.REGION }}
+          job: ${{ env.COMPLETION_JOB }}
+          image: ${{ env.IMAGE }}
+          env_vars: |-
+            NODE_ENV=production
+            SUPABASE_URL=${{ env.SUPABASE_URL }}
+            SUPABASE_ANON_KEY=${{ env.SUPABASE_ANON_KEY }}
+            LOG_LEVEL=info
+            AI_PROVIDER=openrouter
+            OPENROUTER_MODEL=deepseek/deepseek-v4-flash-0731
+            CLOUD_RUN_JOBS_ENABLED=false
+          secrets: |-
+            SUPABASE_SECRET_KEY=repofinisher-supabase-backend-key:latest
+            SECRET_ENCRYPTION_KEY=repofinisher-secret-encryption-key:latest
+            PLAN_SIGNING_SECRET=repofinisher-plan-signing-secret:latest
+          flags: >-
+            --service-account=${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+            --cpu=2
+            --memory=2Gi
+            --max-retries=1
+            --task-timeout=30m
+            --command=node
+            --args=--enable-source-maps,./dist/completion-session-job.mjs
+
+      - name: Allow API runtime to execute worker job with per-run overrides
+        shell: bash
+        env:
+          RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+          gcloud run jobs add-iam-policy-binding "${COMPLETION_JOB}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --member="serviceAccount:${RUNTIME_SERVICE_ACCOUNT}" \
+            --role="roles/run.developer" \
+            --quiet
+
+      - name: Deploy API control plane
+        id: deploy_api
+        uses: google-github-actions/deploy-cloudrun@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          region: ${{ env.REGION }}
+          service: ${{ env.API_SERVICE }}
+          image: ${{ env.IMAGE }}
+          timeout: 300s
+          env_vars: |-
+            NODE_ENV=production
+            SUPABASE_URL=${{ env.SUPABASE_URL }}
+            SUPABASE_ANON_KEY=${{ env.SUPABASE_ANON_KEY }}
+            CORS_ALLOWED_ORIGINS=https://repofinisher.donmatthews.live,https://repofinisher.netlify.app
+            LOG_LEVEL=info
+            AI_PROVIDER=openrouter
+            OPENROUTER_MODEL=deepseek/deepseek-v4-flash-0731
+            CLOUD_RUN_JOBS_ENABLED=true
+            GCP_PROJECT_ID=${{ env.PROJECT_ID }}
+            GCP_REGION=${{ env.REGION }}
+            COMPLETION_SESSION_JOB=${{ env.COMPLETION_JOB }}
+          secrets: |-
+            SUPABASE_SECRET_KEY=repofinisher-supabase-backend-key:latest
+            SECRET_ENCRYPTION_KEY=repofinisher-secret-encryption-key:latest
+            PLAN_SIGNING_SECRET=repofinisher-plan-signing-secret:latest
+          flags: >-
+            --service-account=${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+            --cpu=1
+            --memory=1Gi
+            --min-instances=0
+            --max-instances=5
+            --concurrency=20
+            --allow-unauthenticated
+
+      - name: Verify Cloud Run API directly
+        shell: bash
+        env:
+          API_URL: ${{ steps.deploy_api.outputs.url }}
+        run: |
+          set -euo pipefail
+          echo "Cloud Run API: ${API_URL}"
+          for attempt in 1 2 3 4 5; do
+            if curl --fail --silent --show-error "${API_URL}/api/healthz" >/dev/null; then
+              exit 0
+            fi
+            sleep $((attempt * 3))
+          done
+          echo "Cloud Run API health check failed." >&2
+          exit 1
+
+      - name: Publish deployment summary
+        shell: bash
+        env:
+          API_URL: ${{ steps.deploy_api.outputs.url }}
+        run: |
+          {
+            echo "## RepoFinisher Cloud Run deployment"
+            echo
+            echo "- API: ${API_URL}"
+            echo "- Worker job: ${COMPLETION_JOB}"
+            echo "- Image: ${IMAGE}"
+            echo "- Region: ${REGION}"
+          } >> "$GITHUB_STEP_SUMMARY"

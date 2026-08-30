@@ -4,25 +4,31 @@ This is a lightweight decision log for choices that should not be casually rever
 
 If a decision changes, update this file in the same PR and explain why.
 
-## D001 — Production hosting is Netlify + Render + Supabase + GitHub
+## D001 — Production hosting is Netlify + Cloud Run + Cloud Run Jobs + Supabase + GitHub
 
-**Status:** accepted
+**Status:** accepted; supersedes the prior Netlify + Render hosting decision
 
 RepoFinisher production hosting is:
 
 - Netlify for the frontend SPA,
-- Render for the persistent API and long-running agent work,
-- Supabase for auth/database/RLS/Vault,
-- GitHub for source/CI/PRs.
+- Google Cloud Run for the API/control plane,
+- Google Cloud Run Jobs for long-running finish-until-target completion work,
+- GitHub Actions for CI/build/test evidence and Google Cloud deployment,
+- Supabase for auth/database/RLS/Vault/durable completion state,
+- GitHub for source/CI/PRs/repository evidence.
 
-**Vercel is explicitly not an approved deployment target.**
+**Vercel is explicitly not an approved deployment target.** Render is retained only as a temporary rollback endpoint during the Cloud Run cutover and should be retired after production acceptance succeeds.
 
-Rationale: RepoFinisher performs multi-step reasoning, portfolio orchestration, and repair work that benefits from a persistent API rather than fitting the core backend into short synchronous frontend/serverless execution windows. A prior Vercel production outage/migration also made hosting ambiguity an operational risk.
+Rationale: RepoFinisher needs a stable control plane, but heavy/long-running completion work should not force the request-serving API to remain on a large always-on instance. Cloud Run Jobs let RepoFinisher allocate CPU/memory only while a completion worker is active, while durable Supabase state and GitHub Actions preserve execution/verification evidence. This also removes Render instance sizing as the primary scaling constraint without introducing Vercel.
 
 Consequences:
 
 - Do not add Vercel hosting config.
 - CI should continue guarding against Vercel hosting artifacts.
+- Keep the Netlify frontend; change its `VITE_API_BASE_URL` only after the Cloud Run API is directly verified.
+- Use GitHub OIDC + Google Workload Identity Federation rather than a long-lived Google service-account JSON key.
+- Keep long-running worker state durable in Supabase; do not depend on request-lifetime process memory.
+- Keep Render available only until Cloud Run + Netlify production smoke and at least one real Cloud Run completion job are proven.
 - Residual runtime compatibility dependencies should be removed when safely replaceable.
 
 ## D002 — Exact plan approval is a write boundary
@@ -137,3 +143,13 @@ Architecture, hosting, security storage, environment variables, autonomy policy,
 Model-specific instruction files remain pointers to `AGENTS.md` rather than divergent policies.
 
 Rationale: RepoFinisher is complex enough that undocumented architecture drift directly causes production and agent errors.
+
+## D013 — Long-running completion execution must be durable and independently schedulable
+
+**Status:** accepted
+
+Finish-until-target sessions must persist their authoritative progress, leases, iterations, branch/PR state, CI state, and stop conditions outside the worker process. Cloud Run Jobs may be retried or re-dispatched, but a new worker execution must resume durable state rather than replay completed repository writes.
+
+The API may use an in-process fallback for local development or controlled migration, but production long-running completion work should use the worker plane once Cloud Run Jobs are configured.
+
+Rationale: ephemeral compute is economical only if process death, retry, UI polling, and execution time limits cannot corrupt progress or duplicate writes.
