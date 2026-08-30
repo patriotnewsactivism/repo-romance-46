@@ -1,35 +1,41 @@
 # RepoFinisher Architecture and Product Decisions
 
-This is a lightweight decision log for choices that should not be casually reversed by a later coding session.
+This is the durable decision log for choices that should not be casually reversed by a later coding session.
 
 If a decision changes, update this file in the same PR and explain why.
 
-## D001 — Production hosting is Netlify + Cloud Run + Cloud Run Jobs + Supabase + GitHub
+## D001 — Production runtime is Google Cloud Run + Supabase + GitHub
 
-**Status:** accepted; supersedes the prior Netlify + Render hosting decision
+**Status:** accepted; supersedes the earlier Netlify + Render and Netlify + Cloud Run transitional topologies
 
-RepoFinisher production hosting is:
+Canonical production runtime is:
 
-- Netlify for the frontend SPA,
-- Google Cloud Run for the API/control plane,
-- Google Cloud Run Jobs for long-running finish-until-target completion work,
-- GitHub Actions for CI/build/test evidence and Google Cloud deployment,
-- Supabase for auth/database/RLS/Vault/durable completion state,
-- GitHub for source/CI/PRs/repository evidence.
+- Google Cloud Run service `repofinisher-web` for the frontend SPA;
+- Google Cloud Run service `repofinisher-api` for the API/control plane;
+- Google Cloud Run Job `repofinisher-completion-session` for long-running finish-until-target work;
+- GitHub Actions for CI/build/test and Google Cloud deployment;
+- Google Artifact Registry for immutable images;
+- Google Secret Manager for backend compute-host secrets;
+- Supabase for auth/database/RLS/Vault/durable completion state;
+- GitHub for source/branches/draft PRs/check evidence;
+- Cloudflare for canonical custom-domain DNS;
+- Sentry/Cloud Logging for observability when configured.
 
-**Vercel is explicitly not an approved deployment target.** Render is retained only as a temporary rollback endpoint during the Cloud Run cutover and should be retired after production acceptance succeeds.
+**Vercel is explicitly not an approved deployment target.**
 
-Rationale: RepoFinisher needs a stable control plane, but heavy/long-running completion work should not force the request-serving API to remain on a large always-on instance. Cloud Run Jobs let RepoFinisher allocate CPU/memory only while a completion worker is active, while durable Supabase state and GitHub Actions preserve execution/verification evidence. This also removes Render instance sizing as the primary scaling constraint without introducing Vercel.
+`netlify.toml` and the former Render service are legacy migration/rollback artifacts, not current production targets. They may only be reactivated through an explicit, verified rollback decision.
+
+Rationale: RepoFinisher benefits from one provider-neutral containerized execution platform for the web/control plane while keeping heavy, long-running completion work independently schedulable. Cloud Run Jobs allocate larger resources only while work exists. Durable Supabase state prevents process lifetime, retry, or UI polling from becoming the authoritative execution state.
 
 Consequences:
 
-- Do not add Vercel hosting config.
-- CI should continue guarding against Vercel hosting artifacts.
-- Keep the Netlify frontend; change its `VITE_API_BASE_URL` only after the Cloud Run API is directly verified.
-- Use GitHub OIDC + Google Workload Identity Federation rather than a long-lived Google service-account JSON key.
-- Keep long-running worker state durable in Supabase; do not depend on request-lifetime process memory.
-- Keep Render available only until Cloud Run + Netlify production smoke and at least one real Cloud Run completion job are proven.
-- Residual runtime compatibility dependencies should be removed when safely replaceable.
+- Do not add Vercel hosting configuration.
+- Keep CI's non-Vercel hosting guard.
+- Deploy immutable SHA-tagged images through GitHub OIDC + Workload Identity Federation; do not use long-lived Google service-account JSON keys.
+- Keep long-running worker state durable in Supabase and protect against duplicate worker/branch writes with leases/heartbeats.
+- Verify direct Cloud Run surfaces before changing custom-domain DNS.
+- Treat Cloudflare domain mapping/DNS as part of production release evidence.
+- Keep rollback artifacts only while they have a defined, tested rollback purpose; remove them when obsolete.
 
 ## D002 — Exact plan approval is a write boundary
 
@@ -69,12 +75,12 @@ Rationale: make improvement auditable and tied to real results.
 
 Repository completion should favor:
 
-- current evidence collection,
-- multiple/root-cause hypotheses where appropriate,
-- skeptical critique,
-- evidence-selected specialists,
-- principal-plan synthesis,
-- explicit validation and stop conditions,
+- current evidence collection;
+- multiple/root-cause hypotheses when appropriate;
+- skeptical critique;
+- evidence-selected specialists;
+- principal-plan synthesis;
+- explicit validation and stop conditions;
 
 over one large undifferentiated prompt.
 
@@ -84,21 +90,21 @@ Rationale: reduce shallow planning, unsupported assumptions, and repeated error 
 
 **Status:** accepted
 
-New user-supplied AI provider keys are stored in Supabase Vault through service-role-only backend functions. The browser stores/sees only safe provider/model/configuration metadata and an opaque secret reference indirectly through server-managed state.
-
-Rationale: decouple AI credential storage from host-specific encryption keys and avoid plaintext/browser exposure.
+New user-supplied AI provider keys are stored in Supabase Vault through service-role-only backend functions. The browser only receives safe provider/model/configuration metadata; it never receives the decrypted provider key.
 
 The legacy `custom_ai_key` path is compatibility-only.
+
+Rationale: decouple AI credential storage from compute-host-specific encryption and avoid plaintext/browser exposure.
 
 ## D007 — External LLM prompts complement, not replace, RepoFinisher
 
 **Status:** accepted
 
-Each repository may have a detailed current-state completion handoff for an external coding agent (Codex, Claude Code, Gemini CLI, or neutral target).
+Each repository may have a detailed current-state completion handoff for an external coding agent such as Codex, Claude Code, Gemini CLI, or a provider-neutral target.
 
-The handoff should reuse RepoFinisher's assessment/evidence and definition of done. It is not an excuse to leave RepoFinisher's internal completion engine weaker.
+The handoff must reuse RepoFinisher's assessment/evidence and Definition of Done. It is not an excuse to leave RepoFinisher's internal completion engine weaker.
 
-Rationale: provide portability and operator choice while preserving the product's core autonomous capability.
+Rationale: provide portability/operator choice while preserving the product's core autonomous capability.
 
 ## D008 — Passing CI is not equivalent to a finished repository
 
@@ -106,9 +112,9 @@ Rationale: provide portability and operator choice while preserving the product'
 
 A successful implementation run should be re-scored for completion and production readiness. Remaining user-flow, security, deployment, data, payment, accessibility, or operational blockers must remain visible.
 
-The intended architecture includes repeated bounded iterations until a target is reached or a no-progress/risk/budget stop occurs.
+The intended architecture supports repeated bounded iterations until a target is reached or a no-progress/risk/budget/policy stop occurs.
 
-Rationale: a syntactically/build-correct PR can still leave the product substantially unfinished.
+Rationale: a build-correct PR can still leave the product substantially unfinished.
 
 ## D009 — Portfolio orchestration preserves per-repository failure boundaries
 
@@ -142,14 +148,24 @@ Architecture, hosting, security storage, environment variables, autonomy policy,
 
 Model-specific instruction files remain pointers to `AGENTS.md` rather than divergent policies.
 
-Rationale: RepoFinisher is complex enough that undocumented architecture drift directly causes production and agent errors.
+Rationale: undocumented architecture drift directly causes production and agent errors.
 
 ## D013 — Long-running completion execution must be durable and independently schedulable
 
 **Status:** accepted
 
-Finish-until-target sessions must persist their authoritative progress, leases, iterations, branch/PR state, CI state, and stop conditions outside the worker process. Cloud Run Jobs may be retried or re-dispatched, but a new worker execution must resume durable state rather than replay completed repository writes.
+Finish-until-target sessions must persist authoritative progress, leases, iterations, branch/PR state, CI state, and stop conditions outside the worker process. Cloud Run Jobs may retry or be re-dispatched, but a new worker execution must resume durable state rather than replay completed repository writes.
 
-The API may use an in-process fallback for local development or controlled migration, but production long-running completion work should use the worker plane once Cloud Run Jobs are configured.
+An in-process fallback may exist for local development or controlled recovery, but production long-running completion work should use the worker plane while Cloud Run Jobs are configured.
 
 Rationale: ephemeral compute is economical only if process death, retry, UI polling, and execution time limits cannot corrupt progress or duplicate writes.
+
+## D014 — Custom-domain cutover is a release step, not a source-code assumption
+
+**Status:** accepted
+
+The canonical domain is `repofinisher.donmatthews.live`, but source code alone does not prove that the domain maps to the intended current revision.
+
+The deployment workflow may manage Cloud Run domain mapping and Cloudflare DNS only after direct service verification. Release/incident reporting must distinguish direct-host health from canonical-domain verification.
+
+Rationale: DNS/certificate/domain state can lag or diverge independently of a successful image deployment.
