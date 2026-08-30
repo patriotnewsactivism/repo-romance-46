@@ -38,6 +38,14 @@ interface VibeToolsPanelProps {
     combine_result?: CombineResult | null;
     milestone_plan?: Milestone[] | null;
   };
+  /**
+   * Hand a milestone's goals to the card's finish action. Without this, a
+   * milestone plan is a dead end: the text tells the user to approve a
+   * milestone, but nothing carries its goals into the work.
+   */
+  onSelectMilestone?: (milestone: Milestone) => void;
+  /** Order of the milestone currently driving the finish action, if any. */
+  activeMilestoneOrder?: number | null;
 }
 
 function fmtUsd(n: number) {
@@ -50,7 +58,15 @@ function copy(t: string, label: string) {
   navigator.clipboard.writeText(t).then(() => toast.success(`${label} copied`));
 }
 
-export function VibeToolsPanel({ analysisId, itemRank, kind, repos, existing }: VibeToolsPanelProps) {
+export function VibeToolsPanel({
+  analysisId,
+  itemRank,
+  kind,
+  repos,
+  existing,
+  onSelectMilestone,
+  activeMilestoneOrder,
+}: VibeToolsPanelProps) {
   const [market, setMarket] = useState<MarketAnalysis | null>(existing?.market_analysis ?? null);
   const [valuation, setValuation] = useState<MarketValuation | null>(existing?.valuation ?? null);
   const [spec, setSpec] = useState<VibeSpec | null>(existing?.vibe_spec ?? null);
@@ -408,21 +424,40 @@ export function VibeToolsPanel({ analysisId, itemRank, kind, repos, existing }: 
             Finish plan ({milestones.length} milestone{milestones.length === 1 ? "" : "s"})
           </div>
           <p className="text-xs text-muted-foreground">
-            Nothing has been written. Approve a milestone, then use “Plan changes” on the repository to review each
-            file before anything is committed.
+            Nothing has been written yet. Choose a milestone to drive the finish action on this recommendation — its
+            goals replace the default next steps, and you still review the proposed changes before anything is
+            committed.
           </p>
-          {milestones.map((m) => (
-            <div key={m.order} className="text-sm border-l-2 border-border pl-2">
-              <div className="text-xs font-medium">{m.title}</div>
-              <ul className="mt-0.5 space-y-0.5">
-                {m.goals.map((goal) => (
-                  <li key={goal} className="text-xs text-muted-foreground">
-                    • {goal}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+          {milestones.map((m) => {
+            const isActive = activeMilestoneOrder === m.order;
+            return (
+              <div key={m.order} className="text-sm border-l-2 border-border pl-2">
+                <div className="flex items-start gap-2">
+                  <div className="flex-1">
+                    <div className="text-xs font-medium">{m.title}</div>
+                    <ul className="mt-0.5 space-y-0.5">
+                      {m.goals.map((goal) => (
+                        <li key={goal} className="text-xs text-muted-foreground">
+                          • {goal}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  {onSelectMilestone && (
+                    <Button
+                      size="sm"
+                      variant={isActive ? "secondary" : "outline"}
+                      onClick={() => onSelectMilestone(m)}
+                      className="shrink-0 text-xs"
+                      data-testid={`button-select-milestone-${m.order}`}
+                    >
+                      {isActive ? "Selected" : "Use these goals"}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </Card>
       )}
     </div>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertBranchName, assertCommitSha, assertRepoSlug, encodePath } from "./github";
+import { assertBranchName, assertCommitSha, assertRepoSlug, encodePath, resolveTreeMode } from "./github";
 
 describe("assertRepoSlug", () => {
   it("accepts an ordinary owner/name", () => {
@@ -53,5 +53,35 @@ describe("encodePath", () => {
   it("encodes each segment while preserving the separators", () => {
     expect(encodePath("src/my file.ts")).toBe("src/my%20file.ts");
     expect(encodePath("docs/a?b#c.md")).toBe("docs/a%3Fb%23c.md");
+  });
+});
+
+describe("resolveTreeMode", () => {
+  it("defaults a brand-new path to a regular file", () => {
+    expect(resolveTreeMode("docs/new.md", undefined)).toBe("100644");
+  });
+
+  it("keeps the executable bit on a modified script", () => {
+    expect(resolveTreeMode("scripts/deploy.sh", "100755")).toBe("100755");
+  });
+
+  it("keeps a regular file regular", () => {
+    expect(resolveTreeMode("src/index.ts", "100644")).toBe("100644");
+  });
+
+  it.each([
+    ["120000", "a symlink"],
+    ["160000", "a submodule"],
+    ["040000", "a directory"],
+  ])("refuses to rewrite %s (%s) as a plain blob", (mode) => {
+    expect(() => resolveTreeMode("weird/path", mode)).toThrow(/Refusing to rewrite special Git object/);
+  });
+
+  it("reports the refusal as a client error", () => {
+    try {
+      resolveTreeMode("link", "120000");
+    } catch (err) {
+      expect((err as { status?: number }).status).toBe(400);
+    }
   });
 });

@@ -96,6 +96,8 @@ export interface TreeNode {
   type: "blob" | "tree";
   sha: string;
   size?: number;
+  /** Git file mode, e.g. 100644, 100755 (executable), 120000 (symlink). */
+  mode?: string;
 }
 
 export async function getRepoTree(token: string, repo: string, ref: string): Promise<TreeNode[]> {
@@ -138,6 +140,29 @@ export interface AtomicChange {
   content?: string;
 }
 
+/** Modes this helper is willing to write. */
+const REGULAR_FILE = "100644";
+const EXECUTABLE_FILE = "100755";
+
+export type WritableTreeMode = typeof REGULAR_FILE | typeof EXECUTABLE_FILE;
+
+/**
+ * Which mode a tree entry should carry.
+ *
+ * A path that already exists keeps its mode, so modifying an executable script
+ * does not quietly drop its executable bit. A path Git represents as something
+ * other than a regular or executable file — a symlink (120000) or a submodule
+ * (160000) — is refused rather than rewritten as a plain blob, because that
+ * would be a behavioral change nobody reviewed.
+ */
+export function resolveTreeMode(path: string, existingMode: string | undefined): WritableTreeMode {
+  if (existingMode === undefined) return REGULAR_FILE;
+  if (existingMode === REGULAR_FILE || existingMode === EXECUTABLE_FILE) return existingMode;
+  throw Object.assign(new Error(`Refusing to rewrite special Git object ${path} (mode ${existingMode})`), {
+    status: 400,
+  });
+}
+
 /**
  * Write every change as a single commit on a new branch.
  *
@@ -162,10 +187,16 @@ export async function createAtomicCommit(
     "Reading base commit",
   );
 
-  const treeEntries: { path: string; mode: "100644"; type: "blob"; sha: string | null }[] = [];
+  // See `resolveTreeMode`: existing paths keep the mode they already have.
+  const existingModes = new Map(
+    (await getRepoTree(token, repo, params.baseSha)).map((node) => [node.path, node.mode]),
+  );
+
+  const treeEntries: { path: string; mode: WritableTreeMode; type: "blob"; sha: string | null }[] = [];
   for (const change of params.changes) {
+    const mode = resolveTreeMode(change.path, existingModes.get(change.path));
     if (change.content === undefined) {
-      treeEntries.push({ path: change.path, mode: "100644", type: "blob", sha: null });
+      treeEntries.push({ path: change.path, mode, type: "blob", sha: null });
       continue;
     }
     const blob = await ghJson<{ sha: string }>(
@@ -178,7 +209,7 @@ export async function createAtomicCommit(
       },
       `Creating blob for ${change.path}`,
     );
-    treeEntries.push({ path: change.path, mode: "100644", type: "blob", sha: blob.sha });
+    treeEntries.push({ path: change.path, mode, type: "blob", sha: blob.sha });
   }
 
   const tree = await ghJson<{ sha: string }>(

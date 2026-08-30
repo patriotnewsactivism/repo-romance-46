@@ -2,7 +2,7 @@ FROM public.ecr.aws/docker/library/node:22-slim AS builder
 
 WORKDIR /app
 
-RUN corepack enable && corepack prepare pnpm@10.5.2 --activate
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 COPY . .
 
@@ -14,7 +14,7 @@ FROM public.ecr.aws/docker/library/node:22-slim AS runner
 
 WORKDIR /app
 
-RUN corepack enable && corepack prepare pnpm@10.5.2 --activate
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 COPY . .
 
