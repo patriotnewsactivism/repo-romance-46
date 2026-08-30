@@ -9,6 +9,7 @@ import { ChevronDown, ChevronUp, Target, Zap, GitMerge, Loader2, Twitter, Linked
 import { toast } from 'sonner';
 import { FinishRepoAction } from '@/components/finish-repo-action';
 import { VibeToolsPanel } from '@/components/vibe-tools-panel';
+import type { Milestone } from '@workspace/api-client-react';
 
 interface RecommendationCardProps {
   recommendation: Recommendation;
@@ -19,6 +20,9 @@ interface RecommendationCardProps {
 
 export function RecommendationCard({ recommendation, analysisId, isPublic = false }: RecommendationCardProps) {
   const [isOpen, setIsOpen] = useState(false);
+  // A milestone the user picked in the vibe-tools panel drives the finish
+  // action instead of the recommendation's default next steps.
+  const [activeMilestone, setActiveMilestone] = useState<Milestone | null>(null);
   const [showMerge, setShowMerge] = useState(false);
   const getMergeInstructions = useGetMergeInstructions();
 
@@ -116,13 +120,17 @@ export function RecommendationCard({ recommendation, analysisId, isPublic = fals
           <div className="space-y-3 border-t border-border pt-4">
             <div>
               <h4 className="font-semibold text-sm">Autonomous Finish</h4>
-              <p className="text-xs text-muted-foreground">Finish directly from this card without opening the details panel.</p>
+              <p className="text-xs text-muted-foreground">
+                {activeMilestone
+                  ? `Working ${activeMilestone.title} — its goals replace the default next steps.`
+                  : 'Finish directly from this card without opening the details panel.'}
+              </p>
             </div>
             {recommendation.repos.map((repo) => (
               <FinishRepoAction
                 key={repo}
                 repo={repo}
-                nextSteps={recommendation.next_steps}
+                nextSteps={activeMilestone?.goals ?? recommendation.next_steps}
                 analysisId={analysisId}
                 itemRank={recommendation.rank}
                 initialResult={recommendation.finish_result}
@@ -241,6 +249,8 @@ export function RecommendationCard({ recommendation, analysisId, isPublic = fals
                   combine_result: recommendation.combine_result,
                   milestone_plan: recommendation.milestone_plan,
                 }}
+                onSelectMilestone={setActiveMilestone}
+                activeMilestoneOrder={activeMilestone?.order ?? null}
               />
             )}
           </CollapsibleContent>

@@ -9,7 +9,7 @@ ENV VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
 
 WORKDIR /app
 
-RUN corepack enable && corepack prepare pnpm@10.5.2 --activate
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 COPY . .
 
@@ -23,7 +23,7 @@ FROM node:22-slim AS runner
 
 WORKDIR /app
 
-RUN corepack enable && corepack prepare pnpm@10.5.2 --activate
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 COPY . .
 
