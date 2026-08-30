@@ -65,29 +65,10 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v3
 
-      - name: Verify required production Secret Manager values exist
-        shell: bash
-        run: |
-          set -euo pipefail
-          required=(
-            repofinisher-supabase-backend-key
-            repofinisher-secret-encryption-key
-            repofinisher-plan-signing-secret
-          )
-          for secret_name in "${required[@]}"; do
-            gcloud secrets describe "${secret_name}" --project="${PROJECT_ID}" >/dev/null
-            enabled_version="$(gcloud secrets versions list "${secret_name}" \
-              --project="${PROJECT_ID}" \
-              --filter='state=ENABLED' \
-              --format='value(name)' \
-              --limit=1)"
-            if [[ -z "${enabled_version}" ]]; then
-              echo "Required secret ${secret_name} has no enabled version." >&2
-              exit 1
-            fi
-            echo "Verified ${secret_name} has an enabled version."
-          done
-
+      # The deployer intentionally does not have Secret Manager metadata access.
+      # Cloud Run validates secret references while creating revisions, and the
+      # post-deploy environment audit below verifies every required binding by
+      # name without widening IAM just to perform a redundant preflight.
       - name: Configure Artifact Registry authentication
         shell: bash
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
