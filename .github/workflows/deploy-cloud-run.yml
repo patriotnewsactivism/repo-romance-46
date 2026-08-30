@@ -81,6 +81,7 @@ jobs:
             SUPABASE_URL=${{ env.SUPABASE_URL }}
             SUPABASE_ANON_KEY=${{ env.SUPABASE_ANON_KEY }}
             LOG_LEVEL=info
+            NODE_OPTIONS=--enable-source-maps
             AI_PROVIDER=openrouter
             OPENROUTER_MODEL=deepseek/deepseek-v4-flash-0731
             CLOUD_RUN_JOBS_ENABLED=false
@@ -95,7 +96,7 @@ jobs:
             --max-retries=1
             --task-timeout=30m
             --command=node
-            --args=--enable-source-maps,./dist/completion-session-job.mjs
+            --args=./dist/completion-session-job.mjs
 
       - name: Allow API runtime to execute worker job with per-run overrides
         shell: bash
