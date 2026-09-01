@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useParams, useLocation, Link } from 'wouter';
 import { useGetAnalysis, getGetAnalysisQueryKey, useShareAnalysis, useRerunAnalysis } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { getSession } from '@/lib/auth';
+import { getSession, signInWithGitHub } from '@/lib/auth';
 import { AppHeader } from '@/components/app-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -129,6 +129,9 @@ export default function AnalysisDetail() {
 
   const { analysis, items } = detail;
   const StageIcon = analysis.error && analysis.status === 'running' ? getStageIcon(analysis.error) : Loader2;
+  const githubAuthFailed = analysis.status === 'failed' && Boolean(
+    analysis.error && /bad credentials|github[^\n]*401|expired|revoked|connect github/i.test(analysis.error),
+  );
 
   return (
     <div className="min-h-screen bg-background dark">
@@ -166,9 +169,20 @@ export default function AnalysisDetail() {
 
         {analysis.status === 'failed' && (
           <Card className="border-destructive/40 bg-destructive/5">
-            <CardContent className="pt-6">
+            <CardContent className="pt-6 space-y-3">
               <p className="font-semibold text-destructive">Analysis failed</p>
-              {analysis.error && <p className="text-sm text-muted-foreground mt-2 break-words">{analysis.error}</p>}
+              {githubAuthFailed ? (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    GitHub authorization expired or was revoked. Reconnect GitHub, then rerun this analysis.
+                  </p>
+                  <Button onClick={() => signInWithGitHub()} data-testid="button-reconnect-github">
+                    Reconnect GitHub
+                  </Button>
+                </>
+              ) : (
+                analysis.error && <p className="text-sm text-muted-foreground break-words">{analysis.error}</p>
+              )}
             </CardContent>
           </Card>
         )}
