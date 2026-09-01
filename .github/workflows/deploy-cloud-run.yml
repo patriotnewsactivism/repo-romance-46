@@ -5,18 +5,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - "artifacts/api-server/**"
-      - "artifacts/repo-finisher/**"
-      - "lib/**"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "package.json"
-      - "Dockerfile.apiserver"
-      - "Dockerfile.frontend"
-      - "Dockerfile"
-      - "netlify.toml"
-      - ".github/workflows/deploy-cloud-run.yml"
 
 permissions:
   contents: read
