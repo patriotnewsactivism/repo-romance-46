@@ -50,7 +50,7 @@ const updateSchema = z.object({
   filter_languages: z.array(z.string().max(60)).max(50).optional(),
   filter_exclude_archived: z.boolean().optional(),
   filter_min_stars: z.number().int().min(0).optional(),
-  filter_max_repos: z.number().int().min(2).max(500).optional(),
+  filter_max_repos: z.number().int().min(2).max(1000).optional(),
   analysis_tier: z.enum(["fast", "balanced", "deep"]).optional(),
 });
 
