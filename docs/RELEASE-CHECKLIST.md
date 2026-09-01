@@ -96,7 +96,7 @@ If domain/DNS configuration is affected:
 - [ ] Direct frontend/API surfaces are healthy before DNS mutation.
 - [ ] Cloud Run domain mapping targets `repofinisher-web`.
 - [ ] Mapping emits valid DNS records.
-- [ ] Cloudflare zone/record change targets `repofinisher.donmatthews.live`.
+- [ ] Cloudflare zone/record change targets `portfolio.donmatthews.live`.
 - [ ] Cloudflare token remains in secret storage.
 - [ ] Canonical HTTPS domain resolves and serves the intended frontend revision.
 - [ ] Certificate/domain propagation state is verified rather than assumed.
