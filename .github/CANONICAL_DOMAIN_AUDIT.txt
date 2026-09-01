@@ -1,0 +1,2 @@
+Runtime-verified Google Cloud Run mapping: portfolio.donmatthews.live -> repofinisher-web (us-central1)
+Verified from Google Cloud Console screenshot provided 2026-09-01.
