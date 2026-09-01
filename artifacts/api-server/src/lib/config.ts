@@ -22,7 +22,7 @@ function env(...names: string[]): string {
 
 const KNOWN_FRONTEND_ORIGINS = [
   "https://repofinisher-web-z6kubh2jtq-uc.a.run.app",
-  "https://repofinisher.donmatthews.live",
+  "https://portfolio.donmatthews.live",
 ] as const;
 
 function corsAllowedOrigins(): string[] {
