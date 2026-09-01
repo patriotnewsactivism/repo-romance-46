@@ -47,6 +47,8 @@ Direct service verification and canonical-domain verification are separate relea
 
 The frontend package is `@workspace/repo-finisher` in `artifacts/repo-finisher`. `Dockerfile.frontend` builds the SPA into the `repofinisher-web` container.
 
+Google Cloud Build/Cloud Run repository triggers that use the default `docker build .` contract require the root `Dockerfile`. That compatibility entrypoint builds the same frontend and contains safe public defaults for the Cloud Run API and Supabase browser configuration. The canonical GitHub Actions release continues to build `Dockerfile.frontend` and `Dockerfile.apiserver` explicitly; the root Dockerfile is not a replacement for the API/worker image.
+
 Required browser-build values:
 
 ```text
