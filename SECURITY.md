@@ -75,7 +75,7 @@ Security requirements:
 
 ## Cloudflare DNS
 
-The deployment workflow may update DNS for `repofinisher.donmatthews.live` through a Cloudflare API token stored in GitHub secrets.
+The deployment workflow may update DNS for `portfolio.donmatthews.live` through a Cloudflare API token stored in GitHub secrets.
 
 Do not log the token. Domain/DNS changes occur only after direct Cloud Run surfaces are healthy. Never delete working DNS before the replacement mapping has emitted valid records.
 
@@ -141,7 +141,7 @@ At minimum:
 
 Production authenticated API access must use explicit first-party origins. Do not replace production CORS with `*` to work around a frontend/domain migration.
 
-The canonical browser origin is `https://repofinisher.donmatthews.live`; direct Cloud Run origins may be allowed only when deliberately required for verification/operations.
+The canonical browser origin is `https://portfolio.donmatthews.live`; direct Cloud Run origins may be allowed only when deliberately required for verification/operations.
 
 ## Dependency and workflow security
 
