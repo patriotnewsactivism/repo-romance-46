@@ -114,3 +114,9 @@ The Full Portfolio Value screen includes a collapsible plain-language capability
 - protected by an exact-plan or documentation-only guard.
 
 The goal is that users can understand what a click will do before authorizing it.
+
+The guide is expanded by default on **Finish, Value & Reports**. Market research, feature opportunities, documentation reconciliation, and plan-first implementation are also rendered directly on every ranked repository rather than being hidden only inside an expanded recommendation card.
+
+## Full portfolio scope
+
+Settings offers explicit 50, 100, 250, 500, and **All accessible repositories** scopes. All maps to a bounded maximum of 1,000 repositories per run and uses paginated GitHub discovery. This is a product/runtime safety bound, not a model-specific repository cap. The selected AI model does not silently reduce the requested repository scope; large portfolios use the existing tiered evidence/deep-digest strategy and report exact scored/requested coverage.
