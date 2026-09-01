@@ -20,6 +20,8 @@ For time-sensitive status read `docs/PROJECT_STATE.md` first. For the current Go
 
 Former Netlify/Render configuration is legacy migration/rollback material, not the current target architecture.
 
+The custom-domain cutover uses the documented Cloud Run DomainMappings REST API from GitHub Actions. Do not replace it with `gcloud beta run domain-mappings`: that command can prompt for beta-component installation in a non-interactive runner and leave `repofinisher.donmatthews.live` serving a stale legacy host even after the Cloud Run services deploy successfully.
+
 ## Production endpoints
 
 Canonical frontend:
