@@ -77,6 +77,7 @@ docs/                     Architecture, operations, state, policy, runbooks
 .github/workflows/        CI, Cloud Run deploy, production smoke
 Dockerfile.apiserver      API/worker image
 Dockerfile.frontend       Frontend image
+Dockerfile                Root frontend compatibility entrypoint for Cloud Build repository triggers
 netlify.toml               Legacy frontend-host configuration; not canonical production
 ```
 
