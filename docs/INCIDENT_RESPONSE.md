@@ -49,7 +49,7 @@ Check:
 - `/api/healthz` on the direct Cloud Run URL;
 - Cloud Run request/application logs;
 - required runtime variables and Secret Manager bindings;
-- CORS for `https://repofinisher.donmatthews.live`;
+- CORS for `https://portfolio.donmatthews.live`;
 - Supabase bearer-token validation;
 - runtime service-account identity/permissions;
 - provider-specific failures separately from storage/auth failures.
@@ -76,7 +76,7 @@ Never restart work by fabricating a new session if the existing durable session 
 Canonical domain:
 
 ```text
-repofinisher.donmatthews.live
+portfolio.donmatthews.live
 ```
 
 If direct Cloud Run frontend is healthy but the canonical domain is not:

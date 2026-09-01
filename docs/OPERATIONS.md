@@ -20,14 +20,14 @@ For time-sensitive status read `docs/PROJECT_STATE.md` first. For the current Go
 
 Former Netlify/Render configuration is legacy migration/rollback material, not the current target architecture.
 
-The custom-domain cutover uses the documented Cloud Run DomainMappings REST API from GitHub Actions. Do not replace it with `gcloud beta run domain-mappings`: that command can prompt for beta-component installation in a non-interactive runner and leave `repofinisher.donmatthews.live` serving a stale legacy host even after the Cloud Run services deploy successfully.
+The custom-domain cutover uses the documented Cloud Run DomainMappings REST API from GitHub Actions. Do not replace it with `gcloud beta run domain-mappings`: that command can prompt for beta-component installation in a non-interactive runner and leave a custom domain serving a stale legacy host even after the Cloud Run services deploy successfully.
 
 ## Production endpoints
 
 Canonical frontend:
 
 ```text
-https://repofinisher.donmatthews.live
+https://portfolio.donmatthews.live
 ```
 
 Known direct Cloud Run services in source/workflow:
@@ -259,9 +259,9 @@ It should verify:
 7. deploy/update the frontend;
 8. verify frontend directly;
 9. audit required environment-variable names and canonical CORS;
-10. create/update the custom-domain mapping;
-11. update Cloudflare DNS only after direct surfaces are healthy;
-12. verify the canonical custom domain;
+10. verify the custom-domain mapping;
+11. verify the canonical custom domain;
+12. verify canonical API CORS;
 13. publish a deployment summary.
 
 A deployment step succeeding is not enough if later domain/runtime checks fail.
@@ -271,10 +271,10 @@ A deployment step succeeding is not enough if later domain/runtime checks fail.
 Canonical domain:
 
 ```text
-repofinisher.donmatthews.live
+portfolio.donmatthews.live
 ```
 
-The deployment workflow is allowed to reconcile the Cloud Run domain mapping and Cloudflare DNS when the required Cloudflare credentials are configured.
+The deployment workflow is allowed to verify/reconcile the Cloud Run domain mapping and Cloudflare DNS when the required Cloudflare credentials are configured.
 
 Rules:
 
