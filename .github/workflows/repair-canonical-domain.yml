@@ -32,6 +32,7 @@ env:
   API_PUBLIC_URL: https://repofinisher-api-z6kubh2jtq-uc.a.run.app
   CUSTOM_DOMAIN: portfolio.donmatthews.live
   CUSTOM_DOMAIN_URL: https://portfolio.donmatthews.live
+  LEGACY_DOMAIN: repofinisher.donmatthews.live
 
 jobs:
   repair:
@@ -75,6 +76,28 @@ jobs:
 
           echo "Verified ${CUSTOM_DOMAIN} -> ${WEB_SERVICE} in ${REGION}."
           jq -r '.status.resourceRecords[]? | "DNS: \(.type) \(.rrdata)"' /tmp/portfolio-domain.json || true
+
+      - name: Remove stale legacy Cloud Run mapping
+        shell: bash
+        run: |
+          set -euo pipefail
+          access_token="$(gcloud auth print-access-token)"
+          api_base="https://${REGION}-run.googleapis.com/apis/domains.cloudrun.com/v1/namespaces/${PROJECT_ID}/domainmappings"
+          legacy_url="${api_base}/${LEGACY_DOMAIN}"
+          auth_header="Authorization: Bearer ${access_token}"
+
+          status="$(curl --silent --show-error -H "${auth_header}" -H 'Content-Type: application/json' \
+            -o /tmp/legacy-domain.json -w '%{http_code}' "${legacy_url}")"
+          if [[ "${status}" == "200" ]]; then
+            curl --fail --silent --show-error -X DELETE -H "${auth_header}" "${legacy_url}" >/dev/null
+            echo "Removed stale ${LEGACY_DOMAIN} Cloud Run mapping."
+          elif [[ "${status}" == "404" ]]; then
+            echo "No stale ${LEGACY_DOMAIN} mapping exists."
+          else
+            cat /tmp/legacy-domain.json >&2
+            echo "Unable to inspect legacy mapping (HTTP ${status})." >&2
+            exit 1
+          fi
 
       - name: Set API CORS to the real canonical frontend
         shell: bash
