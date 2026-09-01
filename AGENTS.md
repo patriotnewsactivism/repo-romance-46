@@ -39,7 +39,7 @@ Current production source-of-truth topology is:
 - Cloudflare — canonical custom-domain DNS used by the deployment workflow.
 - Sentry + Cloud Run/Cloud Logging — observability when configured.
 
-The canonical product domain is `https://repofinisher.donmatthews.live`.
+The canonical product domain is `https://portfolio.donmatthews.live`.
 
 **Never deploy RepoFinisher to Vercel. Never add Vercel hosting configuration back to the repository.** Preserve the CI guard that rejects Vercel hosting artifacts.
 
