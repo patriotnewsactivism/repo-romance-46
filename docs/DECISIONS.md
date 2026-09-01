@@ -164,7 +164,7 @@ Rationale: ephemeral compute is economical only if process death, retry, UI poll
 
 **Status:** accepted
 
-The canonical domain is `repofinisher.donmatthews.live`, but source code alone does not prove that the domain maps to the intended current revision.
+The canonical domain is `portfolio.donmatthews.live`, but source code alone does not prove that the domain maps to the intended current revision.
 
 The deployment workflow may manage Cloud Run domain mapping and Cloudflare DNS only after direct service verification. Release/incident reporting must distinguish direct-host health from canonical-domain verification.
 
