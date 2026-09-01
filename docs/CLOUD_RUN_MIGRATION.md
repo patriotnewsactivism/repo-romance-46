@@ -10,7 +10,7 @@ Vercel is not part of this architecture and must not be used as a fallback.
 Browser
   |
   v
-Cloudflare DNS -> repofinisher.donmatthews.live
+Cloudflare DNS -> portfolio.donmatthews.live
   |
   v
 Cloud Run service: repofinisher-web
@@ -31,7 +31,8 @@ GitHub Actions
   +-> OIDC/WIF -> Google Cloud deployment
   +-> immutable Artifact Registry images
   +-> Secret Manager bindings
-  +-> domain mapping + Cloudflare DNS reconciliation
+  +-> domain mapping verification
+  +-> canonical frontend/CORS/runtime verification
 ```
 
 Former Netlify/Render configuration is legacy rollback/migration material, not the canonical target runtime.
@@ -40,7 +41,7 @@ Former Netlify/Render configuration is legacy rollback/migration material, not t
 
 `repofinisher-api` is the request-serving control plane. Long-running finish-until-target work is dispatched to `repofinisher-completion-session`, which can use larger resources only while active and can survive HTTP request lifetimes by loading durable state from Supabase.
 
-The frontend is also containerized and deployed to Cloud Run as `repofinisher-web`, keeping the production web/API build provenance tied to immutable Git SHAs and one deployment workflow.
+The frontend is containerized and deployed to Cloud Run as `repofinisher-web`, keeping the production web/API build provenance tied to immutable Git SHAs and one deployment workflow.
 
 GitHub Actions remains the source of truth for RepoFinisher release automation and for target-repository CI evidence.
 
@@ -51,7 +52,8 @@ GitHub Actions remains the source of truth for RepoFinisher release automation a
 - `artifacts/api-server/src/completion-session-job.ts` — durable completion-session worker entrypoint.
 - `Dockerfile.apiserver` — API/worker image.
 - `Dockerfile.frontend` — production frontend image.
-- `.github/workflows/deploy-cloud-run.yml` — image build, service/job deploy, environment audit, domain/DNS cutover.
+- `.github/workflows/deploy-cloud-run.yml` — image build, service/job deploy, environment audit, domain/runtime verification.
+- `.github/workflows/repair-canonical-domain.yml` — verifies the real canonical mapping, removes the obsolete legacy mapping if present, reconciles CORS, and checks the actual production Settings bundle.
 - `infra/gcp/bootstrap-cloud-run.sh` — one-time APIs/IAM/WIF/Artifact Registry/Secret Manager bootstrap.
 
 ## Security model
@@ -113,11 +115,9 @@ SUPABASE_URL
 SUPABASE_ANON_KEY
 ```
 
-The domain automation additionally requires a Cloudflare API token in GitHub secrets and may use a Cloudflare zone ID repository variable.
-
 ## Deployment order
 
-`.github/workflows/deploy-cloud-run.yml` currently performs this sequence:
+`.github/workflows/deploy-cloud-run.yml` performs this sequence:
 
 1. checkout source;
 2. authenticate through WIF;
@@ -131,12 +131,12 @@ The domain automation additionally requires a Cloudflare API token in GitHub sec
 10. deploy/update `repofinisher-web`;
 11. verify direct frontend response;
 12. audit required API/Job environment-variable names and canonical CORS;
-13. create/reconcile Cloud Run custom-domain mapping;
-14. update Cloudflare DNS to the emitted mapping records;
-15. verify the canonical HTTPS domain;
+13. verify the Cloud Run custom-domain mapping for `portfolio.donmatthews.live`;
+14. verify the canonical HTTPS frontend;
+15. verify canonical API CORS;
 16. publish deployment summary.
 
-Do not report the entire release successful if a late domain/DNS step fails after compute services deploy.
+Do not report the entire release successful if a late runtime/domain step fails after compute services deploy.
 
 ## Runtime configuration
 
@@ -150,7 +150,7 @@ Frontend: https://repofinisher-web-z6kubh2jtq-uc.a.run.app
 Canonical domain:
 
 ```text
-https://repofinisher.donmatthews.live
+https://portfolio.donmatthews.live
 ```
 
 Current starting resources:
@@ -194,82 +194,68 @@ The worker loads repository state, GitHub credentials, AI credentials, approvals
 
 The session row retains lease/heartbeat protections. API scheduling also suppresses duplicate dispatch while a recent worker is active. A retried Job must resume state rather than repeat completed repository writes.
 
-## Current cutover state — 2026-08-30
+## Current cutover state — 2026-09-01
 
-Current `main` snapshot when this runbook was reconciled:
+The Cloud Run/custom-domain incident is resolved at the infrastructure/runtime seam.
 
-```text
-6ae2324e081f03dab59221c7c27b89fcb7eee929
-PR #99 — fix: complete Cloud Run custom-domain cutover
-```
+Verified evidence includes:
 
-Latest deployment workflow examined:
+- Cloud Run deployment run `33555540458` completed successfully;
+- `repofinisher-completion-session` deployed;
+- `repofinisher-api` deployed and direct health passed;
+- `repofinisher-web` deployed and direct verification passed;
+- environment/CORS contract passed;
+- Cloud Run DomainMappings API verified `portfolio.donmatthews.live -> repofinisher-web` in `us-central1`;
+- Cloud Run emitted `CNAME ghs.googlehosted.com.` for the canonical mapping;
+- canonical HTTPS frontend verification passed;
+- canonical API CORS verification passed.
 
-```text
-run 33326728811
-conclusion: failure
-```
-
-Successful stages in that run:
-
-- API/worker image built/pushed;
-- frontend image built/pushed;
-- completion-session Job deployed;
-- Job invocation IAM binding applied;
-- API deployed;
-- direct API health passed;
-- frontend deployed;
-- direct frontend verification passed;
-- API/Job environment-contract audit passed.
-
-Failure stage:
+The follow-up repair/regression run `33556715971` also verified that the obsolete `repofinisher.donmatthews.live` Cloud Run mapping no longer exists and downloaded the JavaScript actually served by `https://portfolio.donmatthews.live`. The live bundle check required and found:
 
 ```text
-Ensure custom domain mapping and update Cloudflare DNS
+GPT-5.6 Sol
+GPT-5.6 Terra
+All accessible repositories
 ```
 
-Observed root cause:
+Therefore the correct current state is:
 
-`gcloud beta run domain-mappings` attempted an interactive beta-component installation inside GitHub Actions, despite an earlier beta install step. GitHub Actions cannot answer that prompt, so the step exited with code 1. The canonical-domain verification step was consequently skipped.
+- **Cloud Run compute surfaces deployed/directly verified:** yes;
+- **canonical mapping/HTTPS/CORS verified:** yes;
+- **live Settings bundle contains the intended current controls:** yes;
+- **authenticated Settings/BYOK acceptance fully proven:** not yet;
+- **real finish-until-target Cloud Run Job end-to-end acceptance fully proven:** not yet.
 
-Therefore the correct state is:
-
-- **Cloud Run compute surfaces deployed/directly verified:** yes for this SHA;
-- **canonical domain/DNS cutover verified:** no;
-- **full production cutover complete:** no.
-
-Fix the domain command non-interactive behavior, rerun deployment, and verify the canonical domain before changing this state.
+Do not confuse the final two application-level gates with the already-resolved domain-mapping issue.
 
 ## Custom-domain and Cloudflare contract
 
-The deployment workflow may manage `repofinisher.donmatthews.live` only after direct frontend/API checks pass.
+The canonical hostname is `portfolio.donmatthews.live`.
 
-Safe order:
+Safe order for any future mapping/DNS change:
 
-1. ensure/inspect Cloud Run mapping for `repofinisher-web`;
-2. wait for Cloud Run to emit required DNS records;
-3. resolve Cloudflare zone;
-4. replace only the intended hostname records;
-5. keep records DNS-only if required by the Cloud Run mapping/certificate path;
-6. verify DNS resolution and HTTPS/certificate readiness;
-7. fetch canonical frontend and confirm it serves the intended deployment marker/revision.
+1. verify direct `repofinisher-web` and `repofinisher-api` surfaces;
+2. inspect/verify the Cloud Run mapping for `repofinisher-web`;
+3. obtain the mapping's required DNS record(s);
+4. reconcile only the intended Cloudflare hostname if a DNS change is actually required;
+5. verify DNS resolution and HTTPS/certificate readiness;
+6. fetch the canonical frontend and verify the intended current production asset/revision.
+
+Never recreate `repofinisher.donmatthews.live` as the canonical mapping. That hostname was an obsolete/stale mapping from the failed cutover path and has been removed.
 
 Do not delete working DNS before a replacement mapping has produced usable records.
 
 ## Production acceptance
 
-The Cloud Run cutover is complete only when all applicable gates are satisfied:
+The infrastructure/domain cutover is verified, but full product completion still requires all applicable application gates, including:
 
-- required CI is green;
+- required CI green;
 - immutable images map to intended Git SHA;
 - Cloud Run Job deployed;
 - API direct health passes;
 - frontend direct verification passes;
 - environment/secret/CORS contract passes;
-- existing sealed GitHub credentials remain usable;
-- Vault-backed AI BYOK remains usable;
 - domain mapping targets `repofinisher-web`;
-- Cloudflare DNS matches mapping records;
 - canonical HTTPS domain serves the intended frontend;
 - production smoke passes;
 - Settings/BYOK authenticated flow works;
@@ -283,7 +269,7 @@ Prefer rolling a Cloud Run service/Job back to a known-good immutable revision/i
 
 Before application rollback, confirm database migrations are compatible with the older revision. Prefer forward corrective migrations over destructive database rollback.
 
-If direct Cloud Run frontend is healthy but canonical domain is not, repair mapping/DNS instead of rolling back healthy application code.
+If direct Cloud Run frontend is healthy but the canonical domain is not, repair mapping/DNS instead of rolling back healthy application code.
 
 Legacy Netlify/Render infrastructure may only be used as an explicit emergency rollback if it remains available, secure, and demonstrably known-good. Record the rollback and follow-up retirement plan in `docs/PROJECT_STATE.md`.
 
@@ -303,4 +289,4 @@ Set project billing budgets/alerts, but do not mistake an alert for a hard appli
 
 ## Updating this runbook
 
-When the current domain blocker is resolved, update both this file and `docs/PROJECT_STATE.md` with the successful workflow run/commit and the exact runtime gates that passed. Remove obsolete transitional language instead of accumulating contradictory topologies.
+When domain, deployment, worker, or runtime acceptance state changes, update both this file and `docs/PROJECT_STATE.md` with the exact workflow run/commit and the runtime gates that actually passed. Remove obsolete transitional language instead of accumulating contradictory topologies.
