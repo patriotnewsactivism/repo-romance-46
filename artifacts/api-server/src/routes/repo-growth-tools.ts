@@ -220,27 +220,36 @@ function growthJsonSchema() {
 function normalizeSourceBackedClaims(result: AiGrowth, sources: MarketResearchSource[]) {
   const allowed = new Set(sources.map((source) => source.url));
   const competitors = result.competitors.filter(
-    (competitor) => competitor.evidence_urls.length > 0 && competitor.evidence_urls.every((url) => allowed.has(url)),
+    (competitor) =>
+      allowed.has(competitor.url) &&
+      competitor.evidence_urls.length > 0 &&
+      competitor.evidence_urls.every((url) => allowed.has(url)),
   );
-  const featureSuggestions = result.feature_suggestions.map((suggestion) => ({
-    ...suggestion,
-    evidence_urls: suggestion.evidence_urls.filter((url) => allowed.has(url)),
-    value_lift_usd: {
-      low: Math.min(suggestion.value_lift_usd.low, suggestion.value_lift_usd.high),
-      high: Math.max(suggestion.value_lift_usd.low, suggestion.value_lift_usd.high),
-    },
-    monthly_revenue_scenario_usd: {
-      low: Math.min(suggestion.monthly_revenue_scenario_usd.low, suggestion.monthly_revenue_scenario_usd.base, suggestion.monthly_revenue_scenario_usd.high),
-      base: suggestion.monthly_revenue_scenario_usd.base,
-      high: Math.max(suggestion.monthly_revenue_scenario_usd.low, suggestion.monthly_revenue_scenario_usd.base, suggestion.monthly_revenue_scenario_usd.high),
-    },
-  }));
+  const featureSuggestions = result.feature_suggestions.map((suggestion) => {
+    const evidenceUrls = suggestion.evidence_urls.filter((url) => allowed.has(url));
+    return {
+      ...suggestion,
+      competitor_gap: evidenceUrls.length > 0
+        ? suggestion.competitor_gap
+        : "No source-backed competitor gap is established for this suggestion; treat it as a repository-evidence product hypothesis.",
+      evidence_urls: evidenceUrls,
+      value_lift_usd: {
+        low: Math.min(suggestion.value_lift_usd.low, suggestion.value_lift_usd.high),
+        high: Math.max(suggestion.value_lift_usd.low, suggestion.value_lift_usd.high),
+      },
+      monthly_revenue_scenario_usd: {
+        low: Math.min(suggestion.monthly_revenue_scenario_usd.low, suggestion.monthly_revenue_scenario_usd.base, suggestion.monthly_revenue_scenario_usd.high),
+        base: suggestion.monthly_revenue_scenario_usd.base,
+        high: Math.max(suggestion.monthly_revenue_scenario_usd.low, suggestion.monthly_revenue_scenario_usd.base, suggestion.monthly_revenue_scenario_usd.high),
+      },
+    };
+  });
   return { ...result, competitors, feature_suggestions: featureSuggestions };
 }
 
 export function isDocumentationPath(path: string) {
   const normalized = path.replace(/^\.\//, "");
-  return /^(README(?:\.[^/]+)?|AGENTS\.md|PLAN(?:\.[^/]+)?\.md|ROADMAP(?:\.[^/]+)?\.md|CONTRIBUTING\.md|SECURITY\.md|CHANGELOG(?:\.[^/]+)?|docs\/.*\.md)$/i.test(normalized);
+  return /^(README(?:\.(?:md|markdown|rst|txt))?|AGENTS\.md|PLAN(?:\.[^/]+)?\.md|ROADMAP(?:\.[^/]+)?\.md|CONTRIBUTING\.md|SECURITY\.md|CHANGELOG(?:\.(?:md|markdown|rst|txt))?|docs\/.*\.md)$/i.test(normalized);
 }
 
 router.post(
@@ -281,7 +290,7 @@ Your first duty is accuracy. Distinguish repository facts, externally verified m
 MARKET EVIDENCE RULES:
 - The supplied source packet is the ONLY authority for named competitors, their features, their pricing, plan limits, or positioning.
 - Never invent a competitor, URL, customer price, feature, market share, TAM, revenue, customer count, or traction claim.
-- A competitor may appear only when at least one supplied source URL directly supports the claim. Put those exact URLs in evidence_urls.
+- A competitor may appear only when at least one supplied source URL directly supports the claim. The competitor URL and every evidence_urls entry must be exact URLs present in the supplied source packet.
 - If pricing is not clearly supported, say "Pricing not verified in supplied sources" rather than estimating it.
 - If no external sources are supplied, competitors MUST be an empty array and the market summary must clearly say live competitor/pricing research is unavailable.
 
@@ -326,7 +335,15 @@ Return strict JSON only.`;
       { provider: aiCredential.provider, apiKey: aiCredential.apiKey },
     );
     const parsed = normalizeSourceBackedClaims(aiGrowthSchema.parse(JSON.parse(response.content || "{}")), sources);
-    if (!live) parsed.competitors = [];
+    if (!live) {
+      parsed.competitors = [];
+      parsed.market_summary = "Live external competitor/pricing research is unavailable. The feature suggestions below are repository-evidence product hypotheses with explicit planning assumptions, not verified market claims.";
+      parsed.feature_suggestions = parsed.feature_suggestions.map((suggestion) => ({
+        ...suggestion,
+        competitor_gap: "No source-backed competitor gap is available; this suggestion is based on repository evidence and product reasoning only.",
+        evidence_urls: [],
+      }));
+    }
 
     res.json({
       research_status: live ? "live" : "unavailable",
