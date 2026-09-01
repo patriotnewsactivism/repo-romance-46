@@ -47,7 +47,7 @@ Supabase:           https://rdsrxfzahhxbvugyarld.supabase.co
 
 The old hostname `repofinisher.donmatthews.live` is not canonical and its stale Cloud Run mapping has been removed.
 
-## Current runtime evidence
+## Latest Cloud Run deployment evidence
 
 ### Cloud Run deployment
 
@@ -117,7 +117,7 @@ The Settings portfolio-scope control is verified in the live bundle to include `
 
 A live-bundle string check proves that the current production asset contains these controls. It does not by itself prove every authenticated Settings save/reload/provider-key flow, so authenticated acceptance remains a separate evidence gate.
 
-## Remaining production acceptance work
+## Highest-priority remaining work
 
 ### 1. Authenticated production smoke
 
