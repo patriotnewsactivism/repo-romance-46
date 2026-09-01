@@ -32,8 +32,12 @@ RepoFinisher includes or is designed to include:
 - full-portfolio repository discovery and prioritization;
 - completion and production-readiness scoring;
 - confidence-adjusted current/potential valuation estimates;
+- investor-facing PDF export built from current portfolio evidence and adjusted valuation;
 - duplicate/shared-IP and portfolio relationship analysis;
 - tiered deep analysis for large portfolios;
+- source-backed live competitor/pricing/feature research when a trusted research provider is configured, with explicit unavailable states instead of invented market facts;
+- feature opportunity analysis with desirability, incremental value planning ranges, revenue scenarios, assumptions, acceptance checks, risks, and source evidence;
+- documentation-only reconciliation for README, `AGENTS.md`, plans/roadmaps, and `docs/*.md`, guarded against runtime-code changes;
 - multi-stage reasoning with evidence analysis, competing hypotheses, skeptical critique, evidence-selected specialists, and principal-plan synthesis;
 - durable repo-local and cross-repo operational memory based on measured outcomes;
 - controlled prompt-strategy experiments whose mutable strategy cannot alter immutable safety/approval policy;
@@ -47,6 +51,14 @@ RepoFinisher includes or is designed to include:
 - external-LLM completion handoffs for Codex, Claude Code, Gemini CLI, or a provider-neutral coding agent.
 
 External-LLM handoffs complement RepoFinisher; they do not replace its internal finishing capability.
+
+## Investor, market, and growth workflows
+
+The Full Portfolio Value surface includes a plain-language capability guide and an **Export investor PDF** action. Recommendation cards expose **Research market & growth**, source-backed competitor snapshots, feature/value opportunities, plan-first feature implementation, documentation reconciliation, and the iterative **Finish until target** controller.
+
+Market accuracy is deliberately asymmetric: RepoFinisher may generate clearly labeled planning scenarios from repository evidence, but it may show a named competitor's customer pricing, features, positioning, or URL only when live external source evidence supports those claims. Without a configured live-research credential, external competitor/pricing research is shown as unavailable rather than guessed.
+
+See [`docs/INVESTOR_AND_GROWTH_TOOLS.md`](docs/INVESTOR_AND_GROWTH_TOOLS.md) for the evidence rules, implementation flow, documentation-only guard, PDF contents, and finish-until-target defaults.
 
 ## Repository layout
 
@@ -124,6 +136,7 @@ Security rules:
 5. `SECRET_ENCRYPTION_KEY` still protects server-sealed credentials such as stored GitHub connections; rotating it without a migration can make prior envelopes unreadable.
 6. GitHub Actions authenticates to Google Cloud using Workload Identity Federation. Do not add a long-lived Google service-account JSON key.
 7. Cloud Run receives backend secrets from Google Secret Manager. Do not embed them in workflow YAML or container images.
+8. `TAVILY_API_KEY`, when used for live market research, is backend-only. Never expose it through `VITE_*`; when it is absent, competitor/pricing research must fail closed to an explicit unavailable state.
 
 See [`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md), [`SECURITY.md`](SECURITY.md), and [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 
@@ -196,6 +209,7 @@ Start with [`docs/README.md`](docs/README.md). Key files:
 - [`docs/DEFINITION_OF_DONE.md`](docs/DEFINITION_OF_DONE.md) — completion evidence standard.
 - [`docs/REASONING_AND_LEARNING.md`](docs/REASONING_AND_LEARNING.md) — reasoning, memory, experiments, repair, iterative sessions.
 - [`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md) — provider/model/BYOK behavior.
+- [`docs/INVESTOR_AND_GROWTH_TOOLS.md`](docs/INVESTOR_AND_GROWTH_TOOLS.md) — investor PDF export, live market evidence, feature scenarios, safe feature planning, docs-only reconciliation, and finish-until-target UI.
 - [`docs/EXTERNAL_LLM_HANDOFFS.md`](docs/EXTERNAL_LLM_HANDOFFS.md) — external-agent handoff contract.
 - [`docs/RELEASE-CHECKLIST.md`](docs/RELEASE-CHECKLIST.md) — release gates.
 - [`docs/INCIDENT_RESPONSE.md`](docs/INCIDENT_RESPONSE.md) — incident response.
