@@ -272,22 +272,49 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Fully managed Cloud Run custom domains currently use the beta command
-          # group. Every invocation is explicitly quiet so a runner can install
-          # the component on demand without an interactive prompt.
-          if gcloud beta run domain-mappings describe --domain="${CUSTOM_DOMAIN}" --project="${PROJECT_ID}" --region="${REGION}" --format=json --quiet >/tmp/repofinisher-domain.json 2>/dev/null; then
+          # Use the documented Cloud Run DomainMappings REST API directly.
+          # Calling `gcloud beta run domain-mappings` can trigger an interactive
+          # component-install prompt even after setup-gcloud installed beta,
+          # which previously left the canonical domain serving stale Netlify.
+          access_token="$(gcloud auth print-access-token)"
+          api_base="https://run.googleapis.com/apis/domains.cloudrun.com/v1/namespaces/${PROJECT_ID}/domainmappings"
+          mapping_url="${api_base}/${CUSTOM_DOMAIN}"
+          auth_header="Authorization: Bearer ${access_token}"
+
+          get_mapping() {
+            curl --silent --show-error -H "${auth_header}" -H 'Content-Type: application/json' \
+              -o /tmp/repofinisher-domain.json -w '%{http_code}' "${mapping_url}"
+          }
+
+          mapping_status="$(get_mapping)"
+          if [[ "${mapping_status}" == "200" ]]; then
             mapped_service="$(jq -r '.spec.routeName // ""' /tmp/repofinisher-domain.json)"
             if [[ "${mapped_service}" != "${WEB_SERVICE}" ]]; then
-              gcloud beta run domain-mappings create --service="${WEB_SERVICE}" --domain="${CUSTOM_DOMAIN}" --project="${PROJECT_ID}" --region="${REGION}" --force-override --quiet
+              curl --fail --silent --show-error -X DELETE -H "${auth_header}" "${mapping_url}" >/dev/null
+              mapping_status="404"
             fi
-          else
-            gcloud beta run domain-mappings create --service="${WEB_SERVICE}" --domain="${CUSTOM_DOMAIN}" --project="${PROJECT_ID}" --region="${REGION}" --quiet
+          elif [[ "${mapping_status}" != "404" ]]; then
+            cat /tmp/repofinisher-domain.json >&2
+            echo "Unable to inspect Cloud Run domain mapping (HTTP ${mapping_status})." >&2
+            exit 1
+          fi
+
+          if [[ "${mapping_status}" == "404" ]]; then
+            mapping_payload="$(jq -cn \
+              --arg domain "${CUSTOM_DOMAIN}" \
+              --arg project "${PROJECT_ID}" \
+              --arg region "${REGION}" \
+              --arg service "${WEB_SERVICE}" \
+              '{apiVersion:"domains.cloudrun.com/v1",kind:"DomainMapping",metadata:{name:$domain,namespace:$project,annotations:{"run.googleapis.com/region":$region}},spec:{routeName:$service,certificateMode:"AUTOMATIC",forceOverride:true}}')"
+            curl --fail --silent --show-error -X POST -H "${auth_header}" -H 'Content-Type: application/json' \
+              --data "${mapping_payload}" "${api_base}" >/tmp/repofinisher-domain.json
           fi
 
           record_types=()
           record_values=()
           for attempt in 1 2 3 4 5 6; do
-            gcloud beta run domain-mappings describe --domain="${CUSTOM_DOMAIN}" --project="${PROJECT_ID}" --region="${REGION}" --format=json --quiet >/tmp/repofinisher-domain.json
+            mapping_status="$(get_mapping)"
+            [[ "${mapping_status}" == "200" ]] || { cat /tmp/repofinisher-domain.json >&2; sleep $((attempt * 5)); continue; }
             mapfile -t record_types < <(jq -r '.status.resourceRecords[]?.type' /tmp/repofinisher-domain.json)
             mapfile -t record_values < <(jq -r '.status.resourceRecords[]?.rrdata' /tmp/repofinisher-domain.json)
             [[ ${#record_types[@]} -gt 0 ]] && break
