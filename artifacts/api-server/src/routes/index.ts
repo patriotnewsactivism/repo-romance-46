@@ -16,6 +16,8 @@ import portfolioIntelligenceRouter from "./portfolio-intelligence";
 import portfolioValuationV2Router from "./portfolio-valuation-v2";
 import tieredIntelligenceRouter from "./tiered-intelligence";
 import vibeToolsRouter from "./vibe-tools";
+import repoGrowthToolsRouter from "./repo-growth-tools";
+import investorReportRouter from "./investor-report";
 import observabilityRouter from "./observability";
 import portfolioGraphRouter from "./portfolio-graph";
 import assuranceRouter from "./assurance";
@@ -47,6 +49,8 @@ router.use(portfolioIntelligenceRouter);
 router.use(portfolioValuationV2Router);
 router.use(investmentIntelligenceRouter);
 router.use(vibeToolsRouter);
+router.use(repoGrowthToolsRouter);
+router.use(investorReportRouter);
 router.use(observabilityRouter);
 
 export default router;
