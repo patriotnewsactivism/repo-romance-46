@@ -30,6 +30,7 @@ For time-sensitive rollout status, read [`docs/PROJECT_STATE.md`](docs/PROJECT_S
 RepoFinisher includes or is designed to include:
 
 - full-portfolio repository discovery and prioritization;
+- explicit full-portfolio scope through 1,000 paginated accessible repositories, independent of the selected AI model;
 - completion and production-readiness scoring;
 - confidence-adjusted current/potential valuation estimates;
 - investor-facing PDF export built from current portfolio evidence and adjusted valuation;
