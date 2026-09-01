@@ -277,7 +277,7 @@ jobs:
           # component-install prompt even after setup-gcloud installed beta,
           # which previously left the canonical domain serving stale Netlify.
           access_token="$(gcloud auth print-access-token)"
-          api_base="https://run.googleapis.com/apis/domains.cloudrun.com/v1/namespaces/${PROJECT_ID}/domainmappings"
+          api_base="https://${REGION}-run.googleapis.com/apis/domains.cloudrun.com/v1/namespaces/${PROJECT_ID}/domainmappings"
           mapping_url="${api_base}/${CUSTOM_DOMAIN}"
           auth_header="Authorization: Bearer ${access_token}"
 
