@@ -17,7 +17,7 @@ The current production architecture in `main` is:
 - **Canonical custom-domain DNS:** Cloudflare, managed by the Cloud Run deployment workflow during cutover.
 - **Observability:** Sentry when configured, plus Cloud Run/Cloud Logging.
 
-The canonical product domain is `https://repofinisher.donmatthews.live`.
+The canonical product domain is `https://portfolio.donmatthews.live`.
 
 **Vercel is not an approved deployment target. Do not deploy RepoFinisher to Vercel or reintroduce Vercel hosting artifacts.** The CI workflow contains an explicit non-Vercel hosting guard.
 
