@@ -7,6 +7,24 @@ import { loadGithubCredential } from "../lib/credentials";
 
 const router: IRouter = Router();
 
+const disconnectedStatus = {
+  connected: false,
+  login: null,
+  avatarUrl: null,
+  displayName: null,
+  repoCount: null,
+};
+
+async function removeRevokedGithubConnection(req: Parameters<Parameters<typeof asyncHandler>[0]>[0]) {
+  const { error } = await req.supabase!
+    .from("github_connections")
+    .delete()
+    .eq("user_id", req.userId!);
+  if (error) {
+    console.warn("Failed to clear revoked GitHub connection:", error.message);
+  }
+}
+
 /**
  * Store a GitHub access token obtained by the frontend's Supabase GitHub OAuth
  * sign-in (session.provider_token) into github_connections. Supabase already
@@ -19,7 +37,6 @@ router.post(
   asyncHandler(async (req, res) => {
     const { providerToken } = z.object({ providerToken: z.string().min(1) }).parse(req.body);
 
-    // Fetch GitHub user info
     const userRes = await fetch("https://api.github.com/user", {
       headers: {
         Authorization: `Bearer ${providerToken}`,
@@ -31,11 +48,6 @@ router.post(
       throw Object.assign(new Error("Invalid or expired GitHub token"), { status: 400 });
     }
 
-    // GitHub returns the token's granted OAuth scopes in this header for
-    // classic OAuth App tokens (which is what Supabase's GitHub provider
-    // issues). Without 'repo' scope, every downstream feature (analysis,
-    // repo-finisher, valuation, vibe-tools) would fail later with opaque
-    // errors instead of telling the user to reconnect now.
     const grantedScopes = (userRes.headers.get("x-oauth-scopes") ?? "")
       .split(",")
       .map((s) => s.trim())
@@ -49,8 +61,6 @@ router.post(
 
     const ghUser = (await userRes.json()) as { id: number; login: string; avatar_url: string; name: string | null };
 
-    // The OAuth token is a repo-scoped credential: seal it before it is
-    // persisted rather than storing it in plaintext as this route used to.
     if (!secretsConfigured()) {
       throw Object.assign(
         new Error("Cannot store a GitHub token: SECRET_ENCRYPTION_KEY is not configured on the server."),
@@ -101,29 +111,47 @@ router.get(
       .maybeSingle();
 
     if (!data) {
-      res.json({ connected: false, login: null, avatarUrl: null, displayName: null, repoCount: null });
+      res.json(disconnectedStatus);
       return;
     }
 
     const conn = data as { github_login: string; avatar_url: string | null; display_name: string | null };
     const credential = await loadGithubCredential(req.supabase!, req.userId!);
 
-    // Optionally fetch live repo count
+    // A row can outlive the credential that it represents: GitHub tokens can be
+    // revoked, and hosting migrations can make an old encrypted envelope
+    // unreadable. Never report such a row as a healthy connection.
+    if (!credential) {
+      res.json(disconnectedStatus);
+      return;
+    }
+
     let repoCount: number | null = null;
     try {
       const r = await fetch("https://api.github.com/user", {
         headers: {
-          Authorization: `Bearer ${credential?.token ?? ""}`,
+          Authorization: `Bearer ${credential.token}`,
           Accept: "application/vnd.github+json",
           "User-Agent": "repo-finisher",
         },
       });
+
+      if (r.status === 401) {
+        // This credential is definitively unusable. Remove the dead row so all
+        // callers converge on the reconnect flow instead of repeatedly sending
+        // a revoked token to GitHub and surfacing "Bad credentials".
+        await removeRevokedGithubConnection(req);
+        res.json(disconnectedStatus);
+        return;
+      }
+
       if (r.ok) {
         const u = (await r.json()) as { public_repos?: number; total_private_repos?: number };
         repoCount = (u.public_repos ?? 0) + (u.total_private_repos ?? 0);
       }
     } catch {
-      // Not critical
+      // A network failure is not proof that a token was revoked. Keep the
+      // connection visible and retry on the next status request.
     }
 
     res.json({
@@ -173,7 +201,16 @@ router.get(
             },
           },
         );
+
+        if (reposRes.status === 401) {
+          await removeRevokedGithubConnection(req);
+          throw Object.assign(
+            new Error("GitHub connection expired or was revoked. Reconnect GitHub and try again."),
+            { status: 401 },
+          );
+        }
         if (!reposRes.ok) throw new Error("GitHub API error");
+
         const pageRepos = (await reposRes.json()) as typeof repos;
         repos.push(...pageRepos);
         if (pageRepos.length < 100) break;
@@ -183,8 +220,7 @@ router.get(
       if ((prefs as { filter_exclude_archived?: boolean } | null)?.filter_exclude_archived) {
         shortlist = shortlist.filter((r) => !r.archived);
       }
-      const maxRepos = requestedLimit;
-      shortlist = shortlist.slice(0, maxRepos);
+      shortlist = shortlist.slice(0, requestedLimit);
 
       const langCounts = new Map<string, number>();
       for (const r of shortlist) {
@@ -200,7 +236,8 @@ router.get(
       const lastPushed = shortlist[0]?.pushed_at ?? null;
 
       res.json({ repoCount: shortlist.length, languages, totalStars, lastPushed });
-    } catch {
+    } catch (error) {
+      if ((error as { status?: number }).status === 401) throw error;
       res.json({ repoCount: 0, languages: [], totalStars: 0, lastPushed: null });
     }
   }),
