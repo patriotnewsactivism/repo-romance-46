@@ -21,14 +21,22 @@ import NotFound from '@/pages/not-found';
 // OAuth code exchange. If this setup lives in App's useEffect, a child route's
 // effect can run first and POST /github/connect without a bearer token.
 //
-// Production is deliberately given a stable fallback API URL as well. During a
-// hosting cutover or preview build VITE_API_BASE_URL may be absent; falling back
-// to same-origin in that situation sends /api/* to the static frontend host and
-// produces HTML 404s such as "Cannot GET /api/preferences/ai-status".
+// Production is deliberately given a stable Cloud Run fallback API URL as well.
+// During a preview build VITE_API_BASE_URL may be absent; falling back to the
+// retired Render API would silently split production traffic across backends.
 const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
-const productionApiBaseUrl = 'https://repofinisher-api-live.onrender.com';
+const productionApiBaseUrl = 'https://repofinisher-api-z6kubh2jtq-uc.a.run.app';
+const canonicalProductionOrigin = 'https://portfolio.donmatthews.live';
 const localHostnames = new Set(['localhost', '127.0.0.1', '::1']);
+const legacyProductionHostnames = new Set(['repofinisher.donmatthews.live']);
 const isLocalBrowser = typeof window !== 'undefined' && localHostnames.has(window.location.hostname);
+
+if (typeof window !== 'undefined' && legacyProductionHostnames.has(window.location.hostname)) {
+  window.location.replace(
+    `${canonicalProductionOrigin}${window.location.pathname}${window.location.search}${window.location.hash}`,
+  );
+}
+
 const apiBaseUrl = configuredApiBaseUrl || (isLocalBrowser ? undefined : productionApiBaseUrl);
 
 if (apiBaseUrl) {
