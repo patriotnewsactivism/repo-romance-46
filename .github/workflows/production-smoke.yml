@@ -6,7 +6,7 @@ on:
       frontend_url:
         description: Canonical RepoFinisher frontend URL
         required: true
-        default: https://repofinisher.donmatthews.live
+        default: https://portfolio.donmatthews.live
       api_url:
         description: RepoFinisher Cloud Run API URL
         required: true

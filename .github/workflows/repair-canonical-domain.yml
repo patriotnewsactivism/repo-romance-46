@@ -99,10 +99,19 @@ jobs:
             exit 1
           fi
 
-      - name: Set API CORS to the real canonical frontend
+      - name: Reconcile API CORS with canonical frontend
         shell: bash
         run: |
           set -euo pipefail
+          current_cors="$(gcloud run services describe "${API_SERVICE}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --format='value(spec.template.spec.containers[0].env.filter(name:CORS_ALLOWED_ORIGINS).value)' 2>/dev/null || true)"
+          if [[ "${current_cors}" == "${CUSTOM_DOMAIN_URL}" ]]; then
+            echo "API CORS already matches ${CUSTOM_DOMAIN_URL}; no revision required."
+            exit 0
+          fi
+
           gcloud run services update "${API_SERVICE}" \
             --project="${PROJECT_ID}" \
             --region="${REGION}" \
@@ -132,3 +141,23 @@ jobs:
           }
 
           echo "Verified ${CUSTOM_DOMAIN_URL} -> ${WEB_SERVICE} and API CORS."
+
+      - name: Verify live Settings bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          html="$(mktemp)"
+          bundle="$(mktemp)"
+          curl --fail --silent --show-error --max-time 15 "${CUSTOM_DOMAIN_URL}/" -o "${html}"
+          asset_path="$(grep -oE 'src="[^"]+\.js"' "${html}" | head -1 | cut -d'"' -f2)"
+          [[ -n "${asset_path}" ]] || { echo "Unable to locate production JavaScript asset." >&2; exit 1; }
+          case "${asset_path}" in
+            http://*|https://*) asset_url="${asset_path}" ;;
+            /*) asset_url="${CUSTOM_DOMAIN_URL}${asset_path}" ;;
+            *) asset_url="${CUSTOM_DOMAIN_URL}/${asset_path}" ;;
+          esac
+          curl --fail --silent --show-error --max-time 30 "${asset_url}" -o "${bundle}"
+          grep -Fq 'GPT-5.6 Sol' "${bundle}" || { echo "Live bundle is missing GPT-5.6 Sol." >&2; exit 1; }
+          grep -Fq 'GPT-5.6 Terra' "${bundle}" || { echo "Live bundle is missing GPT-5.6 Terra." >&2; exit 1; }
+          grep -Fq 'All accessible repositories' "${bundle}" || { echo "Live bundle is missing All accessible repositories." >&2; exit 1; }
+          echo "Verified live Settings bundle contains Sol, Terra, and All accessible repositories."
