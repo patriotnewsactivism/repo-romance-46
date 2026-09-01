@@ -3,7 +3,8 @@ import { customFetch } from '@workspace/api-client-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { ChevronDown, Loader2, RefreshCw, ShieldCheck, Sigma, WalletCards } from 'lucide-react';
+import { ChevronDown, FileDown, Loader2, RefreshCw, ShieldCheck, Sigma, WalletCards } from 'lucide-react';
+import { toast } from 'sonner';
 
 type MoneyRange = { low: number; high: number };
 
@@ -64,6 +65,7 @@ export function PortfolioValuationV2Panel({
   const [data, setData] = useState<PortfolioValuationV2 | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
@@ -99,6 +101,28 @@ export function PortfolioValuationV2Panel({
       setError(err instanceof Error ? err.message : 'Unable to save confidence-adjusted portfolio value.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const downloadInvestorReport = async () => {
+    setDownloading(true);
+    try {
+      const blob = await customFetch<Blob>(`/api/investor-report/${analysisId}.pdf`, { responseType: 'blob' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `repofinisher-investor-report-${analysisId.slice(0, 8)}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      toast.success('Investor PDF exported from the current evidence and valuation.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to export investor PDF.';
+      setError(message);
+      toast.error(message.slice(0, 220));
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -138,10 +162,16 @@ export function PortfolioValuationV2Panel({
             Gross standalone estimates are discounted for evidence quality and duplicated IP, then a small capped synergy uplift is shown separately. This avoids simply adding every repository's headline estimate together.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={recalculate} disabled={saving} className="gap-2 shrink-0">
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          Recalculate & save
-        </Button>
+        <div className="flex flex-wrap gap-2 shrink-0">
+          <Button variant="outline" size="sm" onClick={downloadInvestorReport} disabled={downloading} className="gap-2">
+            {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
+            Export investor PDF
+          </Button>
+          <Button variant="outline" size="sm" onClick={recalculate} disabled={saving} className="gap-2">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Recalculate & save
+          </Button>
+        </div>
       </div>
 
       {error && <p className="text-sm text-red-500 break-words">{error}</p>}
@@ -183,7 +213,7 @@ export function PortfolioValuationV2Panel({
         <div className="rounded border p-3">
           <div className="text-xs text-muted-foreground">Competition evidence</div>
           <div className="font-semibold mt-1">Not invented</div>
-          <div className="text-[11px] text-muted-foreground">Saturation stays unknown until independently verified</div>
+          <div className="text-[11px] text-muted-foreground">Use each repo's Growth & diligence tools for source-backed live competitor/pricing research.</div>
         </div>
       </div>
 
