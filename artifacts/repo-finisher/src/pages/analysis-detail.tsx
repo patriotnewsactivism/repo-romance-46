@@ -185,7 +185,7 @@ export default function AnalysisDetail() {
                 </TabsTrigger>
                 <TabsTrigger value="strategy" data-testid="tab-strategy" className="shrink-0">Strategy</TabsTrigger>
                 <TabsTrigger value="action-plan" data-testid="tab-action-plan" className="shrink-0">Action Plan</TabsTrigger>
-                <TabsTrigger value="investment" data-testid="tab-investment" className="shrink-0">Portfolio Value</TabsTrigger>
+                <TabsTrigger value="investment" data-testid="tab-investment" className="shrink-0">Finish, Value & Reports</TabsTrigger>
                 <TabsTrigger value="valuation" data-testid="tab-valuation" className="shrink-0">Legacy Valuation</TabsTrigger>
                 <TabsTrigger value="share" data-testid="tab-share" className="shrink-0">
                   <Share2 className="w-4 h-4 mr-1" />

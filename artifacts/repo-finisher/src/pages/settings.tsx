@@ -101,6 +101,32 @@ function modelPlaceholder(provider: AiProvider) {
   }
 }
 
+const MODEL_CATALOG: Record<AiProvider, Array<{ id: string; label: string; detail: string }>> = {
+  openrouter: [
+    { id: 'openai/gpt-5.6-sol', label: 'GPT-5.6 Sol', detail: 'Highest-capability coding and repository-finishing agent' },
+    { id: 'openai/gpt-5.6-terra', label: 'GPT-5.6 Terra', detail: 'Strong balanced agent for broad portfolio work' },
+    { id: 'openai/gpt-5.6-luna', label: 'GPT-5.6 Luna', detail: 'Fast, economical agent for routine analysis' },
+    { id: 'deepseek/deepseek-v4-flash-0731', label: 'DeepSeek V4 Flash', detail: 'High-value reasoning and coding default' },
+    { id: 'google/gemini-3.7-pro', label: 'Gemini 3.7 Pro', detail: 'Deep reasoning and long-context repository review' },
+    { id: 'google/gemini-3.7-flash', label: 'Gemini 3.7 Flash', detail: 'Fast long-context analysis' },
+    { id: 'anthropic/claude-opus-4.1', label: 'Claude Opus 4.1', detail: 'Premium architecture and code review' },
+    { id: 'openrouter/auto', label: 'OpenRouter Auto', detail: 'Provider-managed model routing' },
+  ],
+  google: [
+    { id: 'gemini-3.7-pro', label: 'Gemini 3.7 Pro', detail: 'Deep reasoning and long-context repository review' },
+    { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash', detail: 'Fast long-context analysis' },
+  ],
+  openai: [
+    { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', detail: 'Highest-capability coding and repository-finishing agent' },
+    { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', detail: 'Strong balanced agent for broad portfolio work' },
+    { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', detail: 'Fast, economical agent for routine analysis' },
+  ],
+  anthropic: [
+    { id: 'claude-opus-4.1', label: 'Claude Opus 4.1', detail: 'Premium architecture and code review' },
+    { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', detail: 'Balanced implementation and review' },
+  ],
+};
+
 export default function Settings() {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
@@ -310,6 +336,8 @@ export default function Settings() {
     (aiStatus && normalizeProvider(aiStatus.requested_provider) !== aiProvider) ||
     (aiStatus && (aiStatus.requested_model || '') !== aiModel.trim())
   );
+  const catalogModels = MODEL_CATALOG[aiProvider];
+  const selectedCatalogModel = catalogModels.some((model) => model.id === aiModel) ? aiModel : '__custom__';
 
   if (isLoading) {
     return (
@@ -410,14 +438,17 @@ export default function Settings() {
           <CardHeader>
             <CardTitle>AI Provider & Model</CardTitle>
             <CardDescription>
-              Save the provider, exact model, and optional BYOK credential independently from the rest of Settings.
+              Pick a capable model from the catalog; manual model IDs are optional, not required.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="ai-provider">Provider</Label>
-                <Select value={aiProvider} onValueChange={(value) => setAiProvider(value as AiProvider)}>
+                <Select value={aiProvider} onValueChange={(value) => {
+                  setAiProvider(value as AiProvider);
+                  setAiModel('');
+                }}>
                   <SelectTrigger id="ai-provider" data-testid="select-ai-provider">
                     <SelectValue placeholder="Google Gemini" />
                   </SelectTrigger>
@@ -431,21 +462,29 @@ export default function Settings() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="ai-model">Model</Label>
+                <Label htmlFor="ai-model">Model preset</Label>
+                <Select value={aiModel ? selectedCatalogModel : '__default__'} onValueChange={(value) => setAiModel(value === '__default__' || value === '__custom__' ? '' : value)}>
+                  <SelectTrigger id="ai-model" data-testid="select-ai-model">
+                    <SelectValue placeholder="Choose a model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__default__">Platform default (recommended)</SelectItem>
+                    {catalogModels.map((model) => (
+                      <SelectItem key={model.id} value={model.id}>{model.label} — {model.detail}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Input
-                  id="ai-model"
                   value={aiModel}
                   onChange={(e) => setAiModel(e.target.value)}
-                  placeholder={modelPlaceholder(aiProvider)}
+                  placeholder={`Optional custom override: ${modelPlaceholder(aiProvider)}`}
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
                   data-testid="input-ai-model"
                 />
                 <p className="text-xs text-muted-foreground">
-                  {aiProvider === 'openrouter'
-                    ? 'Use the exact OpenRouter model slug. Leave blank to use openrouter/auto.'
-                    : 'Leave blank to use RepoFinisher’s provider default, or enter an exact supported model identifier.'}
+                  Sol and Terra are available as first-class presets. Custom entry remains available for newly released provider models.
                 </p>
               </div>
             </div>
@@ -553,7 +592,7 @@ export default function Settings() {
         <Card>
           <CardHeader>
             <CardTitle>Repository Filters</CardTitle>
-            <CardDescription>Analyze and value up to 500 repositories in a portfolio run.</CardDescription>
+            <CardDescription>Analyze a selected limit or every accessible repository in one portfolio run.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -594,18 +633,18 @@ export default function Settings() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="max-repos">Max repositories (2–500)</Label>
-                <Input
-                  id="max-repos"
-                  type="number"
-                  min="2"
-                  max="500"
-                  value={maxRepos}
-                  onChange={(e) => setMaxRepos(e.target.value)}
-                  placeholder="200"
-                  data-testid="input-max-repos"
-                />
-                <p className="text-xs text-muted-foreground">The old 30-repository valuation ceiling no longer applies.</p>
+                <Label htmlFor="max-repos">Portfolio scope</Label>
+                <Select value={maxRepos || '1000'} onValueChange={setMaxRepos}>
+                  <SelectTrigger id="max-repos" data-testid="select-max-repos"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="50">50 repositories</SelectItem>
+                    <SelectItem value="100">100 repositories</SelectItem>
+                    <SelectItem value="250">250 repositories</SelectItem>
+                    <SelectItem value="500">500 repositories</SelectItem>
+                    <SelectItem value="1000">All accessible repositories (up to 1,000)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Choose All to include your complete 230-repository portfolio; Luna does not impose a 90-repository product limit.</p>
               </div>
             </div>
           </CardContent>

@@ -387,7 +387,7 @@ function applyFilters(repos: Repo[], prefs: FilterPrefs | null): Repo[] {
   if (prefs.filter_min_stars > 0) {
     shortlist = shortlist.filter((r) => r.stargazers_count >= prefs.filter_min_stars);
   }
-  return shortlist.slice(0, prefs.filter_max_repos || 200);
+  return shortlist.slice(0, prefs.filter_max_repos || 1000);
 }
 
 async function fetchAllRepos(token: string, maxRepos: number): Promise<Repo[]> {
@@ -1110,7 +1110,7 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
   };
 
   try {
-    const maxRepos = prefs?.filter_max_repos || 200;
+    const maxRepos = prefs?.filter_max_repos || 1000;
 
     // ── Step 1: Fetch repos ──────────────────────────────────────────────────
     await reportProgress("Fetching repos from GitHub…");
@@ -1487,7 +1487,7 @@ async function getAnalysisContext(supabase: SupabaseClient, userId: string, trig
     // stages on the configured model instead of a hardcoded per-provider guess.
     custom_ai_model: aiCredential.model,
     custom_ai_key: aiCredential.apiKey,
-    filter_max_repos: prefs?.filter_max_repos ?? 200,
+    filter_max_repos: prefs?.filter_max_repos ?? 1000,
     filter_languages: prefs?.filter_languages ?? null,
     filter_min_stars: prefs?.filter_min_stars ?? 0,
     filter_exclude_archived: prefs?.filter_exclude_archived ?? true,

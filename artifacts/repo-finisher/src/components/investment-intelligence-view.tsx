@@ -9,6 +9,7 @@ import { FinishUntilTargetControl } from '@/components/finish-until-target-contr
 import { PortfolioFinishControl } from '@/components/portfolio-finish-control';
 import { TieredIntelligencePanel } from '@/components/tiered-intelligence-panel';
 import { PortfolioValuationV2Panel } from '@/components/portfolio-valuation-v2-panel';
+import { RepositoryGrowthToolsPanel } from '@/components/repository-growth-tools-panel';
 import {
   AlertTriangle,
   DollarSign,
@@ -276,6 +277,7 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
 
           <FinishRepoAction repo={item.repo} nextSteps={item.details?.recommendedNextSteps ?? []} analysisId={analysisId} />
           <FinishUntilTargetControl repo={item.repo} nextSteps={item.details?.recommendedNextSteps ?? []} analysisId={analysisId} />
+          <RepositoryGrowthToolsPanel analysisId={analysisId} itemRank={item.rank} repo={item.repo} />
 
           <details className="rounded border p-3">
             <summary className="cursor-pointer text-sm font-medium flex items-center gap-2"><DollarSign className="h-4 w-4" /> Evidence ledger</summary>

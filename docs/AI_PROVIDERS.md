@@ -20,6 +20,8 @@ Recommended model policy:
 - quality/speed alternative: `google/gemini-3.7-flash`
 - direct Google fallback: `gemini-3.7-flash`
 
+The Settings UI exposes a curated model catalog so normal users do not need to type provider IDs. The catalog includes GPT-5.6 Sol, Terra, and Luna plus high-capability DeepSeek, Gemini, and Anthropic choices. The exact identifier remains visible and editable as an optional custom override so newly released models are not blocked by the catalog release cycle. Saving a preset still uses the existing provider/model readiness test and trusted BYOK path; appearing in the catalog does not imply that an account has entitlement or available provider credit for that model.
+
 If `AI_PROVIDER` is explicitly configured and its matching platform credential exists, RepoFinisher honors it. If that provider is unusable because its server-side credential is absent, the backend automatically selects an available configured credential, preferring OpenRouter first. When no platform credential exists, Settings defaults to OpenRouter so a user can supply an OpenRouter BYOK key without being pushed toward a legacy provider.
 
 The preferred OpenRouter default can be overridden with `OPENROUTER_MODEL` or the common `AI_MODEL` variable. A user-saved exact model identifier takes precedence over those defaults.

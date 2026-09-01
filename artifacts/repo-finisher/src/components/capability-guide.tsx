@@ -49,12 +49,12 @@ const tools = [
 
 export function CapabilityGuide() {
   return (
-    <details className="rounded-lg border border-border bg-card p-4">
+    <details open className="rounded-lg border border-primary/30 bg-card p-4">
       <summary className="cursor-pointer list-none flex items-center gap-2">
         <ShieldCheck className="h-5 w-5 text-primary" />
         <div className="flex-1">
-          <div className="font-semibold">What RepoFinisher can do - and what each action changes</div>
-          <div className="text-xs text-muted-foreground">Open this before running a tool if you want the plain-language difference between analysis, planning, repository writes, and evidence requirements.</div>
+          <div className="font-semibold">Repository finishing, reports, research, and growth tools</div>
+          <div className="text-xs text-muted-foreground">These are live product actions—not roadmap promises. Choose a repository below to finish it, research competitors, reconcile documentation, or plan a valuable feature.</div>
         </div>
       </summary>
       <div className="grid gap-3 mt-4 md:grid-cols-2 xl:grid-cols-3">

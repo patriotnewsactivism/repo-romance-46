@@ -154,30 +154,36 @@ router.get(
       .maybeSingle();
 
     try {
-      const reposRes = await fetch(
-        `https://api.github.com/user/repos?per_page=100&affiliation=owner&sort=pushed`,
-        {
-          headers: {
-            Authorization: `Bearer ${credential.token}`,
-            Accept: "application/vnd.github+json",
-            "User-Agent": "repo-finisher",
-          },
-        },
-      );
-      if (!reposRes.ok) throw new Error("GitHub API error");
-      const repos = (await reposRes.json()) as {
+      const requestedLimit = Math.min((prefs as { filter_max_repos?: number } | null)?.filter_max_repos ?? 1000, 1000);
+      const repos: {
         fork: boolean;
         archived: boolean;
         language: string | null;
         stargazers_count: number;
         pushed_at: string;
-      }[];
+      }[] = [];
+      for (let page = 1; page <= Math.ceil(requestedLimit / 100); page += 1) {
+        const reposRes = await fetch(
+          `https://api.github.com/user/repos?per_page=100&page=${page}&affiliation=owner&sort=pushed`,
+          {
+            headers: {
+              Authorization: `Bearer ${credential.token}`,
+              Accept: "application/vnd.github+json",
+              "User-Agent": "repo-finisher",
+            },
+          },
+        );
+        if (!reposRes.ok) throw new Error("GitHub API error");
+        const pageRepos = (await reposRes.json()) as typeof repos;
+        repos.push(...pageRepos);
+        if (pageRepos.length < 100) break;
+      }
 
       let shortlist = repos.filter((r) => !r.fork);
       if ((prefs as { filter_exclude_archived?: boolean } | null)?.filter_exclude_archived) {
         shortlist = shortlist.filter((r) => !r.archived);
       }
-      const maxRepos = (prefs as { filter_max_repos?: number } | null)?.filter_max_repos ?? 50;
+      const maxRepos = requestedLimit;
       shortlist = shortlist.slice(0, maxRepos);
 
       const langCounts = new Map<string, number>();
