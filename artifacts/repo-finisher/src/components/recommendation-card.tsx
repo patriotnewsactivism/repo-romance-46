@@ -8,7 +8,9 @@ import { Recommendation } from '@workspace/api-client-react';
 import { ChevronDown, ChevronUp, Target, Zap, GitMerge, Loader2, Twitter, Linkedin } from 'lucide-react';
 import { toast } from 'sonner';
 import { FinishRepoAction } from '@/components/finish-repo-action';
+import { FinishUntilTargetControl } from '@/components/finish-until-target-control';
 import { VibeToolsPanel } from '@/components/vibe-tools-panel';
+import { RepositoryGrowthToolsPanel } from '@/components/repository-growth-tools-panel';
 import type { Milestone } from '@workspace/api-client-react';
 
 interface RecommendationCardProps {
@@ -123,18 +125,25 @@ export function RecommendationCard({ recommendation, analysisId, isPublic = fals
               <p className="text-xs text-muted-foreground">
                 {activeMilestone
                   ? `Working ${activeMilestone.title} — its goals replace the default next steps.`
-                  : 'Finish directly from this card without opening the details panel.'}
+                  : 'Choose a single bounded completion run or the iterative finish-until-target controller.'}
               </p>
             </div>
             {recommendation.repos.map((repo) => (
-              <FinishRepoAction
-                key={repo}
-                repo={repo}
-                nextSteps={activeMilestone?.goals ?? recommendation.next_steps}
-                analysisId={analysisId}
-                itemRank={recommendation.rank}
-                initialResult={recommendation.finish_result}
-              />
+              <div key={repo} className="space-y-3">
+                <FinishRepoAction
+                  repo={repo}
+                  nextSteps={activeMilestone?.goals ?? recommendation.next_steps}
+                  analysisId={analysisId}
+                  itemRank={recommendation.rank}
+                  initialResult={recommendation.finish_result}
+                />
+                <FinishUntilTargetControl
+                  repo={repo}
+                  analysisId={analysisId}
+                  itemRank={recommendation.rank}
+                  nextSteps={activeMilestone?.goals ?? recommendation.next_steps}
+                />
+              </div>
             ))}
           </div>
         )}
@@ -253,6 +262,15 @@ export function RecommendationCard({ recommendation, analysisId, isPublic = fals
                 activeMilestoneOrder={activeMilestone?.order ?? null}
               />
             )}
+
+            {!isPublic && recommendation.repos.map((repo) => (
+              <RepositoryGrowthToolsPanel
+                key={`growth-${repo}`}
+                analysisId={analysisId}
+                itemRank={recommendation.rank}
+                repo={repo}
+              />
+            ))}
           </CollapsibleContent>
         </Collapsible>
       </CardContent>
