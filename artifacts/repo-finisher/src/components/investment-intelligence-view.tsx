@@ -3,7 +3,9 @@ import { customFetch } from '@workspace/api-client-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { CapabilityGuide } from '@/components/capability-guide';
 import { FinishRepoAction } from '@/components/finish-repo-action';
+import { FinishUntilTargetControl } from '@/components/finish-until-target-control';
 import { PortfolioFinishControl } from '@/components/portfolio-finish-control';
 import { TieredIntelligencePanel } from '@/components/tiered-intelligence-panel';
 import { PortfolioValuationV2Panel } from '@/components/portfolio-valuation-v2-panel';
@@ -153,20 +155,23 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
 
   if (!data) {
     return (
-      <Card className="p-6 space-y-4">
-        <div className="flex items-center gap-2">
-          <WalletCards className="h-5 w-5 text-primary" />
-          <h3 className="font-semibold">Full Portfolio Value & Finish Priority</h3>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Value every repository recorded in this analysis, rank the best finish-first opportunities, and launch the autonomous finisher directly from the ranking. This replaces the old 30-repository intelligence ceiling.
-        </p>
-        {error && <p className="text-sm text-red-500 break-words">{error}</p>}
-        <Button onClick={run} disabled={running} className="gap-2">
-          {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}
-          {running ? 'Valuing full portfolio…' : 'Calculate Full Portfolio Value'}
-        </Button>
-      </Card>
+      <div className="space-y-4">
+        <CapabilityGuide />
+        <Card className="p-6 space-y-4">
+          <div className="flex items-center gap-2">
+            <WalletCards className="h-5 w-5 text-primary" />
+            <h3 className="font-semibold">Full Portfolio Value & Finish Priority</h3>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Value every repository recorded in this analysis, rank the best finish-first opportunities, and launch the autonomous finisher directly from the ranking. This replaces the old 30-repository intelligence ceiling.
+          </p>
+          {error && <p className="text-sm text-red-500 break-words">{error}</p>}
+          <Button onClick={run} disabled={running} className="gap-2">
+            {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}
+            {running ? 'Valuing full portfolio…' : 'Calculate Full Portfolio Value'}
+          </Button>
+        </Card>
+      </div>
     );
   }
 
@@ -175,6 +180,7 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
 
   return (
     <div className="space-y-4">
+      <CapabilityGuide />
       <Card className="p-4 sm:p-6 space-y-5 border-primary/20 overflow-hidden">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
           <div className="space-y-1 flex-1 min-w-0">
@@ -269,6 +275,7 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
           </div>
 
           <FinishRepoAction repo={item.repo} nextSteps={item.details?.recommendedNextSteps ?? []} analysisId={analysisId} />
+          <FinishUntilTargetControl repo={item.repo} nextSteps={item.details?.recommendedNextSteps ?? []} analysisId={analysisId} />
 
           <details className="rounded border p-3">
             <summary className="cursor-pointer text-sm font-medium flex items-center gap-2"><DollarSign className="h-4 w-4" /> Evidence ledger</summary>
