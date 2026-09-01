@@ -14,6 +14,7 @@ on:
       - "package.json"
       - "Dockerfile.apiserver"
       - "Dockerfile.frontend"
+      - "Dockerfile"
       - "netlify.toml"
       - ".github/workflows/deploy-cloud-run.yml"
 
