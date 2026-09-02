@@ -4,6 +4,7 @@ import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
 import {
   loadAiCredential,
+  platformAiKey,
   platformAiStatus,
 } from "../lib/credentials";
 import {
@@ -12,6 +13,11 @@ import {
 } from "../lib/ai-secret-store";
 import { callAI } from "../lib/ai-provider";
 import { captureException } from "../instrument";
+import {
+  fetchOpenRouterModels,
+  OPENROUTER_MODEL_SORTS,
+  OPENROUTER_REASONING_EFFORTS,
+} from "../lib/openrouter-models";
 
 const router: IRouter = Router();
 const AI_PROVIDERS = ["google", "openai", "anthropic", "openrouter"] as const;
@@ -23,6 +29,7 @@ const READABLE_COLUMNS = [
   "schedule_frequency",
   "custom_ai_provider",
   "custom_ai_model",
+  "custom_ai_reasoning_effort",
   "filter_languages",
   "filter_exclude_archived",
   "filter_min_stars",
@@ -57,6 +64,7 @@ const updateSchema = z.object({
 const aiSettingsSchema = z.object({
   provider: z.enum(AI_PROVIDERS),
   model: modelSchema.nullable().optional(),
+  reasoning_effort: z.enum(OPENROUTER_REASONING_EFFORTS).nullable().optional(),
   api_key: z.string().trim().min(1).max(1000).optional(),
   clear_key: z.boolean().optional().default(false),
 });
@@ -116,12 +124,13 @@ async function aiStatus(supabase: NonNullable<Parameters<typeof loadAiCredential
   const platform = platformAiStatus();
   const { data: row } = await supabase
     .from("user_preferences")
-    .select("custom_ai_provider, custom_ai_model, custom_ai_key, custom_ai_vault_secret_id")
+    .select("custom_ai_provider, custom_ai_model, custom_ai_reasoning_effort, custom_ai_key, custom_ai_vault_secret_id")
     .eq("user_id", userId)
     .maybeSingle();
   const raw = row as {
     custom_ai_provider?: string | null;
     custom_ai_model?: string | null;
+    custom_ai_reasoning_effort?: string | null;
     custom_ai_key?: string | null;
     custom_ai_vault_secret_id?: string | null;
   } | null;
@@ -133,6 +142,7 @@ async function aiStatus(supabase: NonNullable<Parameters<typeof loadAiCredential
     stored_key_set: Boolean(raw?.custom_ai_vault_secret_id || raw?.custom_ai_key),
     requested_provider: raw?.custom_ai_provider ?? platform.defaultProvider,
     requested_model: raw?.custom_ai_model ?? null,
+    requested_reasoning_effort: raw?.custom_ai_reasoning_effort ?? null,
     platform_default: platform.defaultProvider,
     providers: platform.providers,
   };
@@ -151,6 +161,29 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     res.json(await aiStatus(req.supabase!, req.userId!));
+  }),
+);
+
+router.get(
+  "/preferences/openrouter-models",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const sort = z.enum(OPENROUTER_MODEL_SORTS).catch("intelligence-high-to-low").parse(req.query.sort);
+    const active = await loadAiCredential(req.supabase!, req.userId!);
+    const apiKey = active.provider === "openrouter" && active.apiKey
+      ? active.apiKey
+      : platformAiKey("openrouter");
+
+    if (!apiKey) {
+      throw Object.assign(
+        new Error("Save an OpenRouter API key in Settings before loading the live model catalog."),
+        { status: 424 },
+      );
+    }
+
+    const catalog = await fetchOpenRouterModels(apiKey, sort);
+    res.setHeader("Cache-Control", "private, max-age=60");
+    res.json({ ...catalog, sort });
   }),
 );
 
@@ -174,6 +207,7 @@ router.patch(
     const update: Record<string, unknown> = {
       custom_ai_provider: input.provider,
       custom_ai_model: input.model?.trim() || null,
+      custom_ai_reasoning_effort: input.provider === "openrouter" ? input.reasoning_effort ?? null : null,
       updated_at: new Date().toISOString(),
     };
 

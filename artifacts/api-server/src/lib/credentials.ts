@@ -10,6 +10,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { decryptSecret } from "./secrets";
 import { readAiVaultSecret } from "./ai-secret-store";
+import { normalizeOpenRouterReasoningEffort, type OpenRouterReasoningEffort } from "./openrouter-models";
 
 export interface GithubCredential {
   token: string;
@@ -57,6 +58,7 @@ export interface AiCredential {
   model: string | null;
   apiKey: string | null;
   source: AiCredentialSource;
+  reasoningEffort: OpenRouterReasoningEffort | null;
 }
 
 export const SUPPORTED_AI_PROVIDERS = ["google", "openai", "anthropic", "openrouter"] as const;
@@ -162,7 +164,7 @@ export async function loadAiCredential(
 ): Promise<AiCredential> {
   const { data, error } = await supabase
     .from("user_preferences")
-    .select("custom_ai_provider, custom_ai_model, custom_ai_key, custom_ai_vault_secret_id")
+    .select("custom_ai_provider, custom_ai_model, custom_ai_reasoning_effort, custom_ai_key, custom_ai_vault_secret_id")
     .eq("user_id", userId)
     .maybeSingle();
   if (error) throw new Error(`Failed to load AI preferences: ${error.message}`);
@@ -170,12 +172,16 @@ export async function loadAiCredential(
   const row = (data ?? null) as {
     custom_ai_provider: string | null;
     custom_ai_model: string | null;
+    custom_ai_reasoning_effort: string | null;
     custom_ai_key: string | null;
     custom_ai_vault_secret_id: string | null;
   } | null;
   const fallbackProvider = platformAiProvider();
   const provider = normalizeAiProvider(row?.custom_ai_provider, fallbackProvider);
   const model = row?.custom_ai_model?.trim() || platformAiModel(provider);
+  const reasoningEffort = provider === "openrouter"
+    ? normalizeOpenRouterReasoningEffort(row?.custom_ai_reasoning_effort)
+    : null;
 
   let userKey: string | null = null;
   if (row?.custom_ai_vault_secret_id) {
@@ -193,10 +199,10 @@ export async function loadAiCredential(
       userKey = null;
     }
   }
-  if (userKey) return { provider, model, apiKey: userKey, source: "byok" };
+  if (userKey) return { provider, model, apiKey: userKey, source: "byok", reasoningEffort };
 
   const platformKey = platformAiKey(provider);
-  if (platformKey) return { provider, model, apiKey: platformKey, source: "platform" };
+  if (platformKey) return { provider, model, apiKey: platformKey, source: "platform", reasoningEffort };
 
-  return { provider, model, apiKey: null, source: "none" };
+  return { provider, model, apiKey: null, source: "none", reasoningEffort };
 }
