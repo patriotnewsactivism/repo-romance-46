@@ -103,6 +103,8 @@ function modelPlaceholder(provider: AiProvider) {
 
 const MODEL_CATALOG: Record<AiProvider, Array<{ id: string; label: string; detail: string }>> = {
   openrouter: [
+    { id: 'minimax/minimax-m3:free', label: 'MiniMax M3 Free', detail: 'Primary free model for long-horizon agent work, coding, tools, and multimodal input' },
+    { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', label: 'Nemotron 3 Ultra Free', detail: 'Free reasoning, planning, orchestration, and coding fallback' },
     { id: 'openai/gpt-5.6-sol', label: 'GPT-5.6 Sol', detail: 'Highest-capability coding and repository-finishing agent' },
     { id: 'openai/gpt-5.6-terra', label: 'GPT-5.6 Terra', detail: 'Strong balanced agent for broad portfolio work' },
     { id: 'openai/gpt-5.6-luna', label: 'GPT-5.6 Luna', detail: 'Fast, economical agent for routine analysis' },

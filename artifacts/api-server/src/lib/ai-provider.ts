@@ -26,7 +26,14 @@ export interface AIRequest {
 export interface AIResponse {
   content: string;
   thinkingContent?: string;
+  /** Concrete model reported by the provider, when available. */
+  model?: string;
 }
+
+export const OPENROUTER_FREE_AGENT_CHAIN = [
+  "minimax/minimax-m3:free",
+  "nvidia/nemotron-3-ultra-550b-a55b:free",
+] as const;
 
 type PublicHttpError = Error & {
   status?: number;
@@ -38,7 +45,7 @@ const DEFAULT_MODELS: Record<string, string> = {
   google: "gemini-3.7-flash",
   openai: "gpt-4o",
   anthropic: "claude-sonnet-4-20250514",
-  openrouter: "openrouter/auto",
+  openrouter: OPENROUTER_FREE_AGENT_CHAIN[0],
   custom: "gpt-4o",
   // Kept only so old saved preferences fail gracefully until migrated.
   github_models: "gpt-4o-mini",
@@ -315,6 +322,11 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     };
     if (provider === "openrouter") {
       headers["X-Title"] = "RepoFinisher";
+      // Only the reviewed free-tier default gets an automatic fallback. Exact
+      // custom/user-selected models remain pinned and are never substituted.
+      if (model === OPENROUTER_FREE_AGENT_CHAIN[0]) {
+        body.models = [...OPENROUTER_FREE_AGENT_CHAIN];
+      }
     }
 
     const res = await fetchWithRetry(
@@ -329,11 +341,14 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       throw providerRequestError(provider, model, res.status, text);
     }
 
-    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }> };
+    const json = (await res.json()) as {
+      model?: string;
+      choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
+    };
     const raw = json.choices?.[0]?.message?.content;
-    if (typeof raw === "string") return { content: raw };
-    if (Array.isArray(raw)) return { content: raw.map((part) => part.text || "").join("") };
-    return { content: "" };
+    if (typeof raw === "string") return { content: raw, model: json.model };
+    if (Array.isArray(raw)) return { content: raw.map((part) => part.text || "").join(""), model: json.model };
+    return { content: "", model: json.model };
   }
 
   if (provider === "github_models") {
