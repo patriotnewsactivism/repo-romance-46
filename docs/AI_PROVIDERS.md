@@ -15,12 +15,13 @@ OpenRouter is the preferred platform/BYOK entry point because one credential can
 
 Recommended model policy:
 
-- default high-value model: `deepseek/deepseek-v4-flash-0731`
+- default high-value model: `minimax/minimax-m3:free`
+- automatic same-provider fallback: `nvidia/nemotron-3-ultra-550b-a55b:free`
 - premium OpenRouter alternative: `openai/gpt-5.6-luna`
 - quality/speed alternative: `google/gemini-3.7-flash`
 - direct Google fallback: `gemini-3.7-flash`
 
-The Settings UI exposes a curated model catalog so normal users do not need to type provider IDs. The catalog includes GPT-5.6 Sol, Terra, and Luna plus high-capability DeepSeek, Gemini, and Anthropic choices. The exact identifier remains visible and editable as an optional custom override so newly released models are not blocked by the catalog release cycle. Saving a preset still uses the existing provider/model readiness test and trusted BYOK path; appearing in the catalog does not imply that an account has entitlement or available provider credit for that model.
+The Settings UI exposes a curated model catalog so normal users do not need to type provider IDs. MiniMax M3 Free and Nemotron 3 Ultra Free lead the OpenRouter catalog, followed by GPT-5.6 Sol, Terra, and Luna plus other high-capability choices. The exact identifier remains visible and editable as an optional custom override so newly released models are not blocked by the catalog release cycle. Saving a preset still uses the existing provider/model readiness test and trusted BYOK path; appearing in the catalog does not imply that an account has entitlement or available provider credit for that model.
 
 If `AI_PROVIDER` is explicitly configured and its matching platform credential exists, RepoFinisher honors it. If that provider is unusable because its server-side credential is absent, the backend automatically selects an available configured credential, preferring OpenRouter first. When no platform credential exists, Settings defaults to OpenRouter so a user can supply an OpenRouter BYOK key without being pushed toward a legacy provider.
 
@@ -69,7 +70,9 @@ A credential variable that is present but blank (empty or whitespace) counts as 
 
 RepoFinisher should persist the exact model identifier selected/configured by the user rather than silently substituting a different model.
 
-This applies to per-stage model selection as well. Portfolio analysis picks a profiler/critique/synthesis model per tier, but the identifier resolved by `loadAiCredential` — the user's saved model, else the provider's platform default — overrides those stage defaults. Stage defaults are only a fallback for a provider with no configured model, and each provider's fallback must be valid for that provider: OpenRouter identifiers are vendor-namespaced (`deepseek/deepseek-v4-flash-0731`), so a bare `gpt-4o-mini` is not a usable OpenRouter default.
+This applies to per-stage model selection as well. Portfolio analysis picks a profiler/critique/synthesis model per tier, but the identifier resolved by `loadAiCredential` — the user's saved model, else the provider's platform default — overrides those stage defaults. Stage defaults are only a fallback for a provider with no configured model, and each provider's fallback must be valid for that provider: OpenRouter identifiers are vendor-namespaced (`minimax/minimax-m3:free`), so a bare `gpt-4o-mini` is not a usable OpenRouter default.
+
+When the resolved OpenRouter model is the reviewed MiniMax default, RepoFinisher sends the ordered `models` roster `[MiniMax M3 Free, Nemotron 3 Ultra Free]` so OpenRouter can fail over within the same request. Any other exact custom/user-selected model remains pinned and is not silently substituted. The response retains the concrete model ID reported by OpenRouter for safe runtime attribution.
 
 When a provider rejects a model:
 

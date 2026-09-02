@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { callAI, resolveAIRequestTimeoutMs, sanitizeGeminiResponseSchema, type AIRequest } from "./ai-provider";
+import {
+  OPENROUTER_FREE_AGENT_CHAIN,
+  callAI,
+  resolveAIRequestTimeoutMs,
+  sanitizeGeminiResponseSchema,
+  type AIRequest,
+} from "./ai-provider";
 
 function request(system: string, extra: Partial<AIRequest> = {}): AIRequest {
   return {
@@ -58,6 +64,28 @@ describe("OpenRouter routing", () => {
     expect(headers.get("x-title")).toBe("RepoFinisher");
     const body = JSON.parse(String(init?.body));
     expect(body.model).toBe("example/vendor-model");
+    expect(body.models).toBeUndefined();
+  });
+
+  it("routes the reviewed MiniMax default through Nemotron fallback and records the served model", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ model: OPENROUTER_FREE_AGENT_CHAIN[1], choices: [{ message: { content: "fallback-ready" } }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    const result = await callAI(request("free fallback", { timeoutMs: 1000 }), {
+      provider: "openrouter",
+      model: OPENROUTER_FREE_AGENT_CHAIN[0],
+      apiKey: "test-api-key",
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(String(init?.body));
+    expect(body.model).toBe(OPENROUTER_FREE_AGENT_CHAIN[0]);
+    expect(body.models).toEqual([...OPENROUTER_FREE_AGENT_CHAIN]);
+    expect(result).toEqual({ content: "fallback-ready", model: OPENROUTER_FREE_AGENT_CHAIN[1] });
   });
 
   it("lets an explicit request model override the saved model", async () => {
