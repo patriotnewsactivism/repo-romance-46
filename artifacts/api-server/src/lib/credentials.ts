@@ -132,7 +132,7 @@ function platformAiModel(provider: string): string | null {
     case "google": return process.env.GEMINI_MODEL?.trim() || "gemini-3.7-flash";
     case "openai": return process.env.OPENAI_MODEL?.trim() || null;
     case "anthropic": return process.env.ANTHROPIC_MODEL?.trim() || null;
-    case "openrouter": return process.env.OPENROUTER_MODEL?.trim() || "deepseek/deepseek-v4-flash-0731";
+    case "openrouter": return process.env.OPENROUTER_MODEL?.trim() || "minimax/minimax-m3:free";
     default: return null;
   }
 }

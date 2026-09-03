@@ -133,7 +133,18 @@ interface OpenRouterCatalogResponse {
 const REASONING_EFFORTS: OpenRouterReasoningEffort[] = ['max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'none'];
 
 const MODEL_CATALOG: Record<AiProvider, Array<{ id: string; label: string; detail: string }>> = {
-  openrouter: [],
+  openrouter: [
+    { id: 'minimax/minimax-m3:free', label: 'MiniMax M3 Free', detail: 'Primary free model for long-horizon agent work, coding, tools, and multimodal input' },
+    { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', label: 'Nemotron 3 Ultra Free', detail: 'Free reasoning, planning, orchestration, and coding fallback' },
+    { id: 'openai/gpt-5.6-sol', label: 'GPT-5.6 Sol', detail: 'Highest-capability coding and repository-finishing agent' },
+    { id: 'openai/gpt-5.6-terra', label: 'GPT-5.6 Terra', detail: 'Strong balanced agent for broad portfolio work' },
+    { id: 'openai/gpt-5.6-luna', label: 'GPT-5.6 Luna', detail: 'Fast, economical agent for routine analysis' },
+    { id: 'deepseek/deepseek-v4-flash-0731', label: 'DeepSeek V4 Flash', detail: 'High-value reasoning and coding default' },
+    { id: 'google/gemini-3.7-pro', label: 'Gemini 3.7 Pro', detail: 'Deep reasoning and long-context repository review' },
+    { id: 'google/gemini-3.7-flash', label: 'Gemini 3.7 Flash', detail: 'Fast long-context analysis' },
+    { id: 'anthropic/claude-opus-4.1', label: 'Claude Opus 4.1', detail: 'Premium architecture and code review' },
+    { id: 'openrouter/auto', label: 'OpenRouter Auto', detail: 'Provider-managed model routing' },
+  ],
   google: [
     { id: 'gemini-3.7-pro', label: 'Gemini 3.7 Pro', detail: 'Deep reasoning and long-context repository review' },
     { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash', detail: 'Fast long-context analysis' },

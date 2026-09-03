@@ -582,7 +582,7 @@ function defaultStageModels(provider: string, tier: string): StageModels {
     openai: "gpt-4o",
     anthropic: "claude-sonnet-4-20250514",
     google: "gemini-3.7-flash",
-    openrouter: "deepseek/deepseek-v4-flash-0731",
+    openrouter: "minimax/minimax-m3:free",
     custom: "gpt-4o",
   };
   const base = DEFAULT[provider] ?? "gemini-3.7-flash";

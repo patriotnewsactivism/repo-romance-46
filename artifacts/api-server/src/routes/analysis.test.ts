@@ -10,7 +10,7 @@ describe("getStageModels", () => {
     for (const tier of ["fast", "balanced", "deep"]) {
       const stages = getStageModels("openrouter", tier);
       for (const model of [stages.profilerModel, stages.critiqueModel, stages.synthesisModel]) {
-        expect(model).toBe("deepseek/deepseek-v4-flash-0731");
+        expect(model).toBe("minimax/minimax-m3:free");
         expect(model).toContain("/");
       }
     }
