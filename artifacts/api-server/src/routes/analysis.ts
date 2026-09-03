@@ -5,7 +5,7 @@ import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
 import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "../lib/credentials";
 import { runInBackground } from "../lib/background-tasks";
-import { callAI } from "../lib/ai-provider";
+import { callAI, type AIProviderConfig } from "../lib/ai-provider";
 import { captureException, flushSentry } from "../instrument";
 
 const router: IRouter = Router();
@@ -648,7 +648,7 @@ interface PortfolioProfile {
  */
 async function profilePortfolio(
   repos: Repo[],
-  aiConfig: { provider: string; apiKey: string | null },
+  aiConfig: AIProviderConfig,
   stageModels: StageModels,
 ): Promise<PortfolioProfile> {
   const metaLines = repos
@@ -717,7 +717,7 @@ Respond ONLY with valid JSON. Do not wrap in markdown.`;
 async function callBatchedAI(
   digests: string[],
   systemPrompt: string,
-  aiConfig: { provider: string; apiKey: string | null },
+  aiConfig: AIProviderConfig,
 ): Promise<z.infer<typeof RecommendationSchema>> {
   const user = `Here are the repo digests:\n\n${digests.join("\n\n=========\n\n")}`;
 
@@ -743,7 +743,7 @@ function isNonRetryableAIError(error: unknown): boolean {
 async function callBatchedAIWithRetry(
   batch: string[],
   systemPrompt: string,
-  aiConfig: { provider: string; apiKey: string | null },
+  aiConfig: AIProviderConfig,
 ): Promise<z.infer<typeof RecommendationSchema>> {
   const maxAttempts = 2;
   let lastErr: unknown;
@@ -771,7 +771,7 @@ function aiBatchConcurrency(provider: string): number {
 async function runBatchedAI(
   digests: string[],
   systemPrompt: string,
-  aiConfig: { provider: string; apiKey: string | null },
+  aiConfig: AIProviderConfig,
   onProgress?: ProgressFn,
 ): Promise<z.infer<typeof RecommendationSchema>> {
   const budget = maxInputTokensForProvider(aiConfig.provider);
@@ -838,7 +838,7 @@ interface AnalysisCritique {
 async function critiqueResults(
   recommendations: z.infer<typeof RecommendationSchema>["recommendations"],
   repoIndex: string,
-  aiConfig: { provider: string; apiKey: string | null },
+  aiConfig: AIProviderConfig,
   stageModels: StageModels,
 ): Promise<AnalysisCritique> {
   const recsText = recommendations
@@ -908,7 +908,7 @@ async function synthesizeWithReasoning(
   allRecommendations: z.infer<typeof RecommendationSchema>["recommendations"],
   critique: AnalysisCritique,
   repoIndex: string,
-  aiConfig: { provider: string; apiKey: string | null },
+  aiConfig: AIProviderConfig,
   stageModels: StageModels,
 ): Promise<z.infer<typeof RecommendationSchema>> {
   if (allRecommendations.length === 0) {
@@ -989,7 +989,7 @@ Respond with valid JSON matching the exact schema. No markdown wrapping.`;
 async function synthesizeCrossBatch(
   allRecommendations: z.infer<typeof RecommendationSchema>["recommendations"],
   digests: string[],
-  aiConfig: { provider: string; apiKey: string | null },
+  aiConfig: AIProviderConfig,
 ): Promise<z.infer<typeof RecommendationSchema>["recommendations"]> {
   const repoIndex = digests
     .map((d) => {
@@ -1047,6 +1047,7 @@ interface AnalysisContext {
   prefs: {
     custom_ai_provider: string;
     custom_ai_model: string | null;
+    custom_ai_reasoning_effort: import("../lib/openrouter-models").OpenRouterReasoningEffort | null;
     custom_ai_key: string | null;
     filter_max_repos: number;
     filter_languages: string[] | null;
@@ -1136,7 +1137,12 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
 
     const provider = prefs?.custom_ai_provider || "google";
     const aiKey = prefs?.custom_ai_key || null;
-    const aiConfig = { provider, model: prefs?.custom_ai_model ?? null, apiKey: aiKey };
+    const aiConfig: AIProviderConfig = {
+      provider,
+      model: prefs?.custom_ai_model ?? null,
+      apiKey: aiKey,
+      reasoningEffort: prefs?.custom_ai_reasoning_effort ?? null,
+    };
     const stageModels = getStageModels(provider, tier, prefs?.custom_ai_model);
 
     if (!aiKey) {
@@ -1486,6 +1492,7 @@ async function getAnalysisContext(supabase: SupabaseClient, userId: string, trig
     // the platform default for the provider. Carrying it here keeps the analysis
     // stages on the configured model instead of a hardcoded per-provider guess.
     custom_ai_model: aiCredential.model,
+    custom_ai_reasoning_effort: aiCredential.reasoningEffort,
     custom_ai_key: aiCredential.apiKey,
     filter_max_repos: prefs?.filter_max_repos ?? 1000,
     filter_languages: prefs?.filter_languages ?? null,

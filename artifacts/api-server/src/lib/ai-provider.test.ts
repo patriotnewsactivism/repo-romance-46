@@ -88,6 +88,25 @@ describe("OpenRouter routing", () => {
     expect(result).toEqual({ content: "fallback-ready", model: OPENROUTER_FREE_AGENT_CHAIN[1] });
   });
 
+  it("sends the saved OpenRouter reasoning effort without changing the exact model slug", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await callAI(
+      request("reasoning", { timeoutMs: 1000 }),
+      { provider: "openrouter", model: "qwen/example-reasoner", apiKey: "test-api-key", reasoningEffort: "xhigh" },
+    );
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(String(init?.body));
+    expect(body.model).toBe("qwen/example-reasoner");
+    expect(body.reasoning).toEqual({ effort: "xhigh" });
+  });
+
   it("lets an explicit request model override the saved model", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {

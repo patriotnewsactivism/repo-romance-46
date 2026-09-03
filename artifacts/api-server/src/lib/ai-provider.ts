@@ -1,9 +1,12 @@
 // Centralized AI provider routing — handles Google Gemini, OpenAI, Anthropic, OpenRouter, and legacy/custom providers.
 
+import type { OpenRouterReasoningEffort } from "./openrouter-models";
+
 export interface AIProviderConfig {
   provider: string;
   model?: string | null;
   apiKey: string | null;
+  reasoningEffort?: OpenRouterReasoningEffort | null;
 }
 
 export interface AIRequest {
@@ -315,6 +318,9 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
   ) {
     const body: Record<string, unknown> = { model, messages: request.messages };
     if (request.responseFormat) body.response_format = request.responseFormat;
+    if (provider === "openrouter" && config.reasoningEffort) {
+      body.reasoning = { effort: config.reasoningEffort };
+    }
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",

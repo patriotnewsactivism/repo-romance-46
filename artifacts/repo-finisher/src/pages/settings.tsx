@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'wouter';
 import {
   useGetPreferences,
@@ -42,6 +42,7 @@ interface AiProviderStatus {
   stored_key_set: boolean;
   requested_provider: string;
   requested_model: string | null;
+  requested_reasoning_effort: OpenRouterReasoningEffort | null;
   platform_default: string;
   providers: {
     google: { platformConfigured: boolean };
@@ -101,6 +102,36 @@ function modelPlaceholder(provider: AiProvider) {
   }
 }
 
+type OpenRouterReasoningEffort = 'max' | 'xhigh' | 'high' | 'medium' | 'low' | 'minimal' | 'none';
+type OpenRouterSort = 'intelligence-high-to-low' | 'pricing-low-to-high' | 'context-high-to-low' | 'most-popular' | 'newest' | 'best-value';
+
+interface OpenRouterModel {
+  id: string;
+  name: string;
+  description: string | null;
+  provider: string;
+  inputPricePerMillion: number | null;
+  outputPricePerMillion: number | null;
+  contextLength: number;
+  supportsReasoning: boolean;
+  supportedEfforts: OpenRouterReasoningEffort[] | null;
+  defaultEffort: OpenRouterReasoningEffort | null;
+  defaultReasoningEnabled: boolean;
+  reasoningMandatory: boolean;
+  supportsReasoningMaxTokens: boolean;
+  supportsTools: boolean;
+  isFree: boolean;
+  catalogRank: number;
+}
+
+interface OpenRouterCatalogResponse {
+  models: OpenRouterModel[];
+  source: 'user' | 'catalog';
+  sort: string;
+}
+
+const REASONING_EFFORTS: OpenRouterReasoningEffort[] = ['max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'none'];
+
 const MODEL_CATALOG: Record<AiProvider, Array<{ id: string; label: string; detail: string }>> = {
   openrouter: [
     { id: 'minimax/minimax-m3:free', label: 'MiniMax M3 Free', detail: 'Primary free model for long-horizon agent work, coding, tools, and multimodal input' },
@@ -129,6 +160,19 @@ const MODEL_CATALOG: Record<AiProvider, Array<{ id: string; label: string; detai
   ],
 };
 
+function formatPrice(value: number | null) {
+  if (value == null) return 'unknown';
+  if (value === 0) return '$0';
+  if (value < 0.01) return `$${value.toFixed(4)}`;
+  return `$${value.toFixed(value < 1 ? 3 : 2)}`;
+}
+
+function formatContext(tokens: number) {
+  if (!tokens) return 'unknown context';
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}M ctx`;
+  return `${Math.round(tokens / 1000)}K ctx`;
+}
+
 export default function Settings() {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
@@ -145,6 +189,17 @@ export default function Settings() {
   const [aiStatusError, setAiStatusError] = useState<string | null>(null);
   const [savingAi, setSavingAi] = useState(false);
   const [testingAi, setTestingAi] = useState(false);
+  const [aiReasoningEffort, setAiReasoningEffort] = useState<OpenRouterReasoningEffort | ''>('');
+  const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
+  const [openRouterModelsLoading, setOpenRouterModelsLoading] = useState(false);
+  const [openRouterModelsError, setOpenRouterModelsError] = useState<string | null>(null);
+  const [openRouterSearch, setOpenRouterSearch] = useState('');
+  const [openRouterReasoningOnly, setOpenRouterReasoningOnly] = useState(true);
+  const [openRouterFreeOnly, setOpenRouterFreeOnly] = useState(false);
+  const [openRouterToolsOnly, setOpenRouterToolsOnly] = useState(false);
+  const [openRouterMaxInput, setOpenRouterMaxInput] = useState('');
+  const [openRouterMaxOutput, setOpenRouterMaxOutput] = useState('');
+  const [openRouterSort, setOpenRouterSort] = useState<OpenRouterSort>('intelligence-high-to-low');
   const [analysisTier, setAnalysisTier] = useState<'fast' | 'balanced' | 'deep'>('balanced');
   const [filterLanguages, setFilterLanguages] = useState('');
   const [excludeArchived, setExcludeArchived] = useState(true);
@@ -177,6 +232,7 @@ export default function Settings() {
       setAiStatus(status);
       setAiProvider(normalizeProvider(status.requested_provider || status.active_provider));
       setAiModel(status.requested_model || '');
+      setAiReasoningEffort(status.requested_reasoning_effort || '');
     } catch (error) {
       setAiStatusError(error instanceof Error ? error.message : 'Unable to read AI provider status');
     } finally {
@@ -188,6 +244,28 @@ export default function Settings() {
     if (preferences) void loadAiStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preferences]);
+
+  const loadOpenRouterModels = async () => {
+    setOpenRouterModelsLoading(true);
+    setOpenRouterModelsError(null);
+    try {
+      const remoteSort = openRouterSort === 'best-value' ? 'intelligence-high-to-low' : openRouterSort;
+      const result = await customFetch<OpenRouterCatalogResponse>(
+        `/api/preferences/openrouter-models?sort=${encodeURIComponent(remoteSort)}`,
+        { responseType: 'json' },
+      );
+      setOpenRouterModels(result.models || []);
+    } catch (error) {
+      setOpenRouterModelsError(error instanceof Error ? error.message : 'Unable to load OpenRouter models');
+    } finally {
+      setOpenRouterModelsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (aiProvider === 'openrouter') void loadOpenRouterModels();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiProvider, openRouterSort, aiStatus?.stored_key_set]);
 
   const handleSave = () => {
     const languagesArray = filterLanguages
@@ -226,12 +304,14 @@ export default function Settings() {
         body: JSON.stringify({
           provider: aiProvider,
           model: aiModel.trim() || null,
+          reasoning_effort: aiProvider === 'openrouter' ? aiReasoningEffort || null : null,
           ...(aiKey.trim() ? { api_key: aiKey.trim() } : {}),
         }),
       });
       setAiStatus(saved);
       setAiProvider(normalizeProvider(saved.requested_provider || saved.active_provider));
       setAiModel(saved.requested_model || '');
+      setAiReasoningEffort(saved.requested_reasoning_effort || '');
       setAiKey('');
       await queryClient.invalidateQueries({ queryKey: getGetPreferencesQueryKey() });
       toast.success(`${providerLabel(saved.active_provider)} settings saved`, {
@@ -257,6 +337,7 @@ export default function Settings() {
         body: JSON.stringify({
           provider: aiProvider,
           model: aiModel.trim() || null,
+          reasoning_effort: aiProvider === 'openrouter' ? aiReasoningEffort || null : null,
           clear_key: true,
         }),
       });
@@ -336,10 +417,41 @@ export default function Settings() {
   const aiHasUnsavedChanges = Boolean(
     aiKey.trim() ||
     (aiStatus && normalizeProvider(aiStatus.requested_provider) !== aiProvider) ||
-    (aiStatus && (aiStatus.requested_model || '') !== aiModel.trim())
+    (aiStatus && (aiStatus.requested_model || '') !== aiModel.trim()) ||
+    (aiStatus && (aiStatus.requested_reasoning_effort || '') !== aiReasoningEffort)
   );
   const catalogModels = MODEL_CATALOG[aiProvider];
   const selectedCatalogModel = catalogModels.some((model) => model.id === aiModel) ? aiModel : '__custom__';
+  const selectedOpenRouterModel = openRouterModels.find((model) => model.id === aiModel) || null;
+  const filteredOpenRouterModels = useMemo(() => {
+    const query = openRouterSearch.trim().toLowerCase();
+    const maxInput = openRouterMaxInput.trim() ? Number(openRouterMaxInput) : null;
+    const maxOutput = openRouterMaxOutput.trim() ? Number(openRouterMaxOutput) : null;
+    const filtered = openRouterModels.filter((model) => {
+      if (query && !`${model.name} ${model.id} ${model.provider}`.toLowerCase().includes(query)) return false;
+      if (openRouterReasoningOnly && !model.supportsReasoning) return false;
+      if (openRouterFreeOnly && !model.isFree) return false;
+      if (openRouterToolsOnly && !model.supportsTools) return false;
+      if (maxInput != null && Number.isFinite(maxInput) && (model.inputPricePerMillion == null || model.inputPricePerMillion > maxInput)) return false;
+      if (maxOutput != null && Number.isFinite(maxOutput) && (model.outputPricePerMillion == null || model.outputPricePerMillion > maxOutput)) return false;
+      return true;
+    });
+    if (openRouterSort !== 'best-value') return filtered;
+    return [...filtered].sort((a, b) => {
+      const costA = (a.inputPricePerMillion ?? 100) + (a.outputPricePerMillion ?? 100);
+      const costB = (b.inputPricePerMillion ?? 100) + (b.outputPricePerMillion ?? 100);
+      const valueA = (openRouterModels.length - a.catalogRank + 1) / Math.max(0.001, costA);
+      const valueB = (openRouterModels.length - b.catalogRank + 1) / Math.max(0.001, costB);
+      return valueB - valueA;
+    });
+  }, [openRouterModels, openRouterSearch, openRouterReasoningOnly, openRouterFreeOnly, openRouterToolsOnly, openRouterMaxInput, openRouterMaxOutput, openRouterSort]);
+  const availableReasoningEfforts = !aiModel
+    ? []
+    : selectedOpenRouterModel
+      ? selectedOpenRouterModel.supportsReasoning
+        ? selectedOpenRouterModel.supportedEfforts?.length ? selectedOpenRouterModel.supportedEfforts : REASONING_EFFORTS
+        : []
+      : REASONING_EFFORTS;
 
   if (isLoading) {
     return (
@@ -450,6 +562,7 @@ export default function Settings() {
                 <Select value={aiProvider} onValueChange={(value) => {
                   setAiProvider(value as AiProvider);
                   setAiModel('');
+                  setAiReasoningEffort('');
                 }}>
                   <SelectTrigger id="ai-provider" data-testid="select-ai-provider">
                     <SelectValue placeholder="Google Gemini" />
@@ -464,30 +577,138 @@ export default function Settings() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="ai-model">Model preset</Label>
-                <Select value={aiModel ? selectedCatalogModel : '__default__'} onValueChange={(value) => setAiModel(value === '__default__' || value === '__custom__' ? '' : value)}>
-                  <SelectTrigger id="ai-model" data-testid="select-ai-model">
-                    <SelectValue placeholder="Choose a model" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__default__">Platform default (recommended)</SelectItem>
-                    {catalogModels.map((model) => (
-                      <SelectItem key={model.id} value={model.id}>{model.label} — {model.detail}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {aiProvider !== 'openrouter' ? (
+                  <>
+                    <Label htmlFor="ai-model">Model preset</Label>
+                    <Select value={aiModel ? selectedCatalogModel : '__default__'} onValueChange={(value) => setAiModel(value === '__default__' || value === '__custom__' ? '' : value)}>
+                      <SelectTrigger id="ai-model" data-testid="select-ai-model">
+                        <SelectValue placeholder="Choose a model" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__default__">Platform default (recommended)</SelectItem>
+                        {catalogModels.map((model) => (
+                          <SelectItem key={model.id} value={model.id}>{model.label} — {model.detail}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between gap-2">
+                      <Label htmlFor="openrouter-model-search">Live OpenRouter catalog</Label>
+                      <Button type="button" variant="ghost" size="sm" onClick={() => void loadOpenRouterModels()} disabled={openRouterModelsLoading}>
+                        {openRouterModelsLoading ? 'Loading…' : 'Refresh'}
+                      </Button>
+                    </div>
+                    <Input
+                      id="openrouter-model-search"
+                      value={openRouterSearch}
+                      onChange={(e) => setOpenRouterSearch(e.target.value)}
+                      placeholder="Search 500+ models by name, provider, or slug"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                    />
+                    <Select value={openRouterSort} onValueChange={(value) => setOpenRouterSort(value as OpenRouterSort)}>
+                      <SelectTrigger data-testid="select-openrouter-sort"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="intelligence-high-to-low">Intelligence — highest first</SelectItem>
+                        <SelectItem value="best-value">Best value — intelligence / cost</SelectItem>
+                        <SelectItem value="pricing-low-to-high">Cheapest — lowest price first</SelectItem>
+                        <SelectItem value="most-popular">Most popular</SelectItem>
+                        <SelectItem value="context-high-to-low">Largest context</SelectItem>
+                        <SelectItem value="newest">Newest</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <label className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-xs">
+                        Reasoning only <Switch checked={openRouterReasoningOnly} onCheckedChange={setOpenRouterReasoningOnly} />
+                      </label>
+                      <label className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-xs">
+                        Free only <Switch checked={openRouterFreeOnly} onCheckedChange={setOpenRouterFreeOnly} />
+                      </label>
+                      <label className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-xs">
+                        Tool calling <Switch checked={openRouterToolsOnly} onCheckedChange={setOpenRouterToolsOnly} />
+                      </label>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Input inputMode="decimal" value={openRouterMaxInput} onChange={(e) => setOpenRouterMaxInput(e.target.value)} placeholder="Max input $ / 1M" />
+                      <Input inputMode="decimal" value={openRouterMaxOutput} onChange={(e) => setOpenRouterMaxOutput(e.target.value)} placeholder="Max output $ / 1M" />
+                    </div>
+                    {openRouterModelsError ? (
+                      <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs text-amber-300">
+                        {openRouterModelsError}
+                        <div className="mt-1 text-muted-foreground">Save a usable OpenRouter key first if no platform credential is configured.</div>
+                      </div>
+                    ) : null}
+                    <div className="max-h-96 overflow-y-auto rounded-md border">
+                      {openRouterModelsLoading && openRouterModels.length === 0 ? (
+                        <div className="p-4 text-sm text-muted-foreground">Loading the live OpenRouter model catalog…</div>
+                      ) : filteredOpenRouterModels.length === 0 ? (
+                        <div className="p-4 text-sm text-muted-foreground">No models match the current filters.</div>
+                      ) : filteredOpenRouterModels.map((model) => (
+                        <button
+                          key={model.id}
+                          type="button"
+                          onClick={() => {
+                            setAiModel(model.id);
+                            if (!model.supportsReasoning) setAiReasoningEffort('');
+                            else if (model.defaultEffort) setAiReasoningEffort(model.defaultEffort);
+                          }}
+                          className={`w-full border-b p-3 text-left last:border-b-0 hover:bg-muted/40 ${aiModel === model.id ? 'bg-primary/10 ring-1 ring-inset ring-primary/50' : ''}`}
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="font-medium break-words">{model.name}</div>
+                              <div className="text-xs text-muted-foreground break-all">{model.id}</div>
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {model.supportsReasoning && <Badge variant="outline">Reasoning</Badge>}
+                              {model.supportsTools && <Badge variant="outline">Tools</Badge>}
+                              {model.isFree && <Badge variant="outline" className="text-emerald-500">Free</Badge>}
+                            </div>
+                          </div>
+                          <div className="mt-2 text-xs text-muted-foreground">
+                            Input {formatPrice(model.inputPricePerMillion)} / 1M · Output {formatPrice(model.outputPricePerMillion)} / 1M · {formatContext(model.contextLength)}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Showing {filteredOpenRouterModels.length} of {openRouterModels.length} compatible models. Pricing and capability metadata come from OpenRouter at runtime.
+                    </p>
+                  </>
+                )}
                 <Input
                   value={aiModel}
                   onChange={(e) => setAiModel(e.target.value)}
-                  placeholder={`Optional custom override: ${modelPlaceholder(aiProvider)}`}
+                  placeholder={`Exact model slug: ${modelPlaceholder(aiProvider)}`}
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
                   data-testid="input-ai-model"
                 />
-                <p className="text-xs text-muted-foreground">
-                  Sol and Terra are available as first-class presets. Custom entry remains available for newly released provider models.
-                </p>
+                {aiProvider === 'openrouter' && aiModel && !selectedOpenRouterModel && openRouterModels.length > 0 ? (
+                  <p className="text-xs text-amber-400">This saved/custom model is not in the current catalog. It will not be silently replaced.</p>
+                ) : null}
+                {aiProvider === 'openrouter' && availableReasoningEfforts.length > 0 ? (
+                  <div className="space-y-2 rounded-md border p-3">
+                    <Label>Reasoning effort</Label>
+                    <Select value={aiReasoningEffort || '__default__'} onValueChange={(value) => setAiReasoningEffort(value === '__default__' ? '' : value as OpenRouterReasoningEffort)}>
+                      <SelectTrigger data-testid="select-openrouter-reasoning"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__default__">Model/provider default</SelectItem>
+                        {availableReasoningEfforts.map((effort) => (
+                          <SelectItem key={effort} value={effort}>{effort === 'xhigh' ? 'XHigh' : effort.charAt(0).toUpperCase() + effort.slice(1)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      {selectedOpenRouterModel?.reasoningMandatory
+                        ? 'This model requires reasoning. Choose a supported effort or use its provider default.'
+                        : 'RepoFinisher will send this effort with OpenRouter analysis requests.'}
+                    </p>
+                  </div>
+                ) : null}
               </div>
             </div>
 
