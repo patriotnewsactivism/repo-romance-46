@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { z } from "zod";
 import { callAI } from "./ai-provider";
 import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "./credentials";
 import { reasonAboutRepositoryPlan, type ReasonedPlanningResult } from "./reasoning-orchestrator";
 import { verifyDeploymentSandbox, type SandboxVerificationResult } from "./sandbox-verification";
+import { parseModelJsonWithRepair } from "./parse-model-json";
 
 const MAX_CHANGES = 25;
 const MAX_FILE_BYTES = 750_000;
@@ -34,6 +36,7 @@ export interface PreparedFinishPlan {
   repo: string;
   defaultBranch: string;
   sourceBranch?: string;
+  scopePath?: string;
   baseSha: string;
   summary: string;
   nextSteps: string[];
@@ -85,6 +88,7 @@ interface RepoContext {
   token: string;
   defaultBranch: string;
   sourceBranch: string;
+  scopePath: string | null;
   baseSha: string;
   treeSha: string;
   tree: GitHubTreeEntry[];
@@ -151,14 +155,89 @@ async function getBranchHead(token: string, repo: string, branch: string) {
   return { commitSha: ref.object.sha, treeSha: commit.tree.sha };
 }
 
-async function getRepoTree(token: string, repo: string, treeSha: string): Promise<GitHubTreeEntry[]> {
+export function normalizeScopePath(scopePath: string): string {
+  const normalized = scopePath.trim().replace(/^\/+|\/+$/g, "");
+  if (!normalized || normalized.includes("..") || normalized.includes("\\") || normalized.includes("\0")) {
+    throw Object.assign(new Error(`Invalid scope path: ${JSON.stringify(scopePath)}`), { status: 400 });
+  }
+  return normalized;
+}
+
+/**
+ * Walks a scope path (e.g. "artifacts/api-server") segment by segment using
+ * GitHub's non-recursive tree endpoint at each level to resolve the git tree
+ * SHA of the target directory, without ever requesting a recursive listing
+ * of anything larger than one directory level at a time.
+ */
+async function resolveScopedTreeSha(token: string, repo: string, rootTreeSha: string, scopePath: string): Promise<string> {
+  const segments = scopePath.split("/");
+  let currentSha = rootTreeSha;
+  let consumedPath = "";
+  for (const segment of segments) {
+    const res = await ghFetch(token, `/repos/${repo}/git/trees/${currentSha}`);
+    if (!res.ok) throw new Error(`Failed to resolve scope path "${scopePath}": ${res.status}`);
+    const json = (await res.json()) as { tree: GitHubTreeEntry[] };
+    const match = json.tree.find((entry) => entry.path === segment && entry.type === "tree");
+    if (!match) {
+      throw Object.assign(
+        new Error(`Scope path "${scopePath}" was not found (no directory "${segment}" under "${consumedPath || "/"}").`),
+        { status: 400 },
+      );
+    }
+    currentSha = match.sha;
+    consumedPath = consumedPath ? `${consumedPath}/${segment}` : segment;
+  }
+  return currentSha;
+}
+
+/**
+ * Lists top-level directories as candidate scoped-run targets. Cheap: a
+ * single non-recursive tree fetch, which GitHub never truncates at this
+ * level (only recursive listings of very large trees get truncated).
+ */
+async function listScopeSuggestions(token: string, repo: string, rootTreeSha: string): Promise<string[]> {
+  const res = await ghFetch(token, `/repos/${repo}/git/trees/${rootTreeSha}`);
+  if (!res.ok) return [];
+  const json = (await res.json()) as { tree: GitHubTreeEntry[] };
+  return json.tree
+    .filter((entry) => entry.type === "tree")
+    .map((entry) => entry.path)
+    .sort()
+    .slice(0, 30);
+}
+
+export async function getRepoTree(token: string, repo: string, treeSha: string, scopePath?: string): Promise<GitHubTreeEntry[]> {
+  if (scopePath) {
+    const normalizedScope = normalizeScopePath(scopePath);
+    const scopedTreeSha = await resolveScopedTreeSha(token, repo, treeSha, normalizedScope);
+    const res = await ghFetch(token, `/repos/${repo}/git/trees/${scopedTreeSha}?recursive=1`);
+    if (!res.ok) throw new Error(`Failed to fetch scoped tree "${normalizedScope}": ${res.status}`);
+    const json = (await res.json()) as { truncated?: boolean; tree: GitHubTreeEntry[] };
+    if (json.truncated) {
+      throw Object.assign(
+        new Error(`Scope "${normalizedScope}" is itself too large for a safe autonomous run. Choose a smaller subdirectory.`),
+        { status: 409, code: "REPO_TOO_LARGE" },
+      );
+    }
+    // GitHub's recursive fetch from a subtree SHA returns paths relative to
+    // that subtree, not the repo root — re-prefix so every downstream
+    // consumer (file content fetch, change validation, commit building)
+    // keeps working against real, full repo-relative paths.
+    return json.tree
+      .filter((entry) => entry.type === "blob")
+      .map((entry) => ({ ...entry, path: `${normalizedScope}/${entry.path}` }));
+  }
+
   const res = await ghFetch(token, `/repos/${repo}/git/trees/${treeSha}?recursive=1`);
   if (!res.ok) throw new Error(`Failed to fetch tree: ${res.status}`);
   const json = (await res.json()) as { truncated?: boolean; tree: GitHubTreeEntry[] };
   if (json.truncated) {
+    const suggestedScopes = await listScopeSuggestions(token, repo, treeSha);
     throw Object.assign(
-      new Error("Repository tree is too large for a safe whole-repo autonomous run. Use a scoped run."),
-      { status: 409 },
+      new Error(
+        "Repository tree is too large for a safe whole-repo autonomous run. Retry with a scoped run against one of the suggested subdirectories.",
+      ),
+      { status: 409, code: "REPO_TOO_LARGE", details: { suggestedScopes } },
     );
   }
   return json.tree.filter((entry) => entry.type === "blob");
@@ -175,7 +254,7 @@ async function getFileContent(token: string, repo: string, path: string, ref: st
   return Buffer.from(json.content, "base64").toString("utf-8");
 }
 
-async function loadRepoContext(supabase: SupabaseClient, userId: string, repoName: string, sourceBranch?: string): Promise<RepoContext> {
+async function loadRepoContext(supabase: SupabaseClient, userId: string, repoName: string, sourceBranch?: string, scopePath?: string): Promise<RepoContext> {
   validateRepoName(repoName);
   const connection = requireGithubCredential(await loadGithubCredential(supabase, userId));
   const token = connection.token;
@@ -186,12 +265,13 @@ async function loadRepoContext(supabase: SupabaseClient, userId: string, repoNam
   const defaultBranch = String(repo.default_branch || "main");
   const resolvedSourceBranch = sourceBranch?.trim() || defaultBranch;
   const head = await getBranchHead(token, repoName, resolvedSourceBranch);
-  const tree = await getRepoTree(token, repoName, head.treeSha);
+  const tree = await getRepoTree(token, repoName, head.treeSha, scopePath);
 
   return {
     token,
     defaultBranch,
     sourceBranch: resolvedSourceBranch,
+    scopePath: scopePath ? normalizeScopePath(scopePath) : null,
     baseSha: head.commitSha,
     treeSha: head.treeSha,
     tree,
@@ -390,7 +470,55 @@ async function resolveNextSteps(
       ];
 }
 
-async function generateFinishPlan(
+const FINISH_PLAN_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    analysis: { type: "string" },
+    changes: {
+      type: "array",
+      minItems: 1,
+      maxItems: MAX_CHANGES,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          path: { type: "string" },
+          status: { type: "string", enum: ["created", "modified", "deleted"] },
+          content: { type: "string" },
+          description: { type: "string" },
+        },
+        required: ["path", "status", "content", "description"],
+      },
+    },
+  },
+  required: ["analysis", "changes"],
+} as const;
+
+// Mirrors FINISH_PLAN_JSON_SCHEMA above so a plan is validated with the exact
+// same shape that was requested from the model, regardless of whether the
+// provider actually honored strict json_schema mode.
+const finishPlanZodSchema = z.object({
+  analysis: z.string(),
+  changes: z
+    .array(
+      z.object({
+        path: z.string(),
+        status: z.enum(["created", "modified", "deleted"]),
+        content: z.string(),
+        description: z.string(),
+      }),
+    )
+    .min(1)
+    .max(MAX_CHANGES),
+});
+
+function validateFinishPlan(value: unknown): AIFinishPlan | null {
+  const parsed = finishPlanZodSchema.safeParse(value);
+  return parsed.success ? (parsed.data as AIFinishPlan) : null;
+}
+
+export async function generateFinishPlan(
   repo: string,
   repoData: RepoContext["repoData"],
   files: { path: string; content: string }[],
@@ -419,34 +547,7 @@ async function generateFinishPlan(
       ],
       responseFormat: {
         type: "json_schema",
-        json_schema: {
-          name: "finish_plan",
-          strict: true,
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              analysis: { type: "string" },
-              changes: {
-                type: "array",
-                minItems: 1,
-                maxItems: MAX_CHANGES,
-                items: {
-                  type: "object",
-                  additionalProperties: false,
-                  properties: {
-                    path: { type: "string" },
-                    status: { type: "string", enum: ["created", "modified", "deleted"] },
-                    content: { type: "string" },
-                    description: { type: "string" },
-                  },
-                  required: ["path", "status", "content", "description"],
-                },
-              },
-            },
-            required: ["analysis", "changes"],
-          },
-        },
+        json_schema: { name: "finish_plan", strict: true, schema: FINISH_PLAN_JSON_SCHEMA },
       },
       thinkingLevel: reasoning ? "high" : "medium",
       timeoutMs: 75_000,
@@ -454,7 +555,47 @@ async function generateFinishPlan(
     { provider: aiProvider, apiKey: aiKey },
   );
 
-  return JSON.parse(result.content || "{}") as AIFinishPlan;
+  const parsed = await parseModelJsonWithRepair<AIFinishPlan>(result.content || "", {
+    validate: validateFinishPlan,
+    // Exactly one bounded repair attempt: re-prompt the same provider/model,
+    // showing it its own malformed reply, asking for pure raw JSON only. No
+    // eval/Function anywhere in this path — repair output goes through the
+    // same tryParseModelJson()+validateFinishPlan() as the first attempt.
+    repair: async () => {
+      const repairResult = await callAI(
+        {
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+            { role: "assistant", content: (result.content || "").slice(0, 4000) },
+            {
+              role: "user",
+              content:
+                'Your previous response could not be parsed as JSON matching the required schema. Reply with ONLY the raw JSON object — no markdown code fences, no backticks, no prose before or after it. It must match this exact shape: {"analysis": string, "changes": [{"path": string, "status": "created"|"modified"|"deleted", "content": string, "description": string}]}.',
+            },
+          ],
+          responseFormat: {
+            type: "json_schema",
+            json_schema: { name: "finish_plan_repair", strict: true, schema: FINISH_PLAN_JSON_SCHEMA },
+          },
+          thinkingLevel: "low",
+          timeoutMs: 60_000,
+        },
+        { provider: aiProvider, apiKey: aiKey },
+      );
+      return repairResult.content || "";
+    },
+  });
+
+  if (!parsed.ok) {
+    // Sanitized, bounded error — never the full prompt or a raw giant LLM
+    // dump — safe to persist as a completion-session's stop_reason/last_error.
+    throw new Error(
+      `Planning response could not be parsed into a valid finish plan${parsed.repaired ? " after one repair attempt" : ""}: ${parsed.error} (sample: ${JSON.stringify(parsed.rawSample)})`,
+    );
+  }
+
+  return parsed.value;
 }
 
 function canonicalize(value: unknown): string {
@@ -484,6 +625,13 @@ export async function prepareFinishPlan(
     reasoning?: boolean;
     mode?: "plan" | "replan";
     baseBranch?: string;
+    /**
+     * Optional subdirectory (e.g. "artifacts/api-server") to scope this run
+     * to. Required for repositories whose full recursive tree GitHub itself
+     * truncates (see getRepoTree) — without it, prepareFinishPlan throws a
+     * 409 with `details.suggestedScopes` listing viable top-level scopes.
+     */
+    scopePath?: string;
   },
 ) {
   const requestedNextSteps = await resolveNextSteps(supabase, data);
@@ -505,7 +653,7 @@ export async function prepareFinishPlan(
     }
   }
   const nextSteps = reasoning?.nextSteps?.length ? reasoning.nextSteps : requestedNextSteps;
-  const context = await loadRepoContext(supabase, userId, data.repo, data.baseBranch);
+  const context = await loadRepoContext(supabase, userId, data.repo, data.baseBranch, data.scopePath);
   const files = await fetchKeyFiles(context.token, data.repo, context.baseSha, context.tree);
   const aiCredential = await loadAiCredential(supabase, userId, context.token);
 
@@ -526,6 +674,7 @@ export async function prepareFinishPlan(
     repo: data.repo,
     defaultBranch: context.defaultBranch,
     sourceBranch: data.baseBranch?.trim() || undefined,
+    scopePath: context.scopePath ?? undefined,
     baseSha: context.baseSha,
     summary: reasoning ? `${reasoning.summary}\n\nCoding plan: ${generated.analysis}` : generated.analysis,
     nextSteps,

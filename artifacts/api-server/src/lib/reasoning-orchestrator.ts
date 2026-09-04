@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { callAI } from "./ai-provider";
+import { parseModelJsonLenient } from "./parse-model-json";
 import { loadAdaptiveLearningContext } from "./adaptive-learning";
 import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "./credentials";
 import { loadOperationalMemory, memoryGuidance } from "./learning-memory";
@@ -425,7 +426,7 @@ async function runEvidenceAnalyst(ai: { provider: string; apiKey: string | null 
     thinkingLevel: "high",
     timeoutMs: 60_000,
   }, ai);
-  try { return normalizeEvidenceAnalysis(JSON.parse(result.content || "{}")); } catch { return normalizeEvidenceAnalysis({}); }
+  return normalizeEvidenceAnalysis(parseModelJsonLenient(result.content || "{}"));
 }
 
 async function runCritic(ai: { provider: string; apiKey: string | null }, context: Record<string, unknown>): Promise<CriticResult> {
@@ -460,7 +461,7 @@ async function runCritic(ai: { provider: string; apiKey: string | null }, contex
     thinkingLevel: "high",
     timeoutMs: 60_000,
   }, ai);
-  try { return normalizeCritic(JSON.parse(result.content || "{}")); } catch { return normalizeCritic({}); }
+  return normalizeCritic(parseModelJsonLenient(result.content || "{}"));
 }
 
 async function runSpecialist(ai: { provider: string; apiKey: string | null }, role: SpecialistRole, context: Record<string, unknown>): Promise<SpecialistResult> {
@@ -494,7 +495,7 @@ async function runSpecialist(ai: { provider: string; apiKey: string | null }, ro
     thinkingLevel: "medium",
     timeoutMs: 50_000,
   }, ai);
-  try { return normalizeSpecialist(role, JSON.parse(result.content || "{}")); } catch { return normalizeSpecialist(role, {}); }
+  return normalizeSpecialist(role, parseModelJsonLenient(result.content || "{}"));
 }
 
 async function runPlanner(ai: { provider: string; apiKey: string | null }, context: Record<string, unknown>): Promise<PlannerResult> {
@@ -529,7 +530,7 @@ async function runPlanner(ai: { provider: string; apiKey: string | null }, conte
     thinkingLevel: "high",
     timeoutMs: 65_000,
   }, ai);
-  try { return normalizePlanner(JSON.parse(result.content || "{}")); } catch { return normalizePlanner({}); }
+  return normalizePlanner(parseModelJsonLenient(result.content || "{}"));
 }
 
 function evidenceConfidence(diagnosis: EvidenceAnalysis, critic: CriticResult) {

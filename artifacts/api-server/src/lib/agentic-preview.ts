@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { callAI } from "./ai-provider";
+import { parseModelJsonLenient } from "./parse-model-json";
 import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "./credentials";
 import { loadAdaptiveLearningContext } from "./adaptive-learning";
 import { prepareFinishPlan } from "./repo-finisher-engine";
@@ -26,6 +27,8 @@ export interface AgenticPreviewInput {
   analysisId?: string;
   itemRank?: number;
   boundedAutonomyAcknowledged?: boolean;
+  /** Subdirectory to scope this run to — see prepareFinishPlan. */
+  scopePath?: string;
 }
 
 function strings(value: unknown, max = 8) {
@@ -135,7 +138,7 @@ Return strict JSON.`;
     ai,
   );
   try {
-    return normalizeAgentResult(role, JSON.parse(result.content || "{}"));
+    return normalizeAgentResult(role, parseModelJsonLenient(result.content || "{}"));
   } catch {
     return normalizeAgentResult(role, {});
   }
@@ -259,6 +262,7 @@ export async function createAgenticPreview(
     nextSteps: combinedNextSteps,
     analysisId: input.analysisId,
     itemRank: input.itemRank,
+    scopePath: input.scopePath,
   });
 
   const now = new Date().toISOString();

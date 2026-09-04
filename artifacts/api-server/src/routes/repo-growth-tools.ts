@@ -12,6 +12,7 @@ import {
   searchMarketWeb,
   type MarketResearchSource,
 } from "../lib/tavily-market-research";
+import { parseModelJsonWithRepair } from "../lib/parse-model-json";
 
 const router: IRouter = Router();
 const repoPattern = /^[A-Za-z0-9.-]+\/[A-Za-z0-9._-]+$/;
@@ -30,6 +31,9 @@ const previewInput = z.object({
   title: z.string().min(1).max(180),
   goals: z.array(z.string().min(1).max(1000)).min(1).max(20),
   documentationTargets: z.array(z.enum(["README.md", "AGENTS.md", "PLAN.md", "ROADMAP.md", "docs"])).max(5).optional(),
+  // Subdirectory to scope this run to, required for repos too large for a
+  // safe whole-repo tree fetch — see prepareFinishPlan / getRepoTree.
+  scopePath: z.string().trim().min(1).max(300).optional(),
 });
 
 const sourceSchema = z.object({
@@ -252,6 +256,76 @@ export function isDocumentationPath(path: string) {
   return /^(README(?:\.(?:md|markdown|rst|txt))?|AGENTS\.md|PLAN(?:\.[^/]+)?\.md|ROADMAP(?:\.[^/]+)?\.md|CONTRIBUTING\.md|SECURITY\.md|CHANGELOG(?:\.(?:md|markdown|rst|txt))?|docs\/.*\.md)$/i.test(normalized);
 }
 
+/**
+ * Calls the AI provider for the growth/market analysis and parses its
+ * response with one bounded fence/prose-tolerant repair attempt, exactly
+ * like generateFinishPlan in repo-finisher-engine.ts. Extracted from the
+ * route handler so it is directly unit-testable against a mocked fetch.
+ *
+ * Root cause this fixes: this endpoint used to do a bare
+ * `aiGrowthSchema.parse(JSON.parse(response.content || "{}"))` — any
+ * provider that ignored strict json_schema mode (fenced/prose-wrapped
+ * reply) threw an uncaught SyntaxError or ZodError, which asyncHandler
+ * forwarded to the global handler as a generic, unactionable 500.
+ */
+export async function generateGrowthAnalysis(
+  system: string,
+  user: string,
+  aiCredential: { provider: string; apiKey: string | null },
+): Promise<AiGrowth> {
+  const response = await callAI(
+    {
+      messages: [{ role: "system", content: system }, { role: "user", content: user }],
+      responseFormat: { type: "json_schema", json_schema: { name: "repo_growth_analysis", strict: true, schema: growthJsonSchema() } },
+      thinkingLevel: "high",
+      timeoutMs: 90_000,
+    },
+    { provider: aiCredential.provider, apiKey: aiCredential.apiKey },
+  );
+
+  const parsed = await parseModelJsonWithRepair<AiGrowth>(response.content || "", {
+    validate: (value) => {
+      const result = aiGrowthSchema.safeParse(value);
+      return result.success ? result.data : null;
+    },
+    repair: async () => {
+      const repairResult = await callAI(
+        {
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+            { role: "assistant", content: (response.content || "").slice(0, 4000) },
+            {
+              role: "user",
+              content:
+                "Your previous response could not be parsed as JSON matching the required schema. Reply with ONLY the raw JSON object — no markdown code fences, no backticks, no prose before or after it.",
+            },
+          ],
+          responseFormat: { type: "json_schema", json_schema: { name: "repo_growth_analysis_repair", strict: true, schema: growthJsonSchema() } },
+          thinkingLevel: "low",
+          timeoutMs: 60_000,
+        },
+        { provider: aiCredential.provider, apiKey: aiCredential.apiKey },
+      );
+      return repairResult.content || "";
+    },
+  });
+
+  if (!parsed.ok) {
+    // Sanitized, bounded error (never a raw SyntaxError/ZodError or a full
+    // prompt dump) with an explicit 502 — this is the AI provider failing
+    // to return a usable structured response, not our own bug.
+    throw Object.assign(
+      new Error(
+        `Market research analysis could not be generated right now — the AI provider returned an unparseable response${parsed.repaired ? " even after one repair attempt" : ""}. Please retry.`,
+      ),
+      { status: 502, code: "GROWTH_ANALYSIS_UNPARSEABLE" },
+    );
+  }
+
+  return parsed.value;
+}
+
 router.post(
   "/repo-growth-tools/research",
   requireAuth,
@@ -325,16 +399,8 @@ Return strict JSON only.`;
       live_research_error: researchError,
     });
 
-    const response = await callAI(
-      {
-        messages: [{ role: "system", content: system }, { role: "user", content: user }],
-        responseFormat: { type: "json_schema", json_schema: { name: "repo_growth_analysis", strict: true, schema: growthJsonSchema() } },
-        thinkingLevel: "high",
-        timeoutMs: 90_000,
-      },
-      { provider: aiCredential.provider, apiKey: aiCredential.apiKey },
-    );
-    const parsed = normalizeSourceBackedClaims(aiGrowthSchema.parse(JSON.parse(response.content || "{}")), sources);
+    const growthAnalysis = await generateGrowthAnalysis(system, user, aiCredential);
+    const parsed = normalizeSourceBackedClaims(growthAnalysis, sources);
     if (!live) {
       parsed.competitors = [];
       parsed.market_summary = "Live external competitor/pricing research is unavailable. The feature suggestions below are repository-evidence product hypotheses with explicit planning assumptions, not verified market claims.";
@@ -387,6 +453,7 @@ router.post(
       itemRank: input.itemRank,
       boundedAutonomyAcknowledged: true,
       nextSteps: [...safetyGoals, `Selected objective: ${input.title}`, ...input.goals],
+      scopePath: input.scopePath,
     });
 
     if (input.kind === "documentation") {

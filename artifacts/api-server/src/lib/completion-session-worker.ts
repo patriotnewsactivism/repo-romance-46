@@ -18,6 +18,7 @@ const SESSION_WORK_BUDGET_MS = 5.5 * 60_000;
 const MAX_REPAIR_ATTEMPTS = 3;
 const SESSION_PROMPT_FALLBACK = "completion-session-v1-iterative";
 
+type CompletionWorkerModeLike = "cloud-run-job" | "in-process" | "already-running";
 type SessionStatus = "active" | "succeeded" | "blocked" | "budget_exhausted" | "cancelled";
 type SessionPhase = "queued" | "planning" | "executing" | "verifying" | "repairing" | "rescoring" | "replanning" | "complete" | "blocked";
 
@@ -640,6 +641,97 @@ export function scheduleCompletionSession(
   sessionId: string,
 ) {
   runInBackground(processCompletionSession(supabase, userId, sessionId), `completion-session:${sessionId}`);
+}
+
+const RETRYABLE_BLOCK_KINDS = new Set(["iteration_execution_failed"]);
+
+/**
+ * Idempotently retries a session that was blocked because a single planning
+ * iteration threw before any branch/PR/run state was persisted (i.e. was
+ * blocked with kind "iteration_execution_failed" — see launchIteration's
+ * catch above). This is exactly the "formatting error permanently stranded
+ * the session at iteration 0" failure mode: `iteration_count` was never
+ * incremented and no completion_run row was created for the failed attempt,
+ * so resuming just means flipping the session back to active/queued and
+ * rescheduling the worker — it will re-run the *same* iteration number from
+ * scratch, not create a new one.
+ *
+ * Calling this on a session that is already "active" is a safe no-op (it
+ * just reports current state) so a client can call it repeatedly without
+ * side effects. Blocked sessions whose most recent block event is NOT an
+ * `iteration_execution_failed` (e.g. verification failed after a real
+ * branch/PR already exists, or session state was inconsistent) are
+ * rejected with 409 — those failure modes already have branch/PR state that
+ * a blind "retry planning" would not safely reconcile, and are out of scope
+ * for this idempotent retry path.
+ */
+export async function retryBlockedIteration(
+  supabase: SupabaseClient,
+  userId: string,
+  sessionId: string,
+): Promise<{ session: CompletionSessionRow; retried: boolean; workerMode: CompletionWorkerModeLike | null }> {
+  const session = await loadCompletionSession(supabase, userId, sessionId);
+
+  if (session.status === "active") {
+    return { session, retried: false, workerMode: null };
+  }
+
+  if (session.status !== "blocked") {
+    throw Object.assign(
+      new Error(`Session cannot retry an iteration from terminal status "${session.status}".`),
+      { status: 409 },
+    );
+  }
+
+  const events = await listCompletionSessionEvents(supabase, userId, sessionId);
+  const lastEvent = events[events.length - 1] as { kind?: string } | undefined;
+  if (!lastEvent?.kind || !RETRYABLE_BLOCK_KINDS.has(lastEvent.kind)) {
+    throw Object.assign(
+      new Error(
+        `This session was blocked for a reason ("${lastEvent?.kind ?? session.stop_reason ?? "unknown"}") that is not a bounded planning-format retry. It may already have branch/PR state that requires manual review instead of an automatic retry.`,
+      ),
+      { status: 409 },
+    );
+  }
+
+  const now = new Date().toISOString();
+  const { data: updated, error } = await supabase
+    .from("repo_completion_sessions")
+    .update({
+      status: "active",
+      phase: "queued",
+      stop_reason: null,
+      last_error: null,
+      completed_at: null,
+      updated_at: now,
+    })
+    .eq("id", sessionId)
+    .eq("user_id", userId)
+    .eq("status", "blocked")
+    .select("*")
+    .maybeSingle();
+  if (error) throw new Error(`Failed to retry completion-session iteration: ${error.message}`);
+  if (!updated) {
+    // Lost a race with another retry/cancel call between the read above and
+    // this update — re-load and report current state rather than throwing,
+    // keeping this endpoint idempotent under concurrent calls.
+    const latest = await loadCompletionSession(supabase, userId, sessionId);
+    return { session: latest, retried: false, workerMode: null };
+  }
+
+  await recordSessionEvent(
+    supabase,
+    userId,
+    sessionId,
+    session.iteration_count || null,
+    "iteration_retry_requested",
+    "info",
+    `Retrying iteration ${session.iteration_count + 1} after a bounded planning-format failure. No new branch, commit, PR, or iteration record is created by this retry — it re-attempts the same iteration.`,
+  );
+
+  const { scheduleCompletionSession } = await import("./completion-session-scheduler");
+  const workerMode = await scheduleCompletionSession(supabase, userId, sessionId);
+  return { session: updated as CompletionSessionRow, retried: true, workerMode };
 }
 
 export async function listCompletionSessionEvents(
