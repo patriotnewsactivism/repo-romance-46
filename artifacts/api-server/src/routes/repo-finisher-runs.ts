@@ -181,6 +181,11 @@ router.post(
       analysisId: z.string().uuid().optional(),
       itemRank: z.number().int().nonnegative().optional(),
       boundedAutonomyAcknowledged: z.boolean().default(false),
+      // Subdirectory to scope this run to (e.g. "artifacts/api-server"),
+      // required when the repo's full tree is too large for GitHub's
+      // recursive listing — see prepareFinishPlan / getRepoTree, which
+      // returns a 409 with details.suggestedScopes when that happens.
+      scopePath: z.string().trim().min(1).max(300).optional(),
     }).parse(req.body);
 
     const [{ plan, planHash, reasoning }, baselineMetrics] = await Promise.all([

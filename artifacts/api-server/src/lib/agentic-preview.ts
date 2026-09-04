@@ -27,6 +27,8 @@ export interface AgenticPreviewInput {
   analysisId?: string;
   itemRank?: number;
   boundedAutonomyAcknowledged?: boolean;
+  /** Subdirectory to scope this run to — see prepareFinishPlan. */
+  scopePath?: string;
 }
 
 function strings(value: unknown, max = 8) {
@@ -260,6 +262,7 @@ export async function createAgenticPreview(
     nextSteps: combinedNextSteps,
     analysisId: input.analysisId,
     itemRank: input.itemRank,
+    scopePath: input.scopePath,
   });
 
   const now = new Date().toISOString();

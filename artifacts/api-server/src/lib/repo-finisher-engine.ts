@@ -36,6 +36,7 @@ export interface PreparedFinishPlan {
   repo: string;
   defaultBranch: string;
   sourceBranch?: string;
+  scopePath?: string;
   baseSha: string;
   summary: string;
   nextSteps: string[];
@@ -87,6 +88,7 @@ interface RepoContext {
   token: string;
   defaultBranch: string;
   sourceBranch: string;
+  scopePath: string | null;
   baseSha: string;
   treeSha: string;
   tree: GitHubTreeEntry[];
@@ -153,14 +155,89 @@ async function getBranchHead(token: string, repo: string, branch: string) {
   return { commitSha: ref.object.sha, treeSha: commit.tree.sha };
 }
 
-async function getRepoTree(token: string, repo: string, treeSha: string): Promise<GitHubTreeEntry[]> {
+export function normalizeScopePath(scopePath: string): string {
+  const normalized = scopePath.trim().replace(/^\/+|\/+$/g, "");
+  if (!normalized || normalized.includes("..") || normalized.includes("\\") || normalized.includes("\0")) {
+    throw Object.assign(new Error(`Invalid scope path: ${JSON.stringify(scopePath)}`), { status: 400 });
+  }
+  return normalized;
+}
+
+/**
+ * Walks a scope path (e.g. "artifacts/api-server") segment by segment using
+ * GitHub's non-recursive tree endpoint at each level to resolve the git tree
+ * SHA of the target directory, without ever requesting a recursive listing
+ * of anything larger than one directory level at a time.
+ */
+async function resolveScopedTreeSha(token: string, repo: string, rootTreeSha: string, scopePath: string): Promise<string> {
+  const segments = scopePath.split("/");
+  let currentSha = rootTreeSha;
+  let consumedPath = "";
+  for (const segment of segments) {
+    const res = await ghFetch(token, `/repos/${repo}/git/trees/${currentSha}`);
+    if (!res.ok) throw new Error(`Failed to resolve scope path "${scopePath}": ${res.status}`);
+    const json = (await res.json()) as { tree: GitHubTreeEntry[] };
+    const match = json.tree.find((entry) => entry.path === segment && entry.type === "tree");
+    if (!match) {
+      throw Object.assign(
+        new Error(`Scope path "${scopePath}" was not found (no directory "${segment}" under "${consumedPath || "/"}").`),
+        { status: 400 },
+      );
+    }
+    currentSha = match.sha;
+    consumedPath = consumedPath ? `${consumedPath}/${segment}` : segment;
+  }
+  return currentSha;
+}
+
+/**
+ * Lists top-level directories as candidate scoped-run targets. Cheap: a
+ * single non-recursive tree fetch, which GitHub never truncates at this
+ * level (only recursive listings of very large trees get truncated).
+ */
+async function listScopeSuggestions(token: string, repo: string, rootTreeSha: string): Promise<string[]> {
+  const res = await ghFetch(token, `/repos/${repo}/git/trees/${rootTreeSha}`);
+  if (!res.ok) return [];
+  const json = (await res.json()) as { tree: GitHubTreeEntry[] };
+  return json.tree
+    .filter((entry) => entry.type === "tree")
+    .map((entry) => entry.path)
+    .sort()
+    .slice(0, 30);
+}
+
+export async function getRepoTree(token: string, repo: string, treeSha: string, scopePath?: string): Promise<GitHubTreeEntry[]> {
+  if (scopePath) {
+    const normalizedScope = normalizeScopePath(scopePath);
+    const scopedTreeSha = await resolveScopedTreeSha(token, repo, treeSha, normalizedScope);
+    const res = await ghFetch(token, `/repos/${repo}/git/trees/${scopedTreeSha}?recursive=1`);
+    if (!res.ok) throw new Error(`Failed to fetch scoped tree "${normalizedScope}": ${res.status}`);
+    const json = (await res.json()) as { truncated?: boolean; tree: GitHubTreeEntry[] };
+    if (json.truncated) {
+      throw Object.assign(
+        new Error(`Scope "${normalizedScope}" is itself too large for a safe autonomous run. Choose a smaller subdirectory.`),
+        { status: 409, code: "REPO_TOO_LARGE" },
+      );
+    }
+    // GitHub's recursive fetch from a subtree SHA returns paths relative to
+    // that subtree, not the repo root — re-prefix so every downstream
+    // consumer (file content fetch, change validation, commit building)
+    // keeps working against real, full repo-relative paths.
+    return json.tree
+      .filter((entry) => entry.type === "blob")
+      .map((entry) => ({ ...entry, path: `${normalizedScope}/${entry.path}` }));
+  }
+
   const res = await ghFetch(token, `/repos/${repo}/git/trees/${treeSha}?recursive=1`);
   if (!res.ok) throw new Error(`Failed to fetch tree: ${res.status}`);
   const json = (await res.json()) as { truncated?: boolean; tree: GitHubTreeEntry[] };
   if (json.truncated) {
+    const suggestedScopes = await listScopeSuggestions(token, repo, treeSha);
     throw Object.assign(
-      new Error("Repository tree is too large for a safe whole-repo autonomous run. Use a scoped run."),
-      { status: 409 },
+      new Error(
+        "Repository tree is too large for a safe whole-repo autonomous run. Retry with a scoped run against one of the suggested subdirectories.",
+      ),
+      { status: 409, code: "REPO_TOO_LARGE", details: { suggestedScopes } },
     );
   }
   return json.tree.filter((entry) => entry.type === "blob");
@@ -177,7 +254,7 @@ async function getFileContent(token: string, repo: string, path: string, ref: st
   return Buffer.from(json.content, "base64").toString("utf-8");
 }
 
-async function loadRepoContext(supabase: SupabaseClient, userId: string, repoName: string, sourceBranch?: string): Promise<RepoContext> {
+async function loadRepoContext(supabase: SupabaseClient, userId: string, repoName: string, sourceBranch?: string, scopePath?: string): Promise<RepoContext> {
   validateRepoName(repoName);
   const connection = requireGithubCredential(await loadGithubCredential(supabase, userId));
   const token = connection.token;
@@ -188,12 +265,13 @@ async function loadRepoContext(supabase: SupabaseClient, userId: string, repoNam
   const defaultBranch = String(repo.default_branch || "main");
   const resolvedSourceBranch = sourceBranch?.trim() || defaultBranch;
   const head = await getBranchHead(token, repoName, resolvedSourceBranch);
-  const tree = await getRepoTree(token, repoName, head.treeSha);
+  const tree = await getRepoTree(token, repoName, head.treeSha, scopePath);
 
   return {
     token,
     defaultBranch,
     sourceBranch: resolvedSourceBranch,
+    scopePath: scopePath ? normalizeScopePath(scopePath) : null,
     baseSha: head.commitSha,
     treeSha: head.treeSha,
     tree,
@@ -547,6 +625,13 @@ export async function prepareFinishPlan(
     reasoning?: boolean;
     mode?: "plan" | "replan";
     baseBranch?: string;
+    /**
+     * Optional subdirectory (e.g. "artifacts/api-server") to scope this run
+     * to. Required for repositories whose full recursive tree GitHub itself
+     * truncates (see getRepoTree) — without it, prepareFinishPlan throws a
+     * 409 with `details.suggestedScopes` listing viable top-level scopes.
+     */
+    scopePath?: string;
   },
 ) {
   const requestedNextSteps = await resolveNextSteps(supabase, data);
@@ -568,7 +653,7 @@ export async function prepareFinishPlan(
     }
   }
   const nextSteps = reasoning?.nextSteps?.length ? reasoning.nextSteps : requestedNextSteps;
-  const context = await loadRepoContext(supabase, userId, data.repo, data.baseBranch);
+  const context = await loadRepoContext(supabase, userId, data.repo, data.baseBranch, data.scopePath);
   const files = await fetchKeyFiles(context.token, data.repo, context.baseSha, context.tree);
   const aiCredential = await loadAiCredential(supabase, userId, context.token);
 
@@ -589,6 +674,7 @@ export async function prepareFinishPlan(
     repo: data.repo,
     defaultBranch: context.defaultBranch,
     sourceBranch: data.baseBranch?.trim() || undefined,
+    scopePath: context.scopePath ?? undefined,
     baseSha: context.baseSha,
     summary: reasoning ? `${reasoning.summary}\n\nCoding plan: ${generated.analysis}` : generated.analysis,
     nextSteps,

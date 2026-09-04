@@ -11,9 +11,18 @@ export function asyncHandler(fn: AsyncRequestHandler): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
     Promise.resolve(fn(req, res, next)).catch((err: unknown) => {
       if (err instanceof Error) {
-        const statusErr = err as Error & { status?: number; code?: string };
+        const statusErr = err as Error & { status?: number; code?: string; details?: unknown };
         if (statusErr.status) {
-          res.status(statusErr.status).json({ error: err.message });
+          res.status(statusErr.status).json({
+            error: err.message,
+            ...(statusErr.code ? { code: statusErr.code } : {}),
+            // `details` carries caller-attached, JSON-safe structured data
+            // (e.g. suggestedScopes on a "repo too large" 409). It is only
+            // ever set by our own code on a deliberately-thrown error, never
+            // derived from raw upstream/provider bodies, so it's safe to
+            // pass straight through to the client.
+            ...(statusErr.details !== undefined ? { details: statusErr.details } : {}),
+          });
           return;
         }
         // ZodError: validation failure → 400

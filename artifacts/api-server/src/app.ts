@@ -102,7 +102,7 @@ installExpressErrorHandler(app);
 // Attach `.status` to control the HTTP status. A trusted internal subsystem may
 // also attach a pre-sanitized `.publicMessage`; raw upstream/provider bodies are
 // still kept out of the client response.
-app.use((err: Error & { status?: number; code?: string; publicMessage?: string }, req: Request, res: Response, _next: NextFunction) => {
+app.use((err: Error & { status?: number; code?: string; publicMessage?: string; details?: unknown }, req: Request, res: Response, _next: NextFunction) => {
   const status = err.status ?? 500;
   if (status >= 500) {
     req.log?.error({ err }, "Unhandled error");
@@ -113,6 +113,7 @@ app.use((err: Error & { status?: number; code?: string; publicMessage?: string }
   res.status(status).json({
     error: message,
     ...(err.code ? { code: err.code } : {}),
+    ...(err.details !== undefined ? { details: err.details } : {}),
   });
 });
 
