@@ -6,6 +6,7 @@ import { loadBaselineInvestmentMetrics } from "../lib/post-run-evolution";
 import {
   listCompletionSessionEvents,
   loadCompletionSession,
+  retryBlockedIteration,
 } from "../lib/completion-session-worker";
 import { scheduleCompletionSession } from "../lib/completion-session-scheduler";
 
@@ -161,6 +162,24 @@ router.post(
     }
     const workerMode = await scheduleCompletionSession(req.supabase!, req.userId!, sessionId);
     res.status(202).json({ sessionId, status: session.status, phase: session.phase, scheduled: true, workerMode });
+  }),
+);
+
+router.post(
+  "/repo-finisher/completion-sessions/:sessionId/retry-iteration",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { sessionId } = z.object({ sessionId: z.string().uuid() }).parse(req.params);
+    const { session, retried, workerMode } = await retryBlockedIteration(req.supabase!, req.userId!, sessionId);
+    res.status(retried ? 202 : 200).json({
+      sessionId,
+      status: session.status,
+      phase: session.phase,
+      iteration: session.iteration_count,
+      retried,
+      scheduled: retried,
+      workerMode,
+    });
   }),
 );
 

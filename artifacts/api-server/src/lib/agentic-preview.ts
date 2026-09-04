@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { callAI } from "./ai-provider";
+import { parseModelJsonLenient } from "./parse-model-json";
 import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "./credentials";
 import { loadAdaptiveLearningContext } from "./adaptive-learning";
 import { prepareFinishPlan } from "./repo-finisher-engine";
@@ -135,7 +136,7 @@ Return strict JSON.`;
     ai,
   );
   try {
-    return normalizeAgentResult(role, JSON.parse(result.content || "{}"));
+    return normalizeAgentResult(role, parseModelJsonLenient(result.content || "{}"));
   } catch {
     return normalizeAgentResult(role, {});
   }
