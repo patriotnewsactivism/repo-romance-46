@@ -5,7 +5,7 @@ import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
 import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "../lib/credentials";
 import { runInBackground } from "../lib/background-tasks";
-import { callAI, type AIProviderConfig } from "../lib/ai-provider";
+import { callAI, type AIProviderConfig, DEFAULT_REQUEST_TIMEOUT_MS } from "../lib/ai-provider";
 import { captureException, flushSentry } from "../instrument";
 
 const router: IRouter = Router();
@@ -367,6 +367,30 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   ]);
 }
 
+/**
+ * Timeout budget for the Stage 1 portfolio-profiling AI call (see
+ * `profilePortfolio`).
+ *
+ * Production regression: this used to be a flat 30_000ms regardless of
+ * portfolio size — *less* than `DEFAULT_REQUEST_TIMEOUT_MS` (45_000ms), the
+ * single-attempt budget `callAI` itself gives this exact call (profiling
+ * passes no `timeoutMs` override, and its system prompt doesn't match the
+ * "final synthesis" special case, so it always gets the full default —
+ * ai-provider.test.ts's "uses the normal request timeout for other AI
+ * stages" case covers exactly this prompt). The outer `withTimeout` race was
+ * therefore guaranteed to fire before the inner call could ever use the
+ * time it was actually given, and it got worse with portfolio size (bigger
+ * prompt, more clusters to emit) and with slower reasoning models/tiers
+ * (Deep). Every other AI-calling stage in this file budgets at or above the
+ * inner timeout it wraps (self-critique: 60s, cross-batch synthesis: 90s) —
+ * this derives the floor from `DEFAULT_REQUEST_TIMEOUT_MS` itself so the two
+ * can't silently drift apart again, and scales with repo count the same way
+ * repo digestion and AI batch analysis already do below.
+ */
+export function profilingTimeoutMs(repoCount: number): number {
+  return DEFAULT_REQUEST_TIMEOUT_MS + Math.max(15000, repoCount * 500);
+}
+
 interface FilterPrefs {
   filter_languages: string[] | null;
   filter_min_stars: number;
@@ -703,13 +727,28 @@ Respond ONLY with valid JSON. Do not wrap in markdown.`;
     return parsed;
   } catch (e) {
     console.warn("[analysis] Portfolio profiling failed, using default prompt:", e instanceof Error ? e.message : e);
-    return {
-      developer_profile: `Developer with ${repos.length} GitHub repositories across multiple domains.`,
-      domain_clusters: [{ name: "All repos", repos: repos.map((r) => r.full_name), theme: "general" }],
-      custom_system_prompt: FALLBACK_SYSTEM_PROMPT,
-      strategy_summary: "Using standard analysis strategy (profiling unavailable).",
-    };
+    return defaultPortfolioProfile(repos);
   }
+}
+
+/**
+ * Fallback profile used whenever Stage 1 can't produce a real one. Two
+ * distinct call sites need it: the AI call inside `profilePortfolio` above
+ * failing or returning something unusable (caught locally), and the
+ * `withTimeout(...)` wrapped around the whole `profilePortfolio` call in
+ * `runAnalysisJob` running out of budget — a timeout abandons the
+ * in-flight promise without letting it ever reach its own catch block, so
+ * that call site needs this same fallback from the outside. Both must
+ * degrade to the identical profile so a slow or unavailable profiler never
+ * fails the whole analysis outright.
+ */
+function defaultPortfolioProfile(repos: Repo[]): PortfolioProfile {
+  return {
+    developer_profile: `Developer with ${repos.length} GitHub repositories across multiple domains.`,
+    domain_clusters: [{ name: "All repos", repos: repos.map((r) => r.full_name), theme: "general" }],
+    custom_system_prompt: FALLBACK_SYSTEM_PROMPT,
+    strategy_summary: "Using standard analysis strategy (profiling unavailable).",
+  };
 }
 
 // ─── Stage 3: AI batch analysis ─────────────────────────────────────────────
@@ -1169,9 +1208,22 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
     await reportProgress("Profiling your portfolio…");
     const profile = await withTimeout(
       profilePortfolio(shortlist, aiConfig, stageModels),
-      30000,
+      profilingTimeoutMs(shortlist.length),
       "Portfolio profiling",
-    );
+    ).catch(async (e) => {
+      // profilePortfolio already degrades gracefully on its own errors (see
+      // its internal try/catch) — but withTimeout's Promise.race abandons
+      // that promise on a timeout without ever letting it reach that catch
+      // block, so this needs the same fallback from the outside. Mirrors
+      // how the cross-batch-synthesis timeout below treats itself as a
+      // non-essential enrichment stage: degrade, don't fail the analysis.
+      console.warn(
+        "[analysis] Portfolio profiling timed out or failed, using default prompt:",
+        e instanceof Error ? e.message : e,
+      );
+      await reportProgress("Portfolio profiling took too long, continuing with the default analysis strategy…");
+      return defaultPortfolioProfile(shortlist);
+    });
 
     // Persist profile early so users can see it if they check mid-analysis
     try {

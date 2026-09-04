@@ -57,7 +57,11 @@ const DEFAULT_MODELS: Record<string, string> = {
 const MAX_RETRIES = 4;
 const INITIAL_BACKOFF_MS = 5000;
 const MAX_BACKOFF_MS = 10000;
-const DEFAULT_REQUEST_TIMEOUT_MS = 45000;
+// Exported so callers that wrap a `callAI` call in their own outer timeout
+// (e.g. analysis.ts's `withTimeout`) can derive that outer budget from the
+// real inner one instead of hand-copying the number — see profilingTimeoutMs
+// in analysis.ts for why that mattered in production.
+export const DEFAULT_REQUEST_TIMEOUT_MS = 45000;
 const FINAL_SYNTHESIS_TIMEOUT_MS = 8000;
 
 /**
