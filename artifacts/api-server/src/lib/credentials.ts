@@ -119,7 +119,13 @@ export function platformAiKey(provider: string): string | null {
     case "anthropic":
       return normalizeCredentialValue(process.env.ANTHROPIC_API_KEY);
     case "openrouter":
-      return normalizeCredentialValue(process.env.OPENROUTER_API_KEY);
+      // 2026-09-04 labeling: free-tier main first, then the old-account
+      // backup (still serves :free models), then the legacy name.
+      return (
+        normalizeCredentialValue(process.env.OPENROUTER_FREE_API_KEY) ??
+        normalizeCredentialValue(process.env.OPENROUTER_API_KEY_2) ??
+        normalizeCredentialValue(process.env.OPENROUTER_API_KEY)
+      );
     default:
       return null;
   }

@@ -33,9 +33,15 @@ export interface AIResponse {
   model?: string;
 }
 
+// Operator policy 2026-09-04 (Don): FREE models only, most intelligent and
+// most-reasoning first. The platform OpenRouter key is a free-tier key and
+// must NEVER be used for paid model calls — a paid fallback may be added
+// only when the operator specifically authorizes it.
 export const OPENROUTER_FREE_AGENT_CHAIN = [
   "minimax/minimax-m3:free",
   "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "z-ai/glm-5.2:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
 ] as const;
 
 type PublicHttpError = Error & {
