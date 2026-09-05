@@ -335,6 +335,61 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     return { content };
   }
 
+  if (provider === "openrouter" && apiKey && model === OPENROUTER_FREE_AGENT_CHAIN[0]) {
+    // Only the reviewed free-tier default gets an automatic fallback. Exact
+    // custom/user-selected models remain pinned and are never substituted.
+    // OpenRouter rejects `models` routing arrays longer than 3 entries
+    // (HTTP 400: "'models' array must have 3 items or lesser"), so the chain
+    // is chunked into groups of 3; the next group is tried only when every
+    // model in the previous group failed.
+    const groups: string[][] = [];
+    for (let i = 0; i < OPENROUTER_FREE_AGENT_CHAIN.length; i += 3) {
+      groups.push([...OPENROUTER_FREE_AGENT_CHAIN.slice(i, i + 3)]);
+    }
+
+    let lastError: unknown;
+    for (const group of groups) {
+      const body: Record<string, unknown> = { model: group[0], messages: request.messages };
+      if (request.responseFormat) body.response_format = request.responseFormat;
+      if (config.reasoningEffort) body.reasoning = { effort: config.reasoningEffort };
+      body.models = group;
+
+      try {
+        const res = await fetchWithRetry(
+          PROVIDER_ENDPOINTS[provider],
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`,
+              "X-Title": "RepoFinisher",
+            },
+            body: JSON.stringify(body),
+          },
+          provider,
+          requestTimeoutMs,
+        );
+
+        if (!res.ok) {
+          const text = await res.text();
+          throw providerRequestError(provider, group[0], res.status, text);
+        }
+
+        const json = (await res.json()) as {
+          model?: string;
+          choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
+        };
+        const raw = json.choices?.[0]?.message?.content;
+        if (typeof raw === "string") return { content: raw, model: json.model };
+        if (Array.isArray(raw)) return { content: raw.map((part) => part.text || "").join(""), model: json.model };
+        return { content: "", model: json.model };
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    throw lastError ?? new Error("OpenRouter free chain exhausted with no error recorded");
+  }
+
   if (
     (provider === "github_models" || provider === "openai" || provider === "openrouter" || provider === "custom") &&
     apiKey
@@ -351,11 +406,6 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     };
     if (provider === "openrouter") {
       headers["X-Title"] = "RepoFinisher";
-      // Only the reviewed free-tier default gets an automatic fallback. Exact
-      // custom/user-selected models remain pinned and are never substituted.
-      if (model === OPENROUTER_FREE_AGENT_CHAIN[0]) {
-        body.models = [...OPENROUTER_FREE_AGENT_CHAIN];
-      }
     }
 
     const res = await fetchWithRetry(
