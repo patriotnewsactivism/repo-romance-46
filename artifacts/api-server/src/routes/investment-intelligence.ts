@@ -10,12 +10,16 @@ import {
   rankInvestmentOpportunities,
   scoreCompletion,
   scoreProductionReadiness,
+  suggestValueImprovements,
+  valueImprovementsToNextSteps,
   valueRepository,
   type AcceptanceEvidence,
   type IntelligenceEvidence,
   type InvestmentOpportunityInput,
   type ScenarioInput,
+  type ValueImprovementSuggestion,
 } from "@workspace/repo-os";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
 import { callAI } from "../lib/ai-provider";
@@ -24,7 +28,9 @@ import { recordRepoLearning } from "../lib/adaptive-learning";
 
 const router: IRouter = Router();
 const GH_API = "https://api.github.com";
-const METHODOLOGY_VERSION = "investment-intelligence-v1";
+const METHODOLOGY_VERSION = "investment-intelligence-v2";
+/** Cap deep valuation work so large portfolios still finish within API budgets. */
+export const INVESTMENT_INTELLIGENCE_REPO_LIMIT = 50;
 
 interface GhRepo {
   full_name: string;
@@ -270,54 +276,97 @@ function fallbackMarketModel(
   context: AnalysisItemContext | null,
   competition: CompetitionResult,
 ): MarketModel {
-  const marketNeed = context?.marketPotential ? context.marketPotential * 20 : 50;
-  const demand = Math.max(
-    25,
-    Math.min(85, 35 + Math.log10(repo.stargazers_count + repo.forks_count + 2) * 12),
+  const descriptionQuality = Math.min(
+    18,
+    Math.round(((repo.description?.trim().length ?? 0) / 20) * 3),
   );
-  const topStars = competition.competitors.reduce(
-    (max, item) => Math.max(max, item.stars),
-    0,
-  );
-  const pressure = Math.max(
+  const topicBoost = Math.min(12, (repo.topics?.length ?? 0) * 3);
+  const homepageBoost = repo.homepage ? 10 : 0;
+  const licenseBoost = repo.license ? 4 : 0;
+  const activityBoost = Math.round(activityScore(repo.pushed_at) * 0.15);
+  const analysisNeed = context?.marketPotential ? context.marketPotential * 16 : 40;
+  const marketNeed = Math.max(
     20,
+    Math.min(88, analysisNeed * 0.55 + descriptionQuality + topicBoost + homepageBoost + licenseBoost),
+  );
+
+  const demand = Math.max(
+    22,
     Math.min(
-      90,
-      25 +
-        Math.log10(competition.totalCount + 1) * 10 +
-        Math.log10(topStars + 1) * 8,
+      88,
+      28 +
+        Math.log10(repo.stargazers_count + repo.forks_count + 2) * 11 +
+        Math.log10(repo.subscribers_count + 1) * 6 +
+        activityBoost +
+        (repo.homepage ? 6 : 0),
     ),
   );
+
+  const topStars = competition.competitors.reduce((max, item) => Math.max(max, item.stars), 0);
+  const pressure = Math.max(
+    18,
+    Math.min(
+      92,
+      22 +
+        Math.log10(competition.totalCount + 1) * 10 +
+        Math.log10(topStars + 1) * 8 -
+        (repo.stargazers_count >= topStars && topStars > 0 ? 8 : 0),
+    ),
+  );
+
+  const evidenceBits = [
+    repo.description ? "description present" : "thin description",
+    `${repo.topics?.length ?? 0} topics`,
+    repo.homepage ? "homepage set" : "no homepage",
+    repo.license ? "license present" : "no license",
+    `${competition.competitors.length} GitHub competitors sampled`,
+  ];
+
+  const confidence = Math.round(
+    Math.min(
+      62,
+      22 +
+        (competition.competitors.length > 0 ? 14 : 0) +
+        (repo.homepage ? 8 : 0) +
+        (repo.topics?.length ? 6 : 0) +
+        (repo.description && repo.description.length > 40 ? 6 : 0) +
+        (context?.marketPotential ? 4 : 0),
+    ),
+  );
+
+  const baseCustomers = Math.max(15, Math.round(20 + Math.log10(repo.stargazers_count + 2) * 40));
+  const baseArpu = repo.homepage || (repo.topics?.length ?? 0) >= 2 ? 29 : 19;
 
   return {
     market_need_score: Math.round(marketNeed),
     demand_score: Math.round(demand),
     competitive_pressure_score: Math.round(pressure),
-    confidence: competition.competitors.length > 0 ? 45 : 30,
+    confidence,
     market_summary:
-      "Heuristic market proxy based on repository context and GitHub competition; broader customer demand is not independently verified.",
-    recommended_next_steps: context?.nextSteps?.slice(0, 8) ?? [],
+      `Heuristic market proxy from repository signals (${evidenceBits.join("; ")}). ` +
+      "Broader customer demand, TAM, and commercial competitors are not independently verified.",
+    recommended_next_steps: context?.nextSteps?.slice(0, 10) ?? [],
     scenarios: [
       {
         name: "conservative",
-        customers: 25,
-        arpuMonthlyUsd: 15,
+        customers: Math.round(baseCustomers * 0.25),
+        arpuMonthlyUsd: Math.max(12, baseArpu - 8),
         grossMarginPct: 75,
         probability: 0.55,
         assumptions: ["Planning assumption; no customer evidence supplied"],
       },
       {
         name: "base",
-        customers: 150,
-        arpuMonthlyUsd: 25,
+        customers: baseCustomers,
+        arpuMonthlyUsd: baseArpu,
         grossMarginPct: 80,
         probability: 0.3,
         assumptions: ["Planning assumption; requires launch and distribution"],
       },
       {
         name: "strong-execution",
-        customers: 600,
-        arpuMonthlyUsd: 35,
+        customers: Math.round(baseCustomers * 4),
+        arpuMonthlyUsd: baseArpu + 10,
         grossMarginPct: 82,
         probability: 0.15,
         assumptions: ["Upside scenario, not a forecast"],
@@ -602,13 +651,21 @@ async function inspectOneRepo(
     },
   ];
 
+  const valueImprovements: ValueImprovementSuggestion[] = suggestValueImprovements({
+    repo: repoName,
+    completion,
+    readiness,
+    analysisNextSteps: context?.nextSteps ?? [],
+    maxSuggestions: 24,
+  });
+
   const recommendedNextSteps = [
-    ...completion.missingBreakdown.flatMap((gap) => gap.reasons.slice(0, 1)),
+    ...valueImprovementsToNextSteps(valueImprovements, 16),
     ...market.recommended_next_steps,
     ...(context?.nextSteps ?? []),
   ]
     .filter((step, index, all) => step && all.indexOf(step) === index)
-    .slice(0, 10);
+    .slice(0, 20);
 
   return {
     opportunity: {
@@ -644,8 +701,11 @@ async function inspectOneRepo(
         tractionScore: traction,
         sourceFiles: sourceFiles.length,
         sourceBytes,
+        homepage: repo.homepage,
+        topics: repo.topics ?? [],
       },
       market: { ...market, githubCompetition: competition },
+      valueImprovements,
       recommendedNextSteps,
       autonomousAgentPlan: [
         {
@@ -677,158 +737,178 @@ async function inspectOneRepo(
   };
 }
 
+export async function generateAndPersistInvestmentIntelligence(input: {
+  supabase: SupabaseClient;
+  userId: string;
+  analysisId: string;
+  githubToken: string;
+  ai: { provider: string; apiKey: string | null };
+  /** Soft cap — excess repos are skipped after rank order, not hard-failed. */
+  repoLimit?: number;
+}): Promise<Record<string, unknown>> {
+  const {
+    supabase,
+    userId,
+    analysisId,
+    githubToken,
+    ai,
+    repoLimit = INVESTMENT_INTELLIGENCE_REPO_LIMIT,
+  } = input;
+
+  const { data: analysis, error: analysisError } = await supabase
+    .from("analyses")
+    .select("id")
+    .eq("id", analysisId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (analysisError) throw new Error(`Failed to load analysis: ${analysisError.message}`);
+  if (!analysis) throw Object.assign(new Error("Analysis not found"), { status: 404 });
+
+  const { data: items, error: itemsError } = await supabase
+    .from("analysis_items")
+    .select("*")
+    .eq("analysis_id", analysisId)
+    .order("rank", { ascending: true });
+  if (itemsError) throw new Error(`Failed to load analysis items: ${itemsError.message}`);
+
+  const itemRows = (items ?? []) as Array<Record<string, unknown>>;
+  const contexts = contextByRepo(itemRows);
+  const allRepos = [...contexts.keys()];
+  if (allRepos.length === 0) {
+    throw Object.assign(new Error("No repositories were found in this analysis."), { status: 400 });
+  }
+
+  const repos = allRepos.slice(0, Math.max(1, repoLimit));
+  const skipped = allRepos.length - repos.length;
+
+  const inspected: Awaited<ReturnType<typeof inspectOneRepo>>[] = [];
+  const errors: string[] = [];
+  if (skipped > 0) {
+    errors.push(
+      `Scored the top ${repos.length} ranked repositories; ${skipped} additional repositories were deferred to keep valuation within budget.`,
+    );
+  }
+
+  let cursor = 0;
+  const concurrency = Math.min(3, repos.length);
+  await Promise.all(
+    Array.from({ length: concurrency }, async () => {
+      while (cursor < repos.length) {
+        const repo = repos[cursor++];
+        try {
+          inspected.push(await inspectOneRepo(githubToken, repo, contexts.get(repo) ?? null, ai));
+        } catch (error) {
+          errors.push(`${repo}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    }),
+  );
+
+  if (inspected.length === 0) {
+    throw new Error(`Investment intelligence failed for every repository: ${errors.join("; ")}`);
+  }
+
+  const ranked = rankInvestmentOpportunities(inspected.map((entry) => entry.opportunity));
+  const detailByRepo = new Map(inspected.map((entry) => [entry.details.repo, entry.details]));
+  const ranking = ranked.map((entry) => ({
+    ...entry,
+    details: detailByRepo.get(entry.repo),
+  }));
+  const generatedAt = new Date().toISOString();
+  const totalValueImprovements = ranking.reduce((sum, item) => {
+    const details = item.details as { valueImprovements?: unknown[] } | undefined;
+    return sum + (Array.isArray(details?.valueImprovements) ? details.valueImprovements.length : 0);
+  }, 0);
+
+  const result = {
+    methodologyVersion: METHODOLOGY_VERSION,
+    generatedAt,
+    analysisId,
+    ranking,
+    errors,
+    portfolio: {
+      reposScored: ranking.length,
+      reposInAnalysis: allRepos.length,
+      reposDeferred: skipped,
+      valueImprovementsGenerated: totalValueImprovements,
+      presentValueLow: ranking.reduce((sum, item) => sum + item.presentValueUsd.low, 0),
+      presentValueHigh: ranking.reduce((sum, item) => sum + item.presentValueUsd.high, 0),
+      potentialValueLow: ranking.reduce((sum, item) => sum + item.potentialValueUsd.low, 0),
+      potentialValueHigh: ranking.reduce((sum, item) => sum + item.potentialValueUsd.high, 0),
+      weightedCommercializationProbability: Math.round(
+        ranking.reduce((sum, item) => sum + item.commercializationProbability, 0) / ranking.length,
+      ),
+    },
+    recommendation: ranking[0]
+      ? `Finish ${ranking[0].repo} first. Its ${ranking[0].finishFirstScore}/100 finish-first score is the strongest risk-adjusted value-unlock opportunity in this analysis.`
+      : "No ranked recommendation is available.",
+    evidencePolicy:
+      "Every claim is classified as verified evidence, derived metric, model estimate, or insufficient evidence. Model estimates are never presented as observed facts. Dollar figures without revenue evidence are replacement-cost / scenario planning ranges, not appraisals.",
+  };
+
+  const { error: saveError } = await supabase
+    .from("analyses")
+    .update({
+      investment_intelligence: result,
+      investment_intelligence_updated_at: generatedAt,
+    })
+    .eq("id", analysisId)
+    .eq("user_id", userId);
+  if (saveError) {
+    if (saveError.code === "42703" || /investment_intelligence/i.test(saveError.message)) {
+      throw Object.assign(
+        new Error(
+          "Investment intelligence schema is not applied yet. Run the repository migration first.",
+        ),
+        { status: 503 },
+      );
+    }
+    throw new Error(`Failed to save investment intelligence: ${saveError.message}`);
+  }
+
+  await Promise.all(
+    ranking.map((item) =>
+      recordRepoLearning(supabase, userId, item.repo, {
+        action: "investment_intelligence",
+        outcome: "observation",
+        duration_ms: 0,
+        details: `Rank #${item.rank}; finish-first ${item.finishFirstScore}/100; completion ${item.completionPct}%; commercialization ${item.commercializationProbability}%.`,
+        files_affected: [],
+        fix_pattern: "investment-intelligence",
+        prompt_version: METHODOLOGY_VERSION,
+        metadata: {
+          rank: item.rank,
+          finishFirstScore: item.finishFirstScore,
+          evidenceConfidence: item.evidenceConfidence,
+          valueImprovementCount: Array.isArray(
+            (item.details as { valueImprovements?: unknown[] } | undefined)?.valueImprovements,
+          )
+            ? (item.details as { valueImprovements: unknown[] }).valueImprovements.length
+            : 0,
+        },
+        timestamp: generatedAt,
+      }),
+    ),
+  );
+
+  return result;
+}
+
 router.post(
   "/investment-intelligence/:id",
   requireAuth,
   asyncHandler(async (req, res) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     const userId = req.userId!;
-
-    const { data: analysis, error: analysisError } = await req.supabase!
-      .from("analyses")
-      .select("id")
-      .eq("id", id)
-      .eq("user_id", userId)
-      .maybeSingle();
-    if (analysisError) throw new Error(`Failed to load analysis: ${analysisError.message}`);
-    if (!analysis) throw Object.assign(new Error("Analysis not found"), { status: 404 });
-
-    const { data: items, error: itemsError } = await req.supabase!
-      .from("analysis_items")
-      .select("*")
-      .eq("analysis_id", id)
-      .order("rank", { ascending: true });
-    if (itemsError) throw new Error(`Failed to load analysis items: ${itemsError.message}`);
-
-    const itemRows = (items ?? []) as Array<Record<string, unknown>>;
-    const contexts = contextByRepo(itemRows);
-    const repos = [...contexts.keys()];
-    if (repos.length === 0) {
-      throw Object.assign(new Error("No repositories were found in this analysis."), { status: 400 });
-    }
-    if (repos.length > 30) {
-      throw Object.assign(
-        new Error("Investment intelligence is limited to 30 repositories per run."),
-        { status: 400 },
-      );
-    }
-
     const github = requireGithubCredential(await loadGithubCredential(req.supabase!, userId));
     const aiCredential = await loadAiCredential(req.supabase!, userId, github.token);
-    const ai = { provider: aiCredential.provider, apiKey: aiCredential.apiKey };
-
-    const inspected: Awaited<ReturnType<typeof inspectOneRepo>>[] = [];
-    const errors: string[] = [];
-    let cursor = 0;
-    const concurrency = Math.min(3, repos.length);
-    await Promise.all(
-      Array.from({ length: concurrency }, async () => {
-        while (cursor < repos.length) {
-          const repo = repos[cursor++];
-          try {
-            inspected.push(
-              await inspectOneRepo(github.token, repo, contexts.get(repo) ?? null, ai),
-            );
-          } catch (error) {
-            errors.push(`${repo}: ${error instanceof Error ? error.message : String(error)}`);
-          }
-        }
-      }),
-    );
-
-    if (inspected.length === 0) {
-      throw new Error(
-        `Investment intelligence failed for every repository: ${errors.join("; ")}`,
-      );
-    }
-
-    const ranked = rankInvestmentOpportunities(
-      inspected.map((entry) => entry.opportunity),
-    );
-    const detailByRepo = new Map(
-      inspected.map((entry) => [entry.details.repo, entry.details]),
-    );
-    const ranking = ranked.map((entry) => ({
-      ...entry,
-      details: detailByRepo.get(entry.repo),
-    }));
-    const generatedAt = new Date().toISOString();
-    const result = {
-      methodologyVersion: METHODOLOGY_VERSION,
-      generatedAt,
+    const result = await generateAndPersistInvestmentIntelligence({
+      supabase: req.supabase!,
+      userId,
       analysisId: id,
-      ranking,
-      errors,
-      portfolio: {
-        reposScored: ranking.length,
-        presentValueLow: ranking.reduce(
-          (sum, item) => sum + item.presentValueUsd.low,
-          0,
-        ),
-        presentValueHigh: ranking.reduce(
-          (sum, item) => sum + item.presentValueUsd.high,
-          0,
-        ),
-        potentialValueLow: ranking.reduce(
-          (sum, item) => sum + item.potentialValueUsd.low,
-          0,
-        ),
-        potentialValueHigh: ranking.reduce(
-          (sum, item) => sum + item.potentialValueUsd.high,
-          0,
-        ),
-        weightedCommercializationProbability: Math.round(
-          ranking.reduce((sum, item) => sum + item.commercializationProbability, 0) /
-            ranking.length,
-        ),
-      },
-      recommendation: ranking[0]
-        ? `Finish ${ranking[0].repo} first. Its ${ranking[0].finishFirstScore}/100 finish-first score is the strongest risk-adjusted value-unlock opportunity in this analysis.`
-        : "No ranked recommendation is available.",
-      evidencePolicy:
-        "Every claim is classified as verified evidence, derived metric, model estimate, or insufficient evidence. Model estimates are never presented as observed facts.",
-    };
-
-    const { error: saveError } = await req.supabase!
-      .from("analyses")
-      .update({
-        investment_intelligence: result,
-        investment_intelligence_updated_at: generatedAt,
-      })
-      .eq("id", id)
-      .eq("user_id", userId);
-    if (saveError) {
-      if (saveError.code === "42703" || /investment_intelligence/i.test(saveError.message)) {
-        throw Object.assign(
-          new Error(
-            "Investment intelligence schema is not applied yet. Run the repository migration first.",
-          ),
-          { status: 503 },
-        );
-      }
-      throw new Error(`Failed to save investment intelligence: ${saveError.message}`);
-    }
-
-    await Promise.all(
-      ranking.map((item) =>
-        recordRepoLearning(req.supabase!, userId, item.repo, {
-          action: "investment_intelligence",
-          outcome: "observation",
-          duration_ms: 0,
-          details: `Rank #${item.rank}; finish-first ${item.finishFirstScore}/100; completion ${item.completionPct}%; commercialization ${item.commercializationProbability}%.`,
-          files_affected: [],
-          fix_pattern: "investment-intelligence",
-          prompt_version: METHODOLOGY_VERSION,
-          metadata: {
-            rank: item.rank,
-            finishFirstScore: item.finishFirstScore,
-            evidenceConfidence: item.evidenceConfidence,
-          },
-          timestamp: generatedAt,
-        }),
-      ),
-    );
-
+      githubToken: github.token,
+      ai: { provider: aiCredential.provider, apiKey: aiCredential.apiKey },
+    });
     res.json(result);
   }),
 );

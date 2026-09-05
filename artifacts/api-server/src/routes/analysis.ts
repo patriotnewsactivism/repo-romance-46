@@ -513,7 +513,7 @@ const RecommendationSchema = z.object({
 });
 
 /** The static fallback system prompt used when portfolio profiling is unavailable */
-const FALLBACK_SYSTEM_PROMPT = `You are RepoFinisher's senior product architect. Your primary mission is to map each viable repository to production-ready completion.
+const FALLBACK_SYSTEM_PROMPT = `You are RepoFinisher's senior product architect. Your primary mission is to map each viable repository to production-ready completion AND surface abundant, specific ways to raise each repo's commercial value.
 
 DEFAULT DECISION: FINISH THE REPOSITORY INDEPENDENTLY.
 - At least 95% of primary recommendations should be FINISH recommendations.
@@ -521,23 +521,32 @@ DEFAULT DECISION: FINISH THE REPOSITORY INDEPENDENTLY.
 - COMBINE or REPURPOSE is exceptional. Use it only when concrete code-level evidence shows that finishing the repo independently is clearly inferior, duplicative, or technically nonsensical. Never invent a combination just to create variety.
 - A dormant repo is not automatically a combine/repurpose candidate; first determine how to finish it.
 
-For every FINISH recommendation, build a real path to completion, not a generic checklist. Inspect the supplied evidence and identify the intended product, current completion blockers, missing core functionality, broken/stubbed flows, backend/data/auth/security gaps, UX gaps, testing/build issues, deployment readiness, observability, documentation, and rollback/operations needs that actually apply.
+For every FINISH recommendation, build a real path to completion, not a generic checklist. Inspect the supplied evidence and identify the intended product, current completion blockers, missing core functionality, broken/stubbed flows, backend/data/auth/security gaps, UX gaps, testing/build issues, deployment readiness, observability, documentation, monetization/distribution gaps, and rollback/operations needs that actually apply.
 
 Before producing the final recommendation, internally draft the completion plan, challenge its assumptions, look for omissions and failure modes, then revise it. Do not expose private chain-of-thought. Return only the improved conclusion, concrete evidence, and executable completion steps.
 
-Every next_steps array must function as an implementation-quality completion directive: reference actual files/features/APIs where evidence exists; order work by dependency; include acceptance criteria; require build/typecheck/lint/tests as appropriate; require deployment and smoke verification when the repo is deployable; and never call a repo complete while known blockers remain.
+Every next_steps array must be an abundant implementation-quality completion directive:
+- Include at least 6 ordered steps (prefer 8–12 when evidence supports it).
+- Reference actual files/features/APIs where evidence exists.
+- Order work by dependency.
+- Include objective acceptance criteria on each material step.
+- Require build/typecheck/lint/tests as appropriate.
+- Require deployment and smoke verification when the repo is deployable.
+- Explicitly include value-raising work: auth/billing/onboarding, distribution, differentiation, reliability, and evidence that would make valuation more defensible.
+- Never call a repo complete while known blockers remain.
+- Never invent TAM, revenue, customers, or named competitors without evidence in the digest.
 
 For every recommendation return:
 - kind, title, repos, pitch
-- effort (1-5), market_potential (1-5)
-- next_steps: concrete completion sequence with acceptance criteria
+- effort (1-5), market_potential (1-5) — lower market_potential when evidence is thin rather than guessing
+- next_steps: concrete completion + value-uplift sequence with acceptance criteria
 - tech_stack
 - marketing_tweet / marketing_linkedin only when useful
 - estimated_hours
 
-Also produce summary_md describing portfolio-level completion priorities.
+Also produce summary_md describing portfolio-level completion priorities and the highest-value finish-first opportunities.
 
-Preserve coverage: return one primary recommendation for every viable repo represented by the detailed digests, up to 40 per synthesis. Prefer FINISH and independent completion. Generic advice is not acceptable.`;
+Preserve coverage: return one primary recommendation for every viable repo represented by the detailed digests, up to 60 per synthesis. Prefer FINISH and independent completion. Generic advice is not acceptable.`;
 
 const AI_JSON_SCHEMA = {
   type: "object",
@@ -982,9 +991,9 @@ Apply the critique feedback strictly:
 1. Remove or rewrite any recommendation flagged as too generic — every next_step must reference specific files, APIs, or features visible in the repo digests.
 2. Preserve a separate FINISH path for each viable repo represented in the draft. Do not collapse independent repos into a combined recommendation.
 3. Treat critique.missed_synergies as advisory only: use a COMBINE/REPURPOSE result only when the evidence is compelling, and keep at least 95% of final recommendations as FINISH.
-4. Sharpen pitches to name a specific target user and value prop, and make next_steps an executable completion directive with acceptance criteria.
+4. Sharpen pitches to name a specific target user and value prop, and expand next_steps into an abundant executable completion + value-uplift directive (at least 6 steps) with acceptance criteria.
 5. Produce a fresh summary_md (200 words) that reflects this specific developer's portfolio, not a generic template.
-6. Preserve completion coverage for up to 40 viable repos and rank within that set by (market_potential * 2 - effort).
+6. Preserve completion coverage for up to 60 viable repos and rank within that set by (market_potential * 2 - effort). Lower market_potential when evidence is thin rather than inventing demand.
 
 The final output must feel like it was written by someone who actually READ the code, not generic advice.
 
@@ -1129,22 +1138,18 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
     await supabase.from("analyses").update({ error: msg, updated_at: new Date().toISOString() }).eq("id", analysisId);
   };
 
-  // The Vercel function this job runs inside has a hard maxDuration ceiling
-  // (see api/[...path].mjs). Large portfolios can genuinely exceed it: when
-  // that happens Vercel silently kills the invocation mid-await with no
-  // exception, leaving the row frozen at whatever progress message was last
-  // written until the 10-minute staleness watchdog (GET /analysis/:id) marks
-  // it failed. That produced a confusing "hung, then failed for no reason"
-  // experience. This budget guard fails fast and clearly instead, well before
-  // the platform ceiling, so the user gets an actionable message immediately.
+  // Cloud Run completion workers / API instances can outlive the old Vercel
+  // maxDuration ceiling that originally motivated this guard. Keep a hard
+  // budget so hung AI calls still fail clearly, but allow large portfolios
+  // enough time to finish digests + synthesis + valuation kickoff.
   const jobStartedAt = Date.now();
-  const SAFE_BUDGET_MS = 660_000; // 11 min — leaves ~90s margin under the 750s function ceiling
+  const SAFE_BUDGET_MS = 1_500_000; // 25 min — Cloud Run–oriented safe ceiling
   const assertWithinBudget = (stage: string) => {
     const elapsed = Date.now() - jobStartedAt;
     if (elapsed > SAFE_BUDGET_MS) {
       throw new Error(
         `Analysis exceeded its safe execution budget before "${stage}" (${Math.round(elapsed / 1000)}s elapsed). ` +
-          `This portfolio is too large for a single run — try the "Fast" analysis tier or lower "Max repos to analyze" in Settings.`,
+          `This portfolio is too large for a single run — try the "Fast" analysis tier, lower "Max repos to analyze" in Settings, or re-run after a partial success.`,
       );
     }
   };
@@ -1253,7 +1258,7 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
     // ── Two-tier digesting ───────────────────────────────────────────────────
     // Tier 1 (deep): full GitHub fetch + AI context — capped by tier
     // Tier 2 (metadata): compact one-liner — no per-repo API calls
-    const deepDigestLimit = tier === "fast" ? 40 : tier === "deep" ? 100 : 75;
+    const deepDigestLimit = tier === "fast" ? 50 : tier === "deep" ? 120 : 90;
     const compactDigest = provider === "github_models";
     const digestConcurrency = provider === "github_models" ? 5 : 10;
 
@@ -1497,6 +1502,38 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
       // New columns may not exist yet — fall back to base update without them
       await supabase.from("analyses").update(updatePayload).eq("id", analysisId);
     }
+
+    // Auto-kick investment intelligence so valuation + finish-until-target work
+    // without a second manual click. Failures are non-fatal to the analysis.
+    await reportProgress("Scoring portfolio valuation from analysis results…");
+    runInBackground(
+      (async () => {
+        try {
+          const { generateAndPersistInvestmentIntelligence } = await import("./investment-intelligence");
+          await generateAndPersistInvestmentIntelligence({
+            supabase,
+            userId,
+            analysisId,
+            githubToken: token,
+            ai: { provider, apiKey: aiKey },
+          });
+          await supabase
+            .from("analyses")
+            .update({
+              error: null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", analysisId);
+          console.log(`[analysis ${analysisId}] investment intelligence auto-generated`);
+        } catch (error) {
+          console.warn(
+            `[analysis ${analysisId}] investment intelligence auto-run skipped:`,
+            error instanceof Error ? error.message : error,
+          );
+        }
+      })(),
+      "analysis-investment-intelligence",
+    );
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Analysis failed";
     console.error(`[analysis ${analysisId}] failed:`, msg);
@@ -1608,9 +1645,9 @@ router.get(
     if (
       analysis.status === "running" &&
       analysis.updated_at &&
-      Date.now() - new Date(analysis.updated_at as string).getTime() > 10 * 60 * 1000
+      Date.now() - new Date(analysis.updated_at as string).getTime() > 20 * 60 * 1000
     ) {
-      const staleMessage = "Analysis worker stopped reporting progress for more than 10 minutes. Rerun the analysis.";
+      const staleMessage = "Analysis worker stopped reporting progress for more than 20 minutes. Rerun the analysis.";
       const now = new Date().toISOString();
       await req.supabase!
         .from("analyses")
