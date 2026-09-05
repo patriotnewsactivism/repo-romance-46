@@ -35,13 +35,24 @@ function stripBom(text: string): string {
   return text.length > 0 && text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
-function extractBraceBalanced(text: string): string | null {
-  const start = text.indexOf("{");
-  if (start === -1) return null;
+/**
+ * Scans the whole string in one pass and returns EVERY top-level
+ * brace-balanced `{...}` substring it finds, in left-to-right order — not
+ * just the first. A model reply can legitimately contain an earlier `{`
+ * that isn't the real JSON object (e.g. a stray brace in prose, or a
+ * fenced-off example before the actual answer); stopping at the first
+ * opening brace can hand back a bogus or truncated candidate while the
+ * real object sits later in the same string. Callers try every candidate
+ * (via `extractJsonCandidates`) in order and use the first one that both
+ * parses and satisfies their schema.
+ */
+function extractAllBraceBalanced(text: string): string[] {
+  const results: string[] = [];
   let depth = 0;
+  let start = -1;
   let inString = false;
   let escapeNext = false;
-  for (let i = start; i < text.length; i++) {
+  for (let i = 0; i < text.length; i++) {
     const ch = text[i];
     if (escapeNext) {
       escapeNext = false;
@@ -56,20 +67,28 @@ function extractBraceBalanced(text: string): string | null {
       continue;
     }
     if (inString) continue;
-    if (ch === "{") depth++;
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) return text.slice(start, i + 1);
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "}") {
+      if (depth > 0) {
+        depth--;
+        if (depth === 0 && start !== -1) {
+          results.push(text.slice(start, i + 1));
+          start = -1;
+        }
+      }
     }
   }
-  return null;
+  return results;
 }
 
 /**
  * Produces ordered candidate substrings to attempt `JSON.parse` against,
  * from most-likely-correct (the whole trimmed response, for the common
- * well-formatted case) to most-permissive (a brace-balanced object pulled
- * out of a fence or out of surrounding prose).
+ * well-formatted case) to most-permissive (every brace-balanced object
+ * pulled out of a fence or out of surrounding prose, in the order they
+ * appear).
  */
 export function extractJsonCandidates(raw: string): string[] {
   const cleaned = stripBom(String(raw ?? "")).trim();
@@ -80,12 +99,14 @@ export function extractJsonCandidates(raw: string): string[] {
   const fenceInner = fenceMatch?.[1]?.trim();
   if (fenceInner) candidates.push(fenceInner);
 
-  const wholeBraceBalanced = extractBraceBalanced(cleaned);
-  if (wholeBraceBalanced) candidates.push(wholeBraceBalanced);
+  for (const candidate of extractAllBraceBalanced(cleaned)) {
+    candidates.push(candidate);
+  }
 
   if (fenceInner) {
-    const fenceBraceBalanced = extractBraceBalanced(fenceInner);
-    if (fenceBraceBalanced) candidates.push(fenceBraceBalanced);
+    for (const candidate of extractAllBraceBalanced(fenceInner)) {
+      candidates.push(candidate);
+    }
   }
 
   return Array.from(new Set(candidates));
@@ -94,7 +115,8 @@ export function extractJsonCandidates(raw: string): string[] {
 /**
  * Best-effort parse of model output that may be plain JSON, fenced JSON
  * (with or without a language tag), or JSON with brief surrounding prose.
- * Never throws.
+ * Never throws. Returns the first candidate (in `extractJsonCandidates`
+ * order) that parses as valid JSON.
  */
 export function tryParseModelJson(raw: string): { ok: true; value: unknown } | { ok: false; error: string } {
   const candidates = extractJsonCandidates(raw);
@@ -107,6 +129,26 @@ export function tryParseModelJson(raw: string): { ok: true; value: unknown } | {
     }
   }
   return { ok: false, error: lastError };
+}
+
+/**
+ * Like `tryParseModelJson`, but returns every candidate that successfully
+ * parses as JSON (not just the first) so a caller with its own schema
+ * validation can pick the first one that's actually the right shape,
+ * instead of committing to whichever candidate happened to parse first.
+ */
+function tryParseAllModelJsonCandidates(raw: string): { parsed: unknown[]; lastError: string } {
+  const candidates = extractJsonCandidates(raw);
+  const parsed: unknown[] = [];
+  let lastError = "No JSON content found in model response.";
+  for (const candidate of candidates) {
+    try {
+      parsed.push(JSON.parse(candidate));
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  return { parsed, lastError };
 }
 
 function sample(text: string, max = 400): string {
@@ -135,6 +177,10 @@ export function parseModelJsonLenient(raw: string): unknown {
  * retries parsing+validation once against its result. Never throws — always
  * returns a result object so callers can persist a sanitized, bounded
  * structured error instead of crashing a stateful process.
+ *
+ * Each attempt tries every JSON-parseable candidate extracted from the raw
+ * text (not just the first) against `validate`, and only gives up on that
+ * attempt once none of them satisfy the schema.
  */
 export async function parseModelJsonWithRepair<T>(
   raw: string,
@@ -143,9 +189,9 @@ export async function parseModelJsonWithRepair<T>(
     repair: () => Promise<string>;
   },
 ): Promise<ParseModelJsonResult<T>> {
-  const first = tryParseModelJson(raw);
-  if (first.ok) {
-    const validated = options.validate(first.value);
+  const first = tryParseAllModelJsonCandidates(raw);
+  for (const candidate of first.parsed) {
+    const validated = options.validate(candidate);
     if (validated !== null) return { ok: true, value: validated, repaired: false };
   }
 
@@ -161,20 +207,23 @@ export async function parseModelJsonWithRepair<T>(
     };
   }
 
-  const second = tryParseModelJson(repairedRaw);
-  if (second.ok) {
-    const validated = options.validate(second.value);
+  const second = tryParseAllModelJsonCandidates(repairedRaw);
+  for (const candidate of second.parsed) {
+    const validated = options.validate(candidate);
     if (validated !== null) return { ok: true, value: validated, repaired: true };
+  }
+
+  if (second.parsed.length === 0) {
     return {
       ok: false,
-      error: "Repaired model response parsed as JSON but did not satisfy the expected schema.",
+      error: `Repaired model response was still not valid JSON: ${second.lastError}`,
       rawSample: sample(repairedRaw),
       repaired: true,
     };
   }
   return {
     ok: false,
-    error: `Repaired model response was still not valid JSON: ${second.error}`,
+    error: "Repaired model response parsed as JSON but did not satisfy the expected schema.",
     rawSample: sample(repairedRaw),
     repaired: true,
   };
