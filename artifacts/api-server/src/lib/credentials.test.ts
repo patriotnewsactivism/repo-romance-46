@@ -4,6 +4,8 @@ import { normalizeAiProvider, platformAiKey, platformAiProvider, platformAiStatu
 const AI_ENV_KEYS = [
   "AI_PROVIDER",
   "OPENROUTER_API_KEY",
+  "OPENROUTER_FREE_API_KEY",
+  "OPENROUTER_API_KEY_2",
   "GEMINI_API_KEY",
   "GOOGLE_API_KEY",
   "OPENAI_API_KEY",
@@ -95,6 +97,17 @@ describe("blank platform credentials", () => {
   it("trims a padded key so it is usable instead of silently failing to authenticate", () => {
     process.env.OPENROUTER_API_KEY = "  test-openrouter-key\n";
     expect(platformAiKey("openrouter")).toBe("test-openrouter-key");
+  });
+
+  it("prefers the free-tier key labels over the legacy OPENROUTER_API_KEY", () => {
+    process.env.OPENROUTER_API_KEY = "legacy-key";
+    expect(platformAiKey("openrouter")).toBe("legacy-key");
+
+    process.env.OPENROUTER_API_KEY_2 = "backup-key";
+    expect(platformAiKey("openrouter")).toBe("backup-key");
+
+    process.env.OPENROUTER_FREE_API_KEY = "free-key";
+    expect(platformAiKey("openrouter")).toBe("free-key");
   });
 
   it("normalizes blank values for every platform provider", () => {
