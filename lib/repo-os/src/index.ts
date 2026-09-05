@@ -20,3 +20,4 @@ export * from "./portfolio";
 export * from "./run-state";
 export * from "./approvals";
 export * from "./recommendations";
+export * from "./value-improvements";

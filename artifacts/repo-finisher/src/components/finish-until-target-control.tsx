@@ -131,7 +131,7 @@ export function FinishUntilTargetControl({
       <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-2">
         <div className="flex items-center gap-2 text-sm font-semibold"><Repeat2 className="h-4 w-4 text-emerald-500" /> Finish until target</div>
         <p className="text-xs text-muted-foreground">
-          Iterates from fresh evidence until this repo reaches 95% completion and 90% production readiness, or a safety/no-progress/budget stop condition is hit. Up to 5 iterations; one draft PR; automatic merge stays off.
+          This is the path that actually finishes a repo: iterate from fresh evidence until 95% completion and 90% production readiness, or a safety/no-progress/budget stop. Up to 5 iterations; one draft PR; automatic merge stays off. Requires Investment Intelligence scores (usually auto-generated after analysis).
         </p>
         <Button size="sm" variant="outline" className="gap-2" onClick={start} disabled={busy !== null}>
           {busy === "create" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}

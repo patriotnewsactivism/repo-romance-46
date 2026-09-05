@@ -92,6 +92,10 @@ This mode exists so README/AGENTS/PLAN/ROADMAP content can evolve with the actua
 
 RepoFinisher already has a durable multi-iteration completion-session engine. The frontend now exposes it as **Finish until target**.
 
+After a portfolio analysis completes, RepoFinisher automatically kicks off Investment Intelligence for the top ranked repositories (soft-capped for budget). That gives finish-until-target the measured completion/readiness baseline it requires, without a second manual valuation click. You can still refresh Full Portfolio Value manually.
+
+Investment Intelligence now also emits abundant deterministic **value-improvement suggestions** from completion/readiness gaps (auth, tests, deploy evidence ceilings, core functionality, etc.), merged into finish next-steps. These are evidence-backed gap closures, not invented market claims.
+
 The default UI targets are:
 
 - completion: 95%;

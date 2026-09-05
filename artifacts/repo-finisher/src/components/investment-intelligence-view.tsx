@@ -51,6 +51,19 @@ interface RankingItem {
     title?: string;
     pitch?: string;
     recommendedNextSteps?: string[];
+    valueImprovements?: Array<{
+      id: string;
+      title: string;
+      category: string;
+      problem: string;
+      action: string;
+      whyItRaisesValue: string;
+      estimatedCompletionLiftPts: number;
+      valueImpact: number;
+      effort: number;
+      priority: number;
+      acceptanceHint: string;
+    }>;
     market?: { market_summary?: string };
   };
 }
@@ -64,6 +77,9 @@ interface IntelligenceResult {
   portfolio: {
     reposRequested?: number;
     reposScored: number;
+    reposInAnalysis?: number;
+    reposDeferred?: number;
+    valueImprovementsGenerated?: number;
     coveragePct?: number;
     partialFailures?: number;
     scope?: string;
@@ -164,7 +180,7 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
             <h3 className="font-semibold">Full Portfolio Value & Finish Priority</h3>
           </div>
           <p className="text-sm text-muted-foreground">
-            Value every repository recorded in this analysis, rank the best finish-first opportunities, and launch the autonomous finisher directly from the ranking. This replaces the old 30-repository intelligence ceiling.
+            After analysis completes, valuation usually starts automatically. You can also run it here: score completion and readiness, estimate present/potential value with explicit confidence, and generate abundant evidence-backed suggestions for raising each repo&apos;s value. Finish-until-target uses these scores as its baseline.
           </p>
           {error && <p className="text-sm text-red-500 break-words">{error}</p>}
           <Button onClick={run} disabled={running} className="gap-2">
@@ -176,7 +192,7 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
     );
   }
 
-  const requested = data.portfolio.reposRequested ?? data.portfolio.reposScored;
+  const requested = data.portfolio.reposInAnalysis ?? data.portfolio.reposRequested ?? data.portfolio.reposScored;
   const coverage = data.portfolio.coveragePct ?? (requested > 0 ? Math.round((data.portfolio.reposScored / requested) * 1000) / 10 : 0);
 
   return (
@@ -202,7 +218,7 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
           <div className="rounded-md border p-3 col-span-2 sm:col-span-1">
             <div className="text-xs text-muted-foreground">Standalone portfolio value</div>
             <div className="font-semibold text-lg break-words">{money(data.portfolio.presentValueLow)}–{money(data.portfolio.presentValueHigh)}</div>
-            <div className="text-[11px] text-muted-foreground">Before confidence and overlap adjustment</div>
+            <div className="text-[11px] text-muted-foreground">Replacement-cost / traction model — not an appraisal</div>
           </div>
           <div className="rounded-md border p-3 col-span-2 sm:col-span-1">
             <div className="text-xs text-muted-foreground">Standalone potential</div>
@@ -216,11 +232,14 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
           <div className="rounded-md border p-3">
             <div className="text-xs text-muted-foreground">Repos valued</div>
             <div className="font-semibold">{data.portfolio.reposScored}/{requested}</div>
+            {typeof data.portfolio.reposDeferred === "number" && data.portfolio.reposDeferred > 0 && (
+              <div className="text-[11px] text-muted-foreground">{data.portfolio.reposDeferred} deferred</div>
+            )}
           </div>
           <div className="rounded-md border p-3 col-span-2 sm:col-span-1">
-            <div className="text-xs text-muted-foreground">Coverage</div>
-            <div className="font-semibold">{coverage}%</div>
-            <div className="text-[11px] text-muted-foreground">{data.portfolio.scope || 'analysis portfolio'}</div>
+            <div className="text-xs text-muted-foreground">Value-lift suggestions</div>
+            <div className="font-semibold">{data.portfolio.valueImprovementsGenerated ?? 0}</div>
+            <div className="text-[11px] text-muted-foreground">{coverage}% coverage · {data.portfolio.scope || 'analysis portfolio'}</div>
           </div>
         </div>
       </Card>
@@ -233,10 +252,12 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
         <Card className="p-4 border-amber-500/30">
           <div className="flex gap-2 text-sm">
             <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
-            <span>{data.errors.length} repository(s) could not be valued. The totals above include every successful repository score and show the exact coverage percentage.</span>
+            <span>
+              Valuation notes: {data.errors.length} message(s). Totals include every successfully scored repository; deferred or failed repos are listed below.
+            </span>
           </div>
           <details className="mt-2 text-xs text-muted-foreground">
-            <summary className="cursor-pointer">Show failures</summary>
+            <summary className="cursor-pointer">Show details</summary>
             <ul className="mt-2 space-y-1 break-words">
               {data.errors.map((message, index) => <li key={index}>• {message}</li>)}
             </ul>
@@ -275,8 +296,36 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
             <div className="rounded border p-3 text-sm flex justify-between gap-3"><span className="text-muted-foreground">Competitive pressure</span><span className="font-semibold">{item.competitivePressure}/100</span></div>
           </div>
 
+          {item.details?.valueImprovements && item.details.valueImprovements.length > 0 && (
+            <details className="rounded border p-3" open={item.rank <= 3}>
+              <summary className="cursor-pointer text-sm font-medium flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-primary" />
+                {item.details.valueImprovements.length} ways to raise value
+              </summary>
+              <ul className="mt-3 space-y-2">
+                {item.details.valueImprovements.slice(0, 12).map((suggestion) => (
+                  <li key={suggestion.id} className="rounded-md border p-3 text-sm space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">{suggestion.title}</span>
+                      <Badge variant="outline">impact {suggestion.valueImpact}/5</Badge>
+                      <Badge variant="secondary">~+{suggestion.estimatedCompletionLiftPts} pts</Badge>
+                      <Badge variant="outline">effort {suggestion.effort}/5</Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground leading-relaxed">{suggestion.action}</p>
+                    <p className="text-[11px] text-muted-foreground">{suggestion.whyItRaisesValue}</p>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+
+          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 space-y-2">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              A single finish pass opens one draft PR. To actually drive the repo to finished targets, use <span className="font-medium text-foreground">Finish until target</span> — it re-scores and iterates until 95% completion / 90% readiness or a safe stop.
+            </p>
+            <FinishUntilTargetControl repo={item.repo} nextSteps={item.details?.recommendedNextSteps ?? []} analysisId={analysisId} />
+          </div>
           <FinishRepoAction repo={item.repo} nextSteps={item.details?.recommendedNextSteps ?? []} analysisId={analysisId} />
-          <FinishUntilTargetControl repo={item.repo} nextSteps={item.details?.recommendedNextSteps ?? []} analysisId={analysisId} />
           <RepositoryGrowthToolsPanel analysisId={analysisId} itemRank={item.rank} repo={item.repo} />
 
           <details className="rounded border p-3">
