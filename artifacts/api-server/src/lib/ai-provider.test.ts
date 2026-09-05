@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   OPENROUTER_FREE_AGENT_CHAIN,
   callAI,
+  FINAL_SYNTHESIS_TIMEOUT_MS,
   resolveAIRequestTimeoutMs,
   sanitizeGeminiResponseSchema,
   type AIRequest,
@@ -27,11 +28,47 @@ describe("resolveAIRequestTimeoutMs", () => {
       resolveAIRequestTimeoutMs(
         request("You are a world-class product strategist performing the final synthesis of a developer portfolio analysis."),
       ),
-    ).toBe(8000);
+    ).toBe(FINAL_SYNTHESIS_TIMEOUT_MS);
   });
 
   it("uses the normal request timeout for other AI stages", () => {
     expect(resolveAIRequestTimeoutMs(request("You are the portfolio profiler."))).toBe(45000);
+  });
+
+  it("keeps the request deadline active until the response body is complete", async () => {
+    const body = JSON.stringify({ choices: [{ message: { content: "body-complete" } }] });
+    const response = new Response(body, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+    let releaseBody: (() => void) | undefined;
+    vi.spyOn(response, "text").mockImplementation(
+      () => new Promise<string>((resolve) => {
+        releaseBody = () => resolve(body);
+      }),
+    );
+    // The old implementation called json() immediately after headers. Keep
+    // this immediate mock so the assertion proves fetchWithRetry waits for
+    // the body rather than merely the fetch() promise.
+    vi.spyOn(response, "json").mockResolvedValue({ choices: [{ message: { content: "header-only" } }] });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response);
+
+    const pending = callAI(request("provider test", { timeoutMs: 1000 }), {
+      provider: "openrouter",
+      model: "example/vendor-model",
+      apiKey: "test-api-key",
+    });
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    releaseBody?.();
+    await expect(pending).resolves.toEqual({ content: "body-complete", model: undefined });
   });
 
   it("honors an explicit bounded timeout", () => {
