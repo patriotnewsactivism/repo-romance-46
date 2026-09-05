@@ -121,8 +121,35 @@ describe("OpenRouter routing", () => {
     const [, init] = fetchMock.mock.calls[0];
     const body = JSON.parse(String(init?.body));
     expect(body.model).toBe(OPENROUTER_FREE_AGENT_CHAIN[0]);
-    expect(body.models).toEqual([...OPENROUTER_FREE_AGENT_CHAIN]);
+    // OpenRouter caps the `models` routing array at 3 items.
+    expect(body.models).toEqual(OPENROUTER_FREE_AGENT_CHAIN.slice(0, 3));
     expect(result).toEqual({ content: "fallback-ready", model: OPENROUTER_FREE_AGENT_CHAIN[1] });
+  });
+
+  it("falls back to the second chunk when every model in the first chunk fails", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: "nope", code: 404 } }), { status: 404 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ model: OPENROUTER_FREE_AGENT_CHAIN[3], choices: [{ message: { content: "second-chunk" } }] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+
+    const result = await callAI(request("chunked fallback", { timeoutMs: 1000 }), {
+      provider: "openrouter",
+      model: OPENROUTER_FREE_AGENT_CHAIN[0],
+      apiKey: "test-api-key",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [, secondInit] = fetchMock.mock.calls[1];
+    const secondBody = JSON.parse(String(secondInit?.body));
+    expect(secondBody.models).toEqual([OPENROUTER_FREE_AGENT_CHAIN[3]]);
+    expect(result).toEqual({ content: "second-chunk", model: OPENROUTER_FREE_AGENT_CHAIN[3] });
   });
 
   it("sends the saved OpenRouter reasoning effort without changing the exact model slug", async () => {
