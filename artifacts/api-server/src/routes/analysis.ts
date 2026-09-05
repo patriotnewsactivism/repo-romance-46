@@ -5,7 +5,12 @@ import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
 import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "../lib/credentials";
 import { runInBackground } from "../lib/background-tasks";
-import { callAI, type AIProviderConfig, DEFAULT_REQUEST_TIMEOUT_MS } from "../lib/ai-provider";
+import {
+  callAI,
+  type AIProviderConfig,
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  FINAL_SYNTHESIS_TIMEOUT_MS,
+} from "../lib/ai-provider";
 import { captureException, flushSentry } from "../instrument";
 
 const router: IRouter = Router();
@@ -356,15 +361,22 @@ function sleep(ms: number): Promise<void> {
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`${label} exceeded ${Math.round(ms / 1000)}s timeout. Try reducing max repos or switching AI provider.`)),
-        ms,
-      ),
-    ),
-  ]);
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} exceeded ${Math.round(ms / 1000)}s timeout.`)),
+      ms,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 /**
@@ -1011,6 +1023,10 @@ Respond with valid JSON matching the exact schema. No markdown wrapping.`;
           { role: "user", content: userContent },
         ],
         model: stageModels.synthesisModel,
+        // Final polish is optional: completed batch recommendations are a
+        // valid durable result. Keep the provider deadline explicit instead
+        // of relying on a system-prompt heuristic to select it.
+        timeoutMs: FINAL_SYNTHESIS_TIMEOUT_MS,
         thinkingBudgetTokens: stageModels.useThinking ? stageModels.thinkingBudget : undefined,
         // Note: extended thinking (Anthropic) is incompatible with json_schema response_format;
         // for other providers we enforce the schema client-side via Zod.
@@ -1425,9 +1441,18 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
     await reportProgress("Synthesizing final insights…");
     const finalResult = await withTimeout(
       synthesizeWithReasoning(draftRecommendations, critique, repoIndex, aiConfig, stageModels),
-      120000,
+      // The inner provider call has a strict eight-second deadline. This
+      // small outer guard covers unexpected local stalls while preserving the
+      // completed draft instead of failing the full analysis after two minutes.
+      FINAL_SYNTHESIS_TIMEOUT_MS + 7_000,
       "Final synthesis",
-    );
+    ).catch((error) => {
+      console.warn("[analysis] Final synthesis watchdog fired, using draft recommendations:", error);
+      return RecommendationSchema.parse({
+        recommendations: draftRecommendations,
+        summary_md: firstSummary || "Analysis complete.",
+      });
+    });
 
     finalResult.portfolio_stats = computePortfolioStats(shortlist);
 

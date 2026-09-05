@@ -68,7 +68,7 @@ const MAX_BACKOFF_MS = 10000;
 // real inner one instead of hand-copying the number — see profilingTimeoutMs
 // in analysis.ts for why that mattered in production.
 export const DEFAULT_REQUEST_TIMEOUT_MS = 45000;
-const FINAL_SYNTHESIS_TIMEOUT_MS = 8000;
+export const FINAL_SYNTHESIS_TIMEOUT_MS = 8000;
 
 /**
  * Portfolio analysis already has a high-quality draft before its final polish
@@ -168,6 +168,19 @@ async function fetchWithRetry(
 
     try {
       res = await fetch(url, { ...options, signal: controller.signal });
+
+      // `fetch()` resolves when response headers arrive, not when the body is
+      // complete. Clearing the abort timer at that point let a provider hold
+      // an incomplete JSON response open until the portfolio's much larger
+      // outer watchdog fired. Buffer the body while this request's deadline
+      // is still active, then hand callers an equivalent replayable Response.
+      // This makes the per-attempt timeout cover the whole provider response.
+      const body = await res.text();
+      res = new Response(body, {
+        status: res.status,
+        statusText: res.statusText,
+        headers: res.headers,
+      });
     } catch (error) {
       if (controller.signal.aborted) {
         const message = `${providerDisplayName(provider)} request exceeded ${Math.round(timeoutMs / 1000)}s and was cancelled to keep the analysis worker responsive.`;
