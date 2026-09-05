@@ -498,20 +498,24 @@ const FINISH_PLAN_JSON_SCHEMA = {
 // Mirrors FINISH_PLAN_JSON_SCHEMA above so a plan is validated with the exact
 // same shape that was requested from the model, regardless of whether the
 // provider actually honored strict json_schema mode.
-const finishPlanZodSchema = z.object({
-  analysis: z.string(),
-  changes: z
-    .array(
-      z.object({
-        path: z.string(),
-        status: z.enum(["created", "modified", "deleted"]),
-        content: z.string(),
-        description: z.string(),
-      }),
-    )
-    .min(1)
-    .max(MAX_CHANGES),
-});
+const finishPlanZodSchema = z
+  .object({
+    analysis: z.string(),
+    changes: z
+      .array(
+        z
+          .object({
+            path: z.string(),
+            status: z.enum(["created", "modified", "deleted"]),
+            content: z.string(),
+            description: z.string(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(MAX_CHANGES),
+  })
+  .strict();
 
 function validateFinishPlan(value: unknown): AIFinishPlan | null {
   const parsed = finishPlanZodSchema.safeParse(value);
@@ -580,6 +584,12 @@ export async function generateFinishPlan(
           },
           thinkingLevel: "low",
           timeoutMs: 60_000,
+          // Pin the repair call to the exact model that produced the
+          // malformed reply, when the provider reported one. Otherwise this
+          // call falls through to the provider's default model / fallback
+          // roster and can repair with a *different* model than the one
+          // that actually needs correcting.
+          ...(result.model ? { model: result.model } : {}),
         },
         { provider: aiProvider, apiKey: aiKey },
       );

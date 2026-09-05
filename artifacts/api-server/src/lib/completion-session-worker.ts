@@ -221,7 +221,7 @@ async function releaseSession(supabase: SupabaseClient, userId: string, sessionI
     .eq("worker_token", token);
 }
 
-async function blockSession(
+export async function blockSession(
   supabase: SupabaseClient,
   userId: string,
   session: CompletionSessionRow,
@@ -238,6 +238,17 @@ async function blockSession(
       last_error: reason,
       completed_at: now,
       updated_at: now,
+      // Release the worker lease along with the status flip. A blocked
+      // session's worker_token/lease_expires_at otherwise survive the
+      // block — if a later retryBlockedIteration() flips status back to
+      // "active", scheduleCompletionSession()'s recentlyActive() check can
+      // see that stale (not-yet-expired) lease or a recent heartbeat and
+      // conclude a worker is already running, silently skipping dispatch
+      // and leaving the session permanently stranded in "active" with
+      // nothing actually driving it.
+      worker_token: null,
+      lease_expires_at: null,
+      heartbeat_at: null,
     })
     .eq("id", session.id)
     .eq("user_id", userId)
@@ -719,19 +730,45 @@ export async function retryBlockedIteration(
     return { session: latest, retried: false, workerMode: null };
   }
 
-  await recordSessionEvent(
-    supabase,
-    userId,
-    sessionId,
-    session.iteration_count || null,
-    "iteration_retry_requested",
-    "info",
-    `Retrying iteration ${session.iteration_count + 1} after a bounded planning-format failure. No new branch, commit, PR, or iteration record is created by this retry — it re-attempts the same iteration.`,
-  );
+  try {
+    await recordSessionEvent(
+      supabase,
+      userId,
+      sessionId,
+      session.iteration_count || null,
+      "iteration_retry_requested",
+      "info",
+      `Retrying iteration ${session.iteration_count + 1} after a bounded planning-format failure. No new branch, commit, PR, or iteration record is created by this retry — it re-attempts the same iteration.`,
+    );
 
-  const { scheduleCompletionSession } = await import("./completion-session-scheduler");
-  const workerMode = await scheduleCompletionSession(supabase, userId, sessionId);
-  return { session: updated as CompletionSessionRow, retried: true, workerMode };
+    const { scheduleCompletionSession } = await import("./completion-session-scheduler");
+    const workerMode = await scheduleCompletionSession(supabase, userId, sessionId);
+    return { session: updated as CompletionSessionRow, retried: true, workerMode };
+  } catch (error) {
+    // The row-level flip to active/queued above succeeded, but logging the
+    // retry event or actually dispatching a worker for it failed. Leaving
+    // the row "active" here would silently strand it forever: this
+    // function's own early-return for status "active" treats that as
+    // already-in-flight and is a no-op, so nothing would ever attempt to
+    // dispatch a real worker again. Restore it to blocked — scoped to
+    // exactly the active/queued state this call just set, so we don't
+    // clobber a row a concurrent call has since moved on from — so a
+    // future retryBlockedIteration() call can try again, and surface the
+    // original error to the caller instead of masking it.
+    const revertNow = new Date().toISOString();
+    await supabase
+      .from("repo_completion_sessions")
+      .update({
+        status: "blocked",
+        phase: "blocked",
+        updated_at: revertNow,
+      })
+      .eq("id", sessionId)
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .eq("phase", "queued");
+    throw error;
+  }
 }
 
 export async function listCompletionSessionEvents(
