@@ -20,7 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
-  ActionPlan,
+  ActionPlanStatus,
   AnalysisDetail,
   AnalysisRunResult,
   AnalysisSummary,
@@ -885,7 +885,7 @@ export const useShareAnalysis = <TError = ErrorType<unknown>,
       return useMutation(getShareAnalysisMutationOptions(options));
     }
 
-export const getGetActionPlanUrl = (id: string,) => {
+export const getStartActionPlanUrl = (id: string,) => {
 
 
 
@@ -894,11 +894,11 @@ export const getGetActionPlanUrl = (id: string,) => {
 }
 
 /**
- * @summary Generate a phased action plan for recommendations
+ * @summary Kick off phased action plan generation in the background. Returns immediately (200) with the current status instead of blocking on the LLM call — poll GET /analysis/{id}/action-plan for the result. If a completed plan is already cached, it is returned right away.
  */
-export const getActionPlan = async (id: string, options?: RequestInit): Promise<ActionPlan> => {
+export const startActionPlan = async (id: string, options?: RequestInit): Promise<ActionPlanStatus> => {
 
-  return customFetch<ActionPlan>(getGetActionPlanUrl(id),
+  return customFetch<ActionPlanStatus>(getStartActionPlanUrl(id),
   {
     ...options,
     method: 'POST'
@@ -910,11 +910,11 @@ export const getActionPlan = async (id: string, options?: RequestInit): Promise<
 
 
 
-export const getGetActionPlanMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getActionPlan>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof getActionPlan>>, TError,{id: string}, TContext> => {
+export const getStartActionPlanMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startActionPlan>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startActionPlan>>, TError,{id: string}, TContext> => {
 
-const mutationKey = ['getActionPlan'];
+const mutationKey = ['startActionPlan'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -924,10 +924,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof getActionPlan>>, {id: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startActionPlan>>, {id: string}> = (props) => {
           const {id} = props ?? {};
 
-          return  getActionPlan(id,requestOptions)
+          return  startActionPlan(id,requestOptions)
         }
 
 
@@ -937,23 +937,100 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type GetActionPlanMutationResult = NonNullable<Awaited<ReturnType<typeof getActionPlan>>>
+    export type StartActionPlanMutationResult = NonNullable<Awaited<ReturnType<typeof startActionPlan>>>
 
-    export type GetActionPlanMutationError = ErrorType<unknown>
+    export type StartActionPlanMutationError = ErrorType<unknown>
 
     /**
- * @summary Generate a phased action plan for recommendations
+ * @summary Kick off phased action plan generation in the background. Returns immediately (200) with the current status instead of blocking on the LLM call — poll GET /analysis/{id}/action-plan for the result. If a completed plan is already cached, it is returned right away.
  */
-export const useGetActionPlan = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getActionPlan>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useStartActionPlan = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startActionPlan>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof getActionPlan>>,
+        Awaited<ReturnType<typeof startActionPlan>>,
         TError,
         {id: string},
         TContext
       > => {
-      return useMutation(getGetActionPlanMutationOptions(options));
+      return useMutation(getStartActionPlanMutationOptions(options));
     }
+
+export const getGetActionPlanStatusUrl = (id: string,) => {
+
+
+
+
+  return `/api/analysis/${id}/action-plan`
+}
+
+/**
+ * @summary Poll the status/result of an in-progress or completed action plan
+ */
+export const getActionPlanStatus = async (id: string, options?: RequestInit): Promise<ActionPlanStatus> => {
+
+  return customFetch<ActionPlanStatus>(getGetActionPlanStatusUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetActionPlanStatusQueryKey = (id: string,) => {
+    return [
+    `/api/analysis/${id}/action-plan`
+    ] as const;
+    }
+
+
+export const getGetActionPlanStatusQueryOptions = <TData = Awaited<ReturnType<typeof getActionPlanStatus>>, TError = ErrorType<unknown>>(id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getActionPlanStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetActionPlanStatusQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getActionPlanStatus>>> = ({ signal }) => getActionPlanStatus(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getActionPlanStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetActionPlanStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getActionPlanStatus>>>
+export type GetActionPlanStatusQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Poll the status/result of an in-progress or completed action plan
+ */
+
+export function useGetActionPlanStatus<TData = Awaited<ReturnType<typeof getActionPlanStatus>>, TError = ErrorType<unknown>>(
+ id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getActionPlanStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetActionPlanStatusQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetMergeInstructionsUrl = (id: string,) => {
 
