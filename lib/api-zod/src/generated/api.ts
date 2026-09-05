@@ -291,13 +291,15 @@ export const ShareAnalysisResponse = zod.object({
 
 
 /**
- * @summary Generate a phased action plan for recommendations
+ * @summary Kick off phased action plan generation in the background. Returns immediately (200) with the current status instead of blocking on the LLM call — poll GET /analysis/{id}/action-plan for the result. If a completed plan is already cached, it is returned right away.
  */
-export const GetActionPlanParams = zod.object({
+export const StartActionPlanParams = zod.object({
   "id": zod.coerce.string()
 })
 
-export const GetActionPlanResponse = zod.object({
+export const StartActionPlanResponse = zod.object({
+  "status": zod.enum(['not_started', 'running', 'completed', 'failed']),
+  "plan": zod.object({
   "total_weeks": zod.number(),
   "phases": zod.array(zod.object({
   "name": zod.string(),
@@ -311,6 +313,36 @@ export const GetActionPlanResponse = zod.object({
 })),
   "quick_wins": zod.array(zod.string()).optional(),
   "moonshots": zod.array(zod.string()).optional()
+}).nullish(),
+  "error": zod.string().nullish()
+})
+
+
+/**
+ * @summary Poll the status/result of an in-progress or completed action plan
+ */
+export const GetActionPlanStatusParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const GetActionPlanStatusResponse = zod.object({
+  "status": zod.enum(['not_started', 'running', 'completed', 'failed']),
+  "plan": zod.object({
+  "total_weeks": zod.number(),
+  "phases": zod.array(zod.object({
+  "name": zod.string(),
+  "duration_weeks": zod.number(),
+  "items": zod.array(zod.object({
+  "title": zod.string(),
+  "recommendation_index": zod.number(),
+  "why_now": zod.string(),
+  "key_deliverable": zod.string()
+}))
+})),
+  "quick_wins": zod.array(zod.string()).optional(),
+  "moonshots": zod.array(zod.string()).optional()
+}).nullish(),
+  "error": zod.string().nullish()
 })
 
 

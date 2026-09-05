@@ -1762,24 +1762,25 @@ router.post(
   }),
 );
 
-router.post(
-  "/analysis/:id/action-plan",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
-    const userId = req.userId!;
-
-    const { data: items, error: itemsErr } = await req.supabase!
+// Action plan generation is a single LLM call over a potentially large
+// recommendation set — same class of "can outrun the gateway timeout" risk
+// as the main repo analysis, which already solved this via a fire-and-forget
+// background task + DB status column instead of blocking the request. This
+// mirrors that exact pattern (see startAnalysisJob above) rather than
+// inventing a new mechanism.
+async function runActionPlanJob(supabase: SupabaseClient, analysisId: string, userId: string): Promise<void> {
+  try {
+    const { data: items, error: itemsErr } = await supabase
       .from("analysis_items")
       .select("title, kind, repos, pitch, effort, market_potential, next_steps, tech_stack, rank")
-      .eq("analysis_id", id)
+      .eq("analysis_id", analysisId)
       .eq("user_id", userId)
       .order("rank", { ascending: true });
     if (itemsErr) throw new Error(itemsErr.message);
     if (!items || items.length === 0) throw Object.assign(new Error("No recommendations found for this analysis."), { status: 400 });
 
-    const githubCredential = await loadGithubCredential(req.supabase!, userId);
-    const aiConfig = await loadAiCredential(req.supabase!, userId, githubCredential?.token ?? null);
+    const githubCredential = await loadGithubCredential(supabase, userId);
+    const aiConfig = await loadAiCredential(supabase, userId, githubCredential?.token ?? null);
 
     const recsText = items
       .map(
@@ -1822,7 +1823,90 @@ Sequence phases from quick wins (low effort, high impact) to moonshots. Group re
       aiConfig,
     );
 
-    res.json(JSON.parse(result.content || "{}"));
+    const plan = JSON.parse(result.content || "{}");
+
+    await supabase
+      .from("analyses")
+      .update({ action_plan: plan, action_plan_status: "completed", action_plan_error: null, action_plan_updated_at: new Date().toISOString() })
+      .eq("id", analysisId)
+      .eq("user_id", userId);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Action plan generation failed";
+    console.error(`[action-plan ${analysisId}] failed:`, msg);
+    captureException(e, {
+      tags: { subsystem: "action-plan", analysis_id: analysisId },
+      extra: { message: msg },
+    });
+    await supabase
+      .from("analyses")
+      .update({ action_plan_status: "failed", action_plan_error: msg, action_plan_updated_at: new Date().toISOString() })
+      .eq("id", analysisId)
+      .eq("user_id", userId);
+    await flushSentry();
+  }
+}
+
+router.post(
+  "/analysis/:id/action-plan",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const userId = req.userId!;
+
+    const { data: existing, error: existingErr } = await req.supabase!
+      .from("analyses")
+      .select("action_plan, action_plan_status")
+      .eq("id", id)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (existingErr) throw new Error(existingErr.message);
+    if (!existing) throw Object.assign(new Error("Analysis not found"), { status: 404 });
+
+    // Already generated — return the cached result instantly, no re-run.
+    if (existing.action_plan_status === "completed" && existing.action_plan) {
+      res.json({ status: "completed", plan: existing.action_plan, error: null });
+      return;
+    }
+    // Already in flight — don't kick off a second concurrent LLM call.
+    if (existing.action_plan_status === "running") {
+      res.json({ status: "running", plan: null, error: null });
+      return;
+    }
+
+    const { error: markErr } = await req.supabase!
+      .from("analyses")
+      .update({ action_plan_status: "running", action_plan_error: null, action_plan_updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("user_id", userId);
+    if (markErr) throw new Error(markErr.message);
+
+    runInBackground(runActionPlanJob(req.supabase!, id, userId), "action-plan-job");
+
+    res.json({ status: "running", plan: null, error: null });
+  }),
+);
+
+router.get(
+  "/analysis/:id/action-plan",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const userId = req.userId!;
+
+    const { data, error } = await req.supabase!
+      .from("analyses")
+      .select("action_plan, action_plan_status, action_plan_error")
+      .eq("id", id)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) throw Object.assign(new Error("Analysis not found"), { status: 404 });
+
+    res.json({
+      status: data.action_plan_status ?? "not_started",
+      plan: data.action_plan ?? null,
+      error: data.action_plan_error ?? null,
+    });
   }),
 );
 

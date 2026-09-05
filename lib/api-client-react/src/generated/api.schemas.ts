@@ -437,6 +437,23 @@ export interface ActionPlan {
   moonshots?: string[];
 }
 
+export type ActionPlanStatusStatus = typeof ActionPlanStatusStatus[keyof typeof ActionPlanStatusStatus];
+
+
+export const ActionPlanStatusStatus = {
+  not_started: 'not_started',
+  running: 'running',
+  completed: 'completed',
+  failed: 'failed',
+} as const;
+
+export interface ActionPlanStatus {
+  status: ActionPlanStatusStatus;
+  plan?: ActionPlan | null;
+  /** @nullable */
+  error?: string | null;
+}
+
 export interface MergeInput {
   itemRank: number;
 }
