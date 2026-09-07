@@ -143,6 +143,7 @@ const MODEL_CATALOG: Record<AiProvider, Array<{ id: string; label: string; detai
     { id: 'google/gemini-3.7-pro', label: 'Gemini 3.7 Pro', detail: 'Deep reasoning and long-context repository review' },
     { id: 'google/gemini-3.7-flash', label: 'Gemini 3.7 Flash', detail: 'Fast long-context analysis' },
     { id: 'anthropic/claude-opus-4.1', label: 'Claude Opus 4.1', detail: 'Premium architecture and code review' },
+    { id: 'x-ai/grok-4.6', label: 'Grok 4.6', detail: 'Frontier coding and STEM reasoning, 500k context; served via Amazon Bedrock BYOK so it bills AWS rather than OpenRouter credits' },
     { id: 'openrouter/auto', label: 'OpenRouter Auto', detail: 'Provider-managed model routing' },
   ],
   google: [
