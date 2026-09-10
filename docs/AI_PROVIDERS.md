@@ -9,37 +9,43 @@ Current supported provider identifiers:
 - `anthropic`
 - `openrouter`
 
+## Credentials and model identifiers are different things
+
+Provider API keys are secrets. Model identifiers are not.
+
+A deployment should not require one secret per model. The backend needs only the credential for a provider that should be available, for example `GEMINI_API_KEY` for Google Gemini or `OPENROUTER_API_KEY` for OpenRouter. The selected model is ordinary configuration and is resolved from, in order:
+
+1. the user's saved model selection,
+2. that provider's optional model override environment variable,
+3. the provider-specific default stored in application code.
+
+Provider model namespaces must remain isolated. A model configured for OpenRouter must never become the Google model merely because the user switches providers.
+
+The historical provider-agnostic `AI_MODEL` variable is intentionally ignored by model resolution because one global model slug can be valid for one provider and invalid for another. This previously allowed an OpenRouter slug to be sent to the Gemini endpoint and surface as a misleading HTTP 422 model/endpoint error.
+
 ## Recommended production defaults
 
-OpenRouter is the preferred platform/BYOK entry point because one credential can reach multiple high-quality models without changing the integration.
+OpenRouter remains the preferred multi-model entry point because one credential can reach many models without changing integrations. The current automatic free-first OpenRouter chain is defined in `artifacts/api-server/src/lib/ai-provider.ts` and starts with `nex-agi/nex-n2.5-mini:free`.
 
-Recommended model policy:
+Direct Google Gemini uses `gemini-3.8-flash` as the code default. Google model IDs may still be overridden explicitly with `GEMINI_MODEL`, but that variable is optional configuration rather than a required secret.
 
-- default high-value model: `minimax/minimax-m3:free`
-- automatic same-provider fallback: `nvidia/nemotron-3-ultra-550b-a55b:free`
-- premium OpenRouter alternative: `openai/gpt-5.6-luna`
-- quality/speed alternative: `google/gemini-3.7-flash`
-- direct Google fallback: `gemini-3.7-flash`
-
-The Settings UI exposes a curated model catalog so normal users do not need to type provider IDs. MiniMax M3 Free and Nemotron 3 Ultra Free lead the OpenRouter catalog, followed by GPT-5.6 Sol, Terra, and Luna plus other high-capability choices. The exact identifier remains visible and editable as an optional custom override so newly released models are not blocked by the catalog release cycle. Saving a preset still uses the existing provider/model readiness test and trusted BYOK path; appearing in the catalog does not imply that an account has entitlement or available provider credit for that model.
+The Settings UI exposes model choices so normal users do not need to type provider IDs. Exact identifiers remain editable as optional custom overrides so newly released models are not blocked by a catalog release cycle. A listed model does not imply that a particular account has entitlement or available quota for it.
 
 If `AI_PROVIDER` is explicitly configured and its matching platform credential exists, RepoFinisher honors it. If that provider is unusable because its server-side credential is absent, the backend automatically selects an available configured credential, preferring OpenRouter first. When no platform credential exists, Settings defaults to OpenRouter so a user can supply an OpenRouter BYOK key without being pushed toward a legacy provider.
-
-The preferred OpenRouter default can be overridden with `OPENROUTER_MODEL` or the common `AI_MODEL` variable. A user-saved exact model identifier takes precedence over those defaults.
 
 ## User BYOK flow
 
 The Settings UI stores:
 
 - provider,
-- exact model identifier,
+- exact model identifier or `null` for the provider default,
 - configured/not-configured credential state.
 
 The credential itself is submitted to the persistent API and stored in Supabase Vault through service-role-only functions.
 
 The browser must never receive the decrypted API key after save.
 
-A user's BYOK credential takes precedence over platform fallback credentials for the selected provider.
+A user's BYOK credential takes precedence over a platform fallback credential for the selected provider.
 
 ## Platform fallback
 
@@ -47,45 +53,50 @@ The backend can use optional environment credentials:
 
 ```text
 AI_PROVIDER
-AI_MODEL
 
 GEMINI_API_KEY or GOOGLE_API_KEY
-GEMINI_MODEL
-
 OPENAI_API_KEY
-OPENAI_MODEL
-
 ANTHROPIC_API_KEY
-ANTHROPIC_MODEL
+OPENROUTER_FREE_API_KEY or OPENROUTER_API_KEY_2 or OPENROUTER_API_KEY
+```
 
-OPENROUTER_API_KEY
+Optional provider-specific model overrides are ordinary configuration:
+
+```text
+GEMINI_MODEL
+OPENAI_MODEL
+ANTHROPIC_MODEL
 OPENROUTER_MODEL
 ```
 
-`AI_MODEL`, when set, is the common model override. Provider-specific model variables are fallback choices when a common override is absent.
+None of those model identifiers need to be stored as secrets, and none are required when the code default is acceptable.
 
-A credential variable that is present but blank (empty or whitespace) counts as unconfigured. Blank values are normalized to absent in `loadAiCredential` and again in `callAI`, so provider selection, `platformAiStatus`, and the "no usable credential" error all agree. Without that rule a whitespace key is truthy, passes every readiness check, and reaches the provider as `Authorization: Bearer `, which comes back as a misleading authentication error instead of a configuration error. Stored credentials are also trimmed, so a key saved with surrounding whitespace still authenticates.
+A credential variable that is present but blank (empty or whitespace) counts as unconfigured. Blank values are normalized to absent in `loadAiCredential` and again in `callAI`, so provider selection, `platformAiStatus`, and the "no usable credential" error all agree. Stored credentials are also trimmed, so a key saved with surrounding whitespace still authenticates.
 
 ## Exact model identifiers
 
-RepoFinisher should persist the exact model identifier selected/configured by the user rather than silently substituting a different model.
+RepoFinisher persists the exact model identifier selected/configured by the user rather than silently substituting a different model.
 
-This applies to per-stage model selection as well. Portfolio analysis picks a profiler/critique/synthesis model per tier, but the identifier resolved by `loadAiCredential` — the user's saved model, else the provider's platform default — overrides those stage defaults. Stage defaults are only a fallback for a provider with no configured model, and each provider's fallback must be valid for that provider: OpenRouter identifiers are vendor-namespaced (`minimax/minimax-m3:free`), so a bare `gpt-4o-mini` is not a usable OpenRouter default.
-
-When the resolved OpenRouter model is the reviewed MiniMax default, RepoFinisher sends the ordered `models` roster `[MiniMax M3 Free, Nemotron 3 Ultra Free]` so OpenRouter can fail over within the same request. Any other exact custom/user-selected model remains pinned and is not silently substituted. The response retains the concrete model ID reported by OpenRouter for safe runtime attribution.
+Per-stage portfolio analysis may choose profiler/critique/synthesis defaults, but the identifier resolved by `loadAiCredential` — the user's saved model, else that provider's platform/code default — takes precedence. Each provider's fallback must be valid in that provider's own namespace. OpenRouter identifiers are vendor-namespaced, while direct Gemini identifiers such as `gemini-3.8-flash` are not prefixed with `google/`.
 
 When a provider rejects a model:
 
 - return a clear provider/model error,
-- do not erase the stored key unless the user requested removal,
 - do not silently switch to another provider,
+- do not require a new secret just to select another model,
 - allow the user or planning policy to choose an alternative intentionally.
 
 ## OpenRouter
 
-OpenRouter is a first-class supported provider. It is useful as a multi-model routing surface but should not be treated as a reason to weaken provider/model observability.
+OpenRouter is a first-class supported provider and exposes a live model catalog in Settings. Pricing and capability metadata come from OpenRouter at runtime rather than requiring model definitions in backend secrets.
 
 Persist and expose safe metadata about the chosen provider/model so a failed run can be attributed correctly.
+
+## Google Gemini
+
+Direct Gemini calls use the Gemini REST `models/{model}:generateContent` endpoint. The default model is stored in code and can be changed without rotating credentials.
+
+Google also exposes `GET /v1beta/models` for programmatic model discovery. Future catalog expansion should prefer provider discovery over treating model names as deployment secrets.
 
 ## Provider status
 
@@ -99,7 +110,7 @@ Status endpoints may expose safe metadata such as:
 
 They must not expose key values.
 
-`GET /api/preferences/ai-status` is an authenticated API route on the persistent Render service. Production smoke verification deliberately calls it without a token and expects a JSON `401`; an HTML or `404` response is treated as a deployment/routing regression.
+`GET /api/preferences/ai-status` is an authenticated API route on the persistent API service. Production smoke verification deliberately calls it without a token and expects a JSON `401`; an HTML or `404` response is treated as a deployment/routing regression.
 
 ## Credential storage
 
@@ -114,15 +125,14 @@ The historical `custom_ai_key` field remains compatibility-only for legacy encry
 For each provider that is claimed as supported, production verification should cover:
 
 1. select provider,
-2. enter exact model,
-3. enter API key,
-4. save,
-5. reload page,
-6. confirm key is shown only as configured/not-configured,
-7. perform a real provider invocation or provider connectivity test,
-8. change model and verify new model is used,
-9. switch provider and ensure the old provider secret is not silently reused,
-10. remove key and verify Vault reference/secret removal behavior.
+2. leave the model blank and confirm the provider-specific code default resolves,
+3. save without adding a model environment variable,
+4. perform a real provider connectivity test,
+5. choose an exact model and verify it is used,
+6. switch providers and verify the prior provider's model slug is not reused,
+7. confirm a global or unrelated provider model variable cannot leak into the new provider,
+8. reload and confirm the key is shown only as configured/not-configured,
+9. remove the key and verify Vault reference/secret removal behavior.
 
 ## Provider failure handling
 
@@ -140,8 +150,6 @@ These are different failure modes and should become different operational-learni
 
 ## Historical Gemini notes
 
-Older repository notes described Google/Gemini as a single hard platform default and referenced Vercel-hosted API behavior. Those notes are obsolete.
+Older repository notes described Google/Gemini as a single hard platform default and used a provider-agnostic `AI_MODEL` override. That model override architecture is obsolete because it permits cross-provider identifier leakage.
 
-The current architecture is provider-aware, BYOK-capable, hosted with a persistent API on Render, and stores user AI credentials in Supabase Vault.
-
-Model-specific documentation files should defer to this document and `AGENTS.md` rather than preserve old hosting assumptions.
+The current architecture is provider-aware, BYOK-capable, stores credentials in Supabase Vault, and treats model identifiers as normal provider-scoped configuration.
