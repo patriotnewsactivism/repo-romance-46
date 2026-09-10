@@ -1,15 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { normalizeAiProvider, platformAiKey, platformAiProvider, platformAiStatus } from "./credentials";
+import {
+  normalizeAiProvider,
+  platformAiKey,
+  platformAiModel,
+  platformAiProvider,
+  platformAiStatus,
+} from "./credentials";
 
 const AI_ENV_KEYS = [
   "AI_PROVIDER",
+  "AI_MODEL",
   "OPENROUTER_API_KEY",
   "OPENROUTER_FREE_API_KEY",
   "OPENROUTER_API_KEY_2",
+  "OPENROUTER_MODEL",
   "GEMINI_API_KEY",
   "GOOGLE_API_KEY",
+  "GEMINI_MODEL",
   "OPENAI_API_KEY",
+  "OPENAI_MODEL",
   "ANTHROPIC_API_KEY",
+  "ANTHROPIC_MODEL",
 ] as const;
 
 const originalAiEnv = new Map<string, string | undefined>();
@@ -75,6 +86,38 @@ describe("platformAiProvider", () => {
 
   it("uses OpenRouter as the BYOK-oriented default when no platform key exists", () => {
     expect(platformAiProvider()).toBe("openrouter");
+  });
+});
+
+describe("platformAiModel", () => {
+  it("uses provider-specific code defaults without any model environment variables", () => {
+    expect(platformAiModel("google")).toBe("gemini-3.8-flash");
+    expect(platformAiModel("openrouter")).toBe("nex-agi/nex-n2.5-mini:free");
+    expect(platformAiModel("openai")).toBeNull();
+    expect(platformAiModel("anthropic")).toBeNull();
+  });
+
+  it("ignores the historical global AI_MODEL so one provider cannot poison another", () => {
+    process.env.AI_MODEL = "deepseek/deepseek-v4-flash-0731";
+    expect(platformAiModel("google")).toBe("gemini-3.8-flash");
+    expect(platformAiModel("openrouter")).toBe("nex-agi/nex-n2.5-mini:free");
+  });
+
+  it("honors only the selected provider's optional model override", () => {
+    process.env.GEMINI_MODEL = "gemini-3.7-flash";
+    process.env.OPENROUTER_MODEL = "deepseek/deepseek-v4-flash-0731";
+    process.env.OPENAI_MODEL = "gpt-custom";
+    process.env.ANTHROPIC_MODEL = "claude-custom";
+
+    expect(platformAiModel("google")).toBe("gemini-3.7-flash");
+    expect(platformAiModel("openrouter")).toBe("deepseek/deepseek-v4-flash-0731");
+    expect(platformAiModel("openai")).toBe("gpt-custom");
+    expect(platformAiModel("anthropic")).toBe("claude-custom");
+  });
+
+  it("does not let an OpenRouter model override leak into Google", () => {
+    process.env.OPENROUTER_MODEL = "deepseek/deepseek-v4-flash-0731";
+    expect(platformAiModel("google")).toBe("gemini-3.8-flash");
   });
 });
 
