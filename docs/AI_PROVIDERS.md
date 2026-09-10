@@ -125,7 +125,7 @@ The historical `custom_ai_key` field remains compatibility-only for legacy encry
 For each provider that is claimed as supported, production verification should cover:
 
 1. select provider,
-2. leave the model blank and confirm the provider-specific code default resolves,
+2. leave the model blank and confirm Google and OpenRouter resolve their code defaults; confirm OpenAI and Anthropic resolve `null` until configured,
 3. save without adding a model environment variable,
 4. perform a real provider connectivity test,
 5. choose an exact model and verify it is used,
