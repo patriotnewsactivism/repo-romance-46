@@ -64,6 +64,18 @@ export interface AiCredential {
 export const SUPPORTED_AI_PROVIDERS = ["google", "openai", "anthropic", "openrouter"] as const;
 const SUPPORTED_PLATFORM_PROVIDERS = new Set<string>(SUPPORTED_AI_PROVIDERS);
 
+/**
+ * Model identifiers are configuration, never credentials.
+ *
+ * Keep defaults in code so changing providers never requires adding a new
+ * backend secret. Provider-specific environment variables may override these
+ * defaults when an operator intentionally pins a deployment to another model.
+ */
+export const DEFAULT_AI_MODELS = {
+  google: "gemini-3.8-flash",
+  openrouter: "nex-agi/nex-n2.5-mini:free",
+} as const;
+
 export function normalizeAiProvider(value: string | null | undefined, fallback = "openrouter"): string {
   const configured = String(value || "").trim().toLowerCase();
   if (SUPPORTED_PLATFORM_PROVIDERS.has(configured)) return configured;
@@ -131,15 +143,26 @@ export function platformAiKey(provider: string): string | null {
   }
 }
 
-function platformAiModel(provider: string): string | null {
-  const common = process.env.AI_MODEL?.trim();
-  if (common) return common;
+/**
+ * Resolve a model only within the selected provider's namespace.
+ *
+ * Do not use the historical provider-agnostic `AI_MODEL` variable here. A
+ * single global model override can be valid for OpenRouter and invalid for
+ * Gemini (or vice versa), which causes exactly the kind of 404/422 provider
+ * switching failure this resolver is meant to prevent.
+ */
+export function platformAiModel(provider: string): string | null {
   switch (provider) {
-    case "google": return process.env.GEMINI_MODEL?.trim() || "gemini-3.7-flash";
-    case "openai": return process.env.OPENAI_MODEL?.trim() || null;
-    case "anthropic": return process.env.ANTHROPIC_MODEL?.trim() || null;
-    case "openrouter": return process.env.OPENROUTER_MODEL?.trim() || "minimax/minimax-m3:free";
-    default: return null;
+    case "google":
+      return normalizeCredentialValue(process.env.GEMINI_MODEL) ?? DEFAULT_AI_MODELS.google;
+    case "openai":
+      return normalizeCredentialValue(process.env.OPENAI_MODEL);
+    case "anthropic":
+      return normalizeCredentialValue(process.env.ANTHROPIC_MODEL);
+    case "openrouter":
+      return normalizeCredentialValue(process.env.OPENROUTER_MODEL) ?? DEFAULT_AI_MODELS.openrouter;
+    default:
+      return null;
   }
 }
 
