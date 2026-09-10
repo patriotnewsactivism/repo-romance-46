@@ -76,6 +76,7 @@ export const DEFAULT_AI_MODELS = {
   openrouter: "nex-agi/nex-n2.5-mini:free",
 } as const;
 
+/** Normalize a provider name to a supported platform provider or the supplied fallback. */
 export function normalizeAiProvider(value: string | null | undefined, fallback = "openrouter"): string {
   const configured = String(value || "").trim().toLowerCase();
   if (SUPPORTED_PLATFORM_PROVIDERS.has(configured)) return configured;
@@ -122,6 +123,7 @@ export function normalizeCredentialValue(raw: string | null | undefined): string
   return trimmed.length > 0 ? trimmed : null;
 }
 
+/** Resolve the first nonblank platform credential configured for a provider. */
 export function platformAiKey(provider: string): string | null {
   switch (provider) {
     case "google":
