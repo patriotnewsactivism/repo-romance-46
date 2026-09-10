@@ -33,15 +33,31 @@ export interface AIResponse {
   model?: string;
 }
 
-// Operator policy 2026-09-04 (Don): FREE models only, most intelligent and
-// most-reasoning first. The platform OpenRouter key is a free-tier key and
-// must NEVER be used for paid model calls — a paid fallback may be added
-// only when the operator specifically authorizes it.
+// Operator policy 2026-09-10: capable free models first. MiniMax M3 Free and
+// GLM 5.2 Free were removed from OpenRouter and must never be silently replaced
+// with their paid slugs. OpenRouter accepts at most three fallback models per
+// request, so this six-model free roster becomes two native fallback batches.
 export const OPENROUTER_FREE_AGENT_CHAIN = [
-  "minimax/minimax-m3:free",
-  "nvidia/nemotron-3-ultra-550b-a55b:free",
-  "z-ai/glm-5.2:free",
+  "nex-agi/nex-n2.5-mini:free",
   "nvidia/nemotron-3-super-120b-a12b:free",
+  "poolside/laguna-s-2.1:free",
+  "nex-agi/nex-n2.5-pro:free",
+  "nvidia/nemotron-3.5-lightning:free",
+  "nvidia/nemotron-3-ultra-550b-a55b:free",
+] as const;
+
+// Explicitly authorized paid continuity tail. GPT-OSS is deliberately first as
+// the cheapest fast paid fallback; DeepSeek V4 Flash adds much stronger agentic
+// reasoning when needed, with V3.2 as a final ordinary paid fallback.
+export const OPENROUTER_PAID_AGENT_CHAIN = [
+  "openai/gpt-oss-120b",
+  "deepseek/deepseek-v4-flash-0731",
+  "deepseek/deepseek-v3.2",
+] as const;
+
+export const OPENROUTER_AGENT_CHAIN = [
+  ...OPENROUTER_FREE_AGENT_CHAIN,
+  ...OPENROUTER_PAID_AGENT_CHAIN,
 ] as const;
 
 type PublicHttpError = Error & {
@@ -63,10 +79,6 @@ const DEFAULT_MODELS: Record<string, string> = {
 const MAX_RETRIES = 4;
 const INITIAL_BACKOFF_MS = 5000;
 const MAX_BACKOFF_MS = 10000;
-// Exported so callers that wrap a `callAI` call in their own outer timeout
-// (e.g. analysis.ts's `withTimeout`) can derive that outer budget from the
-// real inner one instead of hand-copying the number — see profilingTimeoutMs
-// in analysis.ts for why that mattered in production.
 export const DEFAULT_REQUEST_TIMEOUT_MS = 45000;
 export const FINAL_SYNTHESIS_TIMEOUT_MS = 8000;
 
@@ -156,10 +168,12 @@ async function fetchWithRetry(
   options: RequestInit,
   provider: string,
   timeoutMs: number,
+  retryBudget: number = MAX_RETRIES,
 ): Promise<Response> {
   let lastError = "";
   const singleAttemptOnly = timeoutMs <= FINAL_SYNTHESIS_TIMEOUT_MS;
-  const maxRetries = singleAttemptOnly ? 0 : MAX_RETRIES;
+  const boundedRetryBudget = Math.max(0, Math.min(MAX_RETRIES, Math.floor(retryBudget)));
+  const maxRetries = singleAttemptOnly ? 0 : boundedRetryBudget;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const controller = new AbortController();
@@ -169,12 +183,6 @@ async function fetchWithRetry(
     try {
       res = await fetch(url, { ...options, signal: controller.signal });
 
-      // `fetch()` resolves when response headers arrive, not when the body is
-      // complete. Clearing the abort timer at that point let a provider hold
-      // an incomplete JSON response open until the portfolio's much larger
-      // outer watchdog fired. Buffer the body while this request's deadline
-      // is still active, then hand callers an equivalent replayable Response.
-      // This makes the per-attempt timeout cover the whole provider response.
       const body = await res.text();
       res = new Response(body, {
         status: res.status,
@@ -239,13 +247,6 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
   const model = request.model || config.model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.google;
   const requestTimeoutMs = resolveAIRequestTimeoutMs(request);
 
-  // Last line of defence for a blank-but-truthy credential. Sending one produces
-  // `Authorization: Bearer ` and a provider-side auth error that blames the
-  // request rather than the missing key — OpenRouter reports it as
-  // `401 Missing Authentication header`. Treating blank as absent lets the call
-  // fall through to this function's own "no usable credential" message, which
-  // names the provider and tells the operator what to configure. The trim also
-  // makes a key stored with stray surrounding whitespace work as intended.
   const apiKey = typeof config.apiKey === "string" && config.apiKey.trim().length > 0 ? config.apiKey.trim() : null;
 
   if (provider === "anthropic" && apiKey) {
@@ -336,15 +337,16 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
   }
 
   if (provider === "openrouter" && apiKey && model === OPENROUTER_FREE_AGENT_CHAIN[0]) {
-    // Only the reviewed free-tier default gets an automatic fallback. Exact
-    // custom/user-selected models remain pinned and are never substituted.
-    // OpenRouter rejects `models` routing arrays longer than 3 entries
-    // (HTTP 400: "'models' array must have 3 items or lesser"), so the chain
-    // is chunked into groups of 3; the next group is tried only when every
-    // model in the previous group failed.
+    // The reviewed default uses automatic free-first continuity. Exact custom
+    // user-selected models remain pinned and are never substituted.
+    //
+    // OpenRouter rejects fallback arrays longer than three models, so the nine
+    // model chain becomes three requests at most: free batch 1, free batch 2,
+    // then the cheap paid continuity batch. Each group gets a single network
+    // attempt because retrying an exhausted free group wastes quota and time.
     const groups: string[][] = [];
-    for (let i = 0; i < OPENROUTER_FREE_AGENT_CHAIN.length; i += 3) {
-      groups.push([...OPENROUTER_FREE_AGENT_CHAIN.slice(i, i + 3)]);
+    for (let i = 0; i < OPENROUTER_AGENT_CHAIN.length; i += 3) {
+      groups.push([...OPENROUTER_AGENT_CHAIN.slice(i, i + 3)]);
     }
 
     let lastError: unknown;
@@ -368,6 +370,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
           },
           provider,
           requestTimeoutMs,
+          0,
         );
 
         if (!res.ok) {
@@ -387,7 +390,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
         lastError = err;
       }
     }
-    throw lastError ?? new Error("OpenRouter free chain exhausted with no error recorded");
+    throw lastError ?? new Error("OpenRouter agent chain exhausted with no error recorded");
   }
 
   if (
