@@ -1,36 +1,3 @@
-[build]
-  # repo-finisher references composite workspace libraries (notably
-  # @workspace/api-client-react). A clean Netlify clone has no generated .d.ts
-  # files yet, so build the root TypeScript project references before running
-  # the frontend's no-emit typecheck. Do not call a package-level `build` on
-  # api-client-react: that package intentionally has no build script.
-  command = "pnpm run typecheck:libs && pnpm --filter @workspace/repo-finisher typecheck && pnpm --filter @workspace/repo-finisher build"
-  publish = "artifacts/repo-finisher/dist/public"
-
-[build.environment]
-  NODE_VERSION = "24"
-  PNPM_VERSION = "9.15.9"
-  VITE_API_BASE_URL = "https://repofinisher-api-z6kubh2jtq-uc.a.run.app"
-  VITE_SUPABASE_URL = "https://rdsrxfzahhxbvugyarld.supabase.co"
-  # Supabase publishable keys are intentionally public browser credentials; RLS remains the authorization boundary.
-  VITE_SUPABASE_ANON_KEY = "sb_publishable_95xMusG9KjCGJemIa8dgcw_-8JqzgER"
-  VITE_SENTRY_ENVIRONMENT = "production"
-
-# SPA routes. Existing static assets win because force is false.
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
-  force = false
-
-[[headers]]
-  for = "/assets/*"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-
-[[headers]]
-  for = "/*"
-  [headers.values]
-    X-Content-Type-Options = "nosniff"
-    Referrer-Policy = "strict-origin-when-cross-origin"
-    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+# REMOVED - Netlify is not an approved deployment target.
+# Canonical production is Google Cloud Run (repofinisher-web / repofinisher-api).
+# See AGENTS.md and docs/CLOUD_RUN_MIGRATION.md.
