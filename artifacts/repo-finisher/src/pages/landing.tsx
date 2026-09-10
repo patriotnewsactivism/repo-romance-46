@@ -26,6 +26,11 @@ export default function Landing() {
       <section className="relative py-24 px-4 sm:px-6 lg:px-8 overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent pointer-events-none" />
         <div className="max-w-4xl mx-auto text-center relative">
+          <img
+            src="/repo-finisher-logo.png"
+            alt="Repo Finisher — Close faster. Move forward."
+            className="mx-auto mb-10 w-full max-w-2xl rounded-2xl shadow-2xl shadow-blue-500/10"
+          />
           <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold mb-6 leading-tight text-white">
             Stop collecting.
             <br />

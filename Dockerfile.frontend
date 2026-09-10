@@ -1,27 +1,36 @@
 # Dockerfile for the RepoFinisher frontend SPA
 FROM node:22-slim AS builder
 
+ARG VITE_API_BASE_URL
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+ARG VITE_SUPABASE_URL
+ENV VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+ARG VITE_SUPABASE_ANON_KEY
+ENV VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
+
 WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 COPY . .
 
-RUN pnpm install --frozen-lockfile || true
+RUN pnpm install --frozen-lockfile
 
-RUN pnpm --filter @workspace/repo-finisher build || true
+RUN pnpm --filter @workspace/repo-finisher build
+
+RUN test -f artifacts/repo-finisher/dist/public/index.html
 
 FROM node:22-slim AS runner
 
+WORKDIR /app
+
+RUN npm install --global serve@14.2.6
+
 USER node
 
-WORKDIR /app/artifacts/repo-finisher
+COPY --from=builder --chown=node:node /app/artifacts/repo-finisher/dist/public ./public
 
-COPY --from=builder /app/artifacts/repo-finisher/dist ./dist
-
-ENV VITE_API_BASE_URL=https://repofinisher-api-z6kubh2jtq-uc.a.run.app
-ENV VITE_SUPABASE_URL=https://rdsrxfzahhxbvugyarld.supabase.co
 ENV PORT=8080
 EXPOSE 8080
 
-CMD ["npx", "serve", "-s", "dist", "-l", "8080"]
+CMD ["serve", "-s", "public", "-l", "8080"]
