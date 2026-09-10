@@ -10,6 +10,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { decryptSecret } from "./secrets";
 import { readAiVaultSecret } from "./ai-secret-store";
+import { defaultAiModel } from "./ai-model-config";
 import { normalizeOpenRouterReasoningEffort, type OpenRouterReasoningEffort } from "./openrouter-models";
 
 export interface GithubCredential {
@@ -62,6 +63,7 @@ export interface AiCredential {
 }
 
 export const SUPPORTED_AI_PROVIDERS = ["google", "openai", "anthropic", "openrouter"] as const;
+export type SupportedAiProvider = (typeof SUPPORTED_AI_PROVIDERS)[number];
 const SUPPORTED_PLATFORM_PROVIDERS = new Set<string>(SUPPORTED_AI_PROVIDERS);
 
 export function normalizeAiProvider(value: string | null | undefined, fallback = "openrouter"): string {
@@ -97,13 +99,8 @@ export function platformAiProvider(): string {
  *
  * Env vars and stored rows can both hold whitespace, and a whitespace string is
  * truthy, so a blank key used to survive every `if (key)` check between here and
- * the provider call and go out as `Authorization: Bearer `. OpenRouter answers
- * that with `401 Missing Authentication header`, which reads like an integration
- * bug rather than an unconfigured key. Normalizing here makes a blank value
- * indistinguishable from an absent one, so the caller reports the real problem.
- *
- * Trimming also rescues the common case of a key pasted with surrounding
- * whitespace, which is otherwise a working key that always fails to authenticate.
+ * the provider call and go out as an empty bearer token. Normalizing here makes
+ * a blank value indistinguishable from an absent one.
  */
 export function normalizeCredentialValue(raw: string | null | undefined): string | null {
   const trimmed = typeof raw === "string" ? raw.trim() : "";
@@ -131,16 +128,17 @@ export function platformAiKey(provider: string): string | null {
   }
 }
 
-function platformAiModel(provider: string): string | null {
-  const common = process.env.AI_MODEL?.trim();
-  if (common) return common;
-  switch (provider) {
-    case "google": return process.env.GEMINI_MODEL?.trim() || "gemini-3.7-flash";
-    case "openai": return process.env.OPENAI_MODEL?.trim() || null;
-    case "anthropic": return process.env.ANTHROPIC_MODEL?.trim() || null;
-    case "openrouter": return process.env.OPENROUTER_MODEL?.trim() || "minimax/minimax-m3:free";
-    default: return null;
-  }
+/**
+ * Model IDs are not environment secrets. The app-selected model stored in
+ * `user_preferences.custom_ai_model` wins; this function is only the in-code
+ * fallback when no model was selected in the app.
+ *
+ * The historical AI_MODEL/GEMINI_MODEL/OPENROUTER_MODEL/etc. variables are
+ * intentionally ignored so a model slug cannot leak across providers and the
+ * user never has to configure the same model in both the UI and deployment ENV.
+ */
+export function platformAiModel(provider: string): string | null {
+  return defaultAiModel(provider);
 }
 
 /** Safe platform readiness metadata. Never includes credential values. */
@@ -156,12 +154,38 @@ export function platformAiStatus() {
   };
 }
 
+export async function loadStoredAiProviderSecretId(
+  supabase: SupabaseClient,
+  userId: string,
+  provider: string,
+): Promise<string | null> {
+  const normalizedProvider = normalizeAiProvider(provider, provider);
+  const { data, error } = await supabase
+    .from("ai_provider_credentials")
+    .select("vault_secret_id")
+    .eq("user_id", userId)
+    .eq("provider", normalizedProvider)
+    .maybeSingle();
+
+  if (error) {
+    // During a rolling deploy the API may briefly start before the migration has
+    // reached the database. Preserve the legacy read path for that specific
+    // schema-missing case rather than turning every AI request into a 500.
+    if ((error as { code?: string }).code === "42P01") return null;
+    throw new Error(`Failed to load ${normalizedProvider} credential metadata: ${error.message}`);
+  }
+
+  const secretId = (data as { vault_secret_id?: string | null } | null)?.vault_secret_id;
+  return typeof secretId === "string" && secretId.length > 0 ? secretId : null;
+}
+
 /**
  * Resolve which provider, model, and key to use for a user.
  *
- * BYOK credentials are stored in Supabase Vault. The historical custom_ai_key
- * column is read only as a compatibility fallback for old rows that have not
- * yet been migrated. A user's BYOK credential wins over a platform credential.
+ * Provider credentials are stored independently in Supabase Vault and indexed by
+ * `ai_provider_credentials`, so switching from OpenRouter to Gemini (or back)
+ * never deletes or reuses the other provider's key. The historical single-key
+ * preference columns are read only as a compatibility fallback.
  */
 export async function loadAiCredential(
   supabase: SupabaseClient,
@@ -182,6 +206,7 @@ export async function loadAiCredential(
     custom_ai_key: string | null;
     custom_ai_vault_secret_id: string | null;
   } | null;
+
   const fallbackProvider = platformAiProvider();
   const provider = normalizeAiProvider(row?.custom_ai_provider, fallbackProvider);
   const model = row?.custom_ai_model?.trim() || platformAiModel(provider);
@@ -190,21 +215,43 @@ export async function loadAiCredential(
     : null;
 
   let userKey: string | null = null;
-  if (row?.custom_ai_vault_secret_id) {
+  let providerSecretId: string | null = null;
+  try {
+    providerSecretId = await loadStoredAiProviderSecretId(supabase, userId, provider);
+  } catch {
+    providerSecretId = null;
+  }
+
+  if (providerSecretId) {
     try {
-      userKey = normalizeCredentialValue(await readAiVaultSecret(supabase, userId, row.custom_ai_vault_secret_id));
+      userKey = normalizeCredentialValue(await readAiVaultSecret(supabase, userId, provider, providerSecretId));
     } catch {
       userKey = null;
     }
   }
 
-  if (!userKey && row?.custom_ai_key) {
+  // Compatibility path for accounts that have not yet been migrated from the
+  // historical single Vault pointer. Only use it when that pointer belongs to
+  // the same selected provider.
+  const legacyProvider = normalizeAiProvider(row?.custom_ai_provider, provider);
+  if (!userKey && row?.custom_ai_vault_secret_id && legacyProvider === provider) {
+    try {
+      userKey = normalizeCredentialValue(
+        await readAiVaultSecret(supabase, userId, provider, row.custom_ai_vault_secret_id),
+      );
+    } catch {
+      userKey = null;
+    }
+  }
+
+  if (!userKey && row?.custom_ai_key && legacyProvider === provider) {
     try {
       userKey = normalizeCredentialValue(decryptSecret(row.custom_ai_key));
     } catch {
       userKey = null;
     }
   }
+
   if (userKey) return { provider, model, apiKey: userKey, source: "byok", reasoningEffort };
 
   const platformKey = platformAiKey(provider);
