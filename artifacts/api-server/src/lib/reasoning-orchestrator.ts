@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { callAI } from "./ai-provider";
+import { callAI, type AIProviderConfig } from "./ai-provider";
 import { parseModelJsonLenient } from "./parse-model-json";
 import { loadAdaptiveLearningContext } from "./adaptive-learning";
 import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "./credentials";
@@ -378,7 +378,9 @@ function normalizePlanner(value: unknown): PlannerResult {
   };
 }
 
-async function runEvidenceAnalyst(ai: { provider: string; apiKey: string | null }, context: Record<string, unknown>): Promise<EvidenceAnalysis> {
+type AiConfig = AIProviderConfig;
+
+async function runEvidenceAnalyst(ai: AiConfig, context: Record<string, unknown>): Promise<EvidenceAnalysis> {
   const result = await callAI({
     messages: [
       {
@@ -429,7 +431,7 @@ async function runEvidenceAnalyst(ai: { provider: string; apiKey: string | null 
   return normalizeEvidenceAnalysis(parseModelJsonLenient(result.content || "{}"));
 }
 
-async function runCritic(ai: { provider: string; apiKey: string | null }, context: Record<string, unknown>): Promise<CriticResult> {
+async function runCritic(ai: AiConfig, context: Record<string, unknown>): Promise<CriticResult> {
   const result = await callAI({
     messages: [
       {
@@ -464,7 +466,7 @@ async function runCritic(ai: { provider: string; apiKey: string | null }, contex
   return normalizeCritic(parseModelJsonLenient(result.content || "{}"));
 }
 
-async function runSpecialist(ai: { provider: string; apiKey: string | null }, role: SpecialistRole, context: Record<string, unknown>): Promise<SpecialistResult> {
+async function runSpecialist(ai: AiConfig, role: SpecialistRole, context: Record<string, unknown>): Promise<SpecialistResult> {
   const result = await callAI({
     messages: [
       {
@@ -493,12 +495,12 @@ async function runSpecialist(ai: { provider: string; apiKey: string | null }, ro
       },
     },
     thinkingLevel: "medium",
-    timeoutMs: 50_000,
+    timeoutMs: 45_000,
   }, ai);
   return normalizeSpecialist(role, parseModelJsonLenient(result.content || "{}"));
 }
 
-async function runPlanner(ai: { provider: string; apiKey: string | null }, context: Record<string, unknown>): Promise<PlannerResult> {
+async function runPlanner(ai: AiConfig, context: Record<string, unknown>): Promise<PlannerResult> {
   const result = await callAI({
     messages: [
       {
@@ -531,6 +533,122 @@ async function runPlanner(ai: { provider: string; apiKey: string | null }, conte
     timeoutMs: 65_000,
   }, ai);
   return normalizePlanner(parseModelJsonLenient(result.content || "{}"));
+}
+
+export function buildSpecialistContext(
+  selection: { role: SpecialistRole; reason: string },
+  sharedContext: {
+    repositoryEvidence: RepoEvidence;
+    requestedNextSteps: string[];
+    analysisContext: Record<string, unknown> | null;
+    measuredLearning: { operationalMemory: string[] };
+  },
+  diagnosis: EvidenceAnalysis,
+  critic: CriticResult,
+) {
+  const { repository, treeSignals, files } = sharedContext.repositoryEvidence;
+
+  const roleKeywords: Record<SpecialistRole, RegExp> = {
+    "frontend-ux": /(component|page|view|ui|style|css|layout|app|index\.(tsx|jsx|html))/i,
+    "backend-api": /(route|api|controller|server|handler|endpoint|router|service)/i,
+    database: /(migration|schema|model|sql|db|prisma|drizzle|entity)/i,
+    "devops-deployment": /(docker|compose|\.github|ci|deploy|workflow|manifest|render|cloudrun)/i,
+    "security-auth": /(auth|oauth|jwt|session|token|permission|guard|secret)/i,
+    "payments-growth": /(stripe|billing|payment|plan|checkout|pricing|subscription)/i,
+    accessibility: /(a11y|aria|screenreader|nav|header|dialog|modal)/i,
+    "mobile-native": /(app\.(json|js|tsx)|expo|ios|android|native|screen)/i,
+    "data-ai": /(ai|llm|model|prompt|chain|pipeline|agent|eval)/i,
+    "qa-reliability": /(test|spec|e2e|cypress|playwright|jest|vitest)/i,
+    observability: /(log|metric|trace|sentry|monitor|telemetry|health)/i,
+  };
+
+  const pattern = roleKeywords[selection.role];
+  let snippetChars = 0;
+  const relevantFiles = files
+    .filter((file) => (pattern ? pattern.test(file.path) : false))
+    .filter((file) => {
+      if (snippetChars + file.content.length <= 16_000) {
+        snippetChars += file.content.length;
+        return true;
+      }
+      return false;
+    })
+    .slice(0, 4);
+
+  return {
+    specialistRole: selection.role,
+    specialistObjective: specialistObjective(selection.role),
+    selectionReason: selection.reason,
+    repository: {
+      repo: repository.repo,
+      description: repository.description,
+      language: repository.language,
+      topics: repository.topics,
+      defaultBranch: repository.defaultBranch,
+      headSha: repository.headSha,
+    },
+    treeSignals,
+    inspectedFilePaths: files.map((f) => f.path),
+    relevantCodeSnippets: relevantFiles.map((f) => ({ path: f.path, content: f.content.slice(0, 3000) })),
+    diagnosis: {
+      summary: diagnosis.summary,
+      findings: diagnosis.findings.slice(0, 8),
+      unknowns: diagnosis.unknowns,
+    },
+    critic: {
+      acceptedFindingIds: critic.acceptedFindingIds,
+      rejectedFindingIds: critic.rejectedFindingIds,
+      critique: critic.critique,
+      regressionRisks: critic.regressionRisks,
+      missingEvidence: critic.missingEvidence,
+    },
+    operationalGuidance: sharedContext.measuredLearning.operationalMemory?.slice(0, 6) ?? [],
+  };
+}
+
+export function buildDeterministicSpecialist(selection: { role: SpecialistRole; reason: string }): SpecialistResult {
+  return {
+    role: selection.role,
+    summary: `Deterministic review for ${selection.role}: ${selection.reason}`,
+    priorities: [selection.reason],
+    risks: [`Automated ${selection.role} specialist timed out or was unavailable; verify ${selection.role} concerns directly against repository evidence.`],
+    validation: [`Execute tests and checks relevant to ${selection.role}.`],
+    confidence: 50,
+  };
+}
+
+export function buildDeterministicPlan(
+  traceId: string | null,
+  repo: string,
+  strategy: { version: string; arm: "incumbent" | "challenger" },
+  specialistSelections: Array<{ role: SpecialistRole; reason: string }>,
+  requestedNextSteps: string[],
+  memory: string[],
+  legacyGuidance: string[],
+  evidence: RepoEvidence,
+  summaryReason?: string,
+): ReasonedPlanningResult {
+  const nextSteps = unique([
+    ...requestedNextSteps,
+    ...memory,
+    ...legacyGuidance,
+    "Run existing tests, typechecks, build, security checks, and deployment-preview smoke verification; repair root causes without weakening acceptance criteria.",
+  ]);
+  return {
+    traceId,
+    version: REASONING_VERSION,
+    repo,
+    promptVersion: strategy.version,
+    strategyArm: strategy.arm,
+    specialists: specialistSelections.map((item) => item.role),
+    summary: summaryReason || "No usable AI reasoning credential was available, so this plan is limited to deterministic repository evidence and measured operational memory.",
+    nextSteps,
+    risks: ["Multi-agent hypothesis testing and critique could not run for this plan."],
+    validation: ["Require CI and deployment/runtime verification before treating changes as successful."],
+    stopConditions: ["Stop if validation cannot be observed or the repository base moves during execution."],
+    confidence: memory.length ? 55 : 35,
+    evidence,
+  };
 }
 
 function evidenceConfidence(diagnosis: EvidenceAnalysis, critic: CriticResult) {
@@ -583,11 +701,14 @@ export async function reasonAboutRepositoryPlan(
       resolvePromptStrategy(supabase, userId),
     ]);
     const aiCredential = await loadAiCredential(supabase, userId, github.token);
-    // Preserve the exact provider/model selected in Settings (or the platform
-    // default resolved by loadAiCredential) across every reasoning stage. The
-    // previous object dropped `model`, causing callAI to silently fall back to a
-    // provider default during external-prompt generation and autonomous finish.
-    const ai = { provider: aiCredential.provider, model: aiCredential.model, apiKey: aiCredential.apiKey };
+    // Preserve the exact provider/model/reasoningEffort selected in Settings (or
+    // platform defaults) across every reasoning stage.
+    const ai: AiConfig = {
+      provider: aiCredential.provider,
+      model: aiCredential.model,
+      apiKey: aiCredential.apiKey,
+      reasoningEffort: aiCredential.reasoningEffort,
+    };
     const memory = memoryGuidance(memories, 14);
     const legacyGuidance = arrayOfStrings(learning.promptGuidance, 12);
     const specialistSelections = selectSpecialists({
@@ -617,27 +738,16 @@ export async function reasonAboutRepositoryPlan(
     });
 
     if (!ai.apiKey) {
-      const nextSteps = unique([
-        ...requestedNextSteps,
-        ...memory,
-        ...legacyGuidance,
-        "Run existing tests, typechecks, build, security checks, and deployment-preview smoke verification; repair root causes without weakening acceptance criteria.",
-      ]);
-      const fallback: ReasonedPlanningResult = {
+      const fallback = buildDeterministicPlan(
         traceId,
-        version: REASONING_VERSION,
-        repo: input.repo,
-        promptVersion: strategy.version,
-        strategyArm: strategy.arm,
-        specialists: specialistSelections.map((item) => item.role),
-        summary: "No usable AI reasoning credential was available, so this plan is limited to deterministic repository evidence and measured operational memory.",
-        nextSteps,
-        risks: ["Multi-agent hypothesis testing and critique could not run for this plan."],
-        validation: ["Require CI and deployment/runtime verification before treating changes as successful."],
-        stopConditions: ["Stop if validation cannot be observed or the repository base moves during execution."],
-        confidence: memory.length ? 55 : 35,
+        input.repo,
+        strategy,
+        specialistSelections,
+        requestedNextSteps,
+        memory,
+        legacyGuidance,
         evidence,
-      };
+      );
       await updateTrace(supabase, userId, traceId, { stage: "complete", status: "partial", decision: fallback, confidence: fallback.confidence, completed_at: new Date().toISOString() });
       return fallback;
     }
@@ -662,22 +772,112 @@ export async function reasonAboutRepositoryPlan(
       },
     };
 
-    const diagnosis = await runEvidenceAnalyst(ai, sharedContext);
+    let diagnosis: EvidenceAnalysis;
+    try {
+      diagnosis = await runEvidenceAnalyst(ai, sharedContext);
+    } catch (err) {
+      console.warn(
+        "[reasoning-orchestrator] Evidence analyst failed or timed out; falling back to deterministic repository plan:",
+        err instanceof Error ? err.message : err,
+      );
+      const fallback = buildDeterministicPlan(
+        traceId,
+        input.repo,
+        strategy,
+        specialistSelections,
+        requestedNextSteps,
+        memory,
+        legacyGuidance,
+        evidence,
+        `AI reasoning provider timed out or was temporarily unavailable (${err instanceof Error ? err.message : "timeout"}); plan constructed directly from verified repository evidence and operational memory.`,
+      );
+      await updateTrace(supabase, userId, traceId, {
+        stage: "complete",
+        status: "partial",
+        decision: fallback,
+        confidence: fallback.confidence,
+        completed_at: new Date().toISOString(),
+      });
+      return fallback;
+    }
+
     await updateTrace(supabase, userId, traceId, {
       stage: "critic_review",
       hypotheses: diagnosis.findings,
       decision: { evidenceSummary: diagnosis.summary, unknowns: diagnosis.unknowns },
     });
 
-    const critic = await runCritic(ai, { ...sharedContext, diagnosis });
+    let critic: CriticResult;
+    try {
+      critic = await runCritic(ai, { ...sharedContext, diagnosis });
+    } catch (err) {
+      console.warn(
+        "[reasoning-orchestrator] Critic stage failed or timed out; falling back to deterministic critique:",
+        err instanceof Error ? err.message : err,
+      );
+      critic = {
+        acceptedFindingIds: diagnosis.findings.filter((f) => f.confidence >= 40).map((f) => f.id),
+        rejectedFindingIds: diagnosis.findings.filter((f) => f.confidence < 40).map((f) => f.id),
+        critique: ["Critic stage timed out or was unavailable; accepted findings meeting baseline confidence threshold."],
+        regressionRisks: ["Verify all changes against existing test suites before merging."],
+        missingEvidence: diagnosis.unknowns,
+        confidence: 50,
+      };
+    }
+
     await updateTrace(supabase, userId, traceId, { stage: "specialist_review", critiques: critic, confidence: critic.confidence });
 
-    const specialists = await Promise.all(
-      specialistSelections.map((selection) => runSpecialist(ai, selection.role, { ...sharedContext, diagnosis, critic })),
-    );
-    await updateTrace(supabase, userId, traceId, { stage: "synthesizing_plan", specialists: specialists.length ? specialists : specialistSelections });
+    const specialists: SpecialistResult[] = [];
+    for (const selection of specialistSelections) {
+      try {
+        const specContext = buildSpecialistContext(selection, sharedContext, diagnosis, critic);
+        const specResult = await runSpecialist(ai, selection.role, specContext);
+        specialists.push(specResult);
+      } catch (err) {
+        console.warn(
+          `[reasoning-orchestrator] Specialist ${selection.role} failed or timed out:`,
+          err instanceof Error ? err.message : err,
+        );
+        specialists.push(buildDeterministicSpecialist(selection));
+      }
+    }
 
-    const planned = await runPlanner(ai, { ...sharedContext, diagnosis, critic, specialists });
+    await updateTrace(supabase, userId, traceId, {
+      stage: "synthesizing_plan",
+      specialists: specialists.length ? specialists : specialistSelections,
+    });
+
+    let planned: PlannerResult;
+    try {
+      planned = await runPlanner(ai, { ...sharedContext, diagnosis, critic, specialists });
+    } catch (err) {
+      console.warn(
+        "[reasoning-orchestrator] Planner stage failed or timed out; synthesizing from findings and specialists:",
+        err instanceof Error ? err.message : err,
+      );
+      const actionSteps = diagnosis.findings
+        .filter((f) => critic.acceptedFindingIds.includes(f.id))
+        .map((f) => f.recommendedAction);
+      const specialistSteps = specialists.flatMap((s) => s.priorities);
+      const fallbackSteps = unique([
+        ...actionSteps,
+        ...specialistSteps,
+        ...requestedNextSteps,
+      ]);
+      planned = {
+        summary: diagnosis.summary || "Synthesized plan based on accepted repository findings and specialist priorities.",
+        nextSteps: fallbackSteps.length ? fallbackSteps : ["Implement highest-priority accepted finding and verify in CI."],
+        risks: unique([...critic.regressionRisks, ...specialists.flatMap((s) => s.risks)], 12),
+        validation: unique([
+          ...diagnosis.findings.map((f) => f.validation),
+          ...specialists.flatMap((s) => s.validation),
+          "Require CI and deployment/runtime verification before treating changes as successful.",
+        ], 12),
+        stopConditions: ["Stop if validation cannot be observed or the repository base moves during execution."],
+        confidence: 45,
+      };
+    }
+
     const nextSteps = unique([
       ...planned.nextSteps,
       ...planned.validation.map((step) => `Validation requirement: ${step}`),
