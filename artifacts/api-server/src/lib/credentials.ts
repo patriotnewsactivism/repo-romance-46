@@ -154,6 +154,21 @@ export function platformAiStatus() {
   };
 }
 
+type ErrorLike = { code?: string; message?: string; details?: string; hint?: string };
+
+export function isProviderSchemaMissing(error: unknown): boolean {
+  const candidate = (error ?? {}) as ErrorLike;
+  const code = String(candidate.code || "").toUpperCase();
+  if (["42P01", "PGRST202", "PGRST205"].includes(code)) return true;
+  const text = [candidate.message, candidate.details, candidate.hint, error instanceof Error ? error.message : ""]
+    .filter(Boolean)
+    .join(" ");
+  return (
+    /ai_provider_credentials|repo_finisher_(?:store|read|delete)_ai_provider_secret/i.test(text) &&
+    /does not exist|schema cache|could not find|not found/i.test(text)
+  );
+}
+
 export async function loadStoredAiProviderSecretId(
   supabase: SupabaseClient,
   userId: string,
@@ -171,7 +186,7 @@ export async function loadStoredAiProviderSecretId(
     // During a rolling deploy the API may briefly start before the migration has
     // reached the database. Preserve the legacy read path for that specific
     // schema-missing case rather than turning every AI request into a 500.
-    if ((error as { code?: string }).code === "42P01") return null;
+    if (isProviderSchemaMissing(error)) return null;
     throw new Error(`Failed to load ${normalizedProvider} credential metadata: ${error.message}`);
   }
 

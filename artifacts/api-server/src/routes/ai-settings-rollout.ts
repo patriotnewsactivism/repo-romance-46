@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
 import {
+  isProviderSchemaMissing,
   loadAiCredential,
   loadStoredAiProviderSecretId,
   normalizeAiProvider,
@@ -31,19 +32,6 @@ type ExistingAiRow = {
 };
 
 type ProviderCredentialRow = { provider: string; vault_secret_id: string };
-
-type ErrorLike = { code?: string; message?: string; details?: string; hint?: string };
-
-function isProviderSchemaMissing(error: unknown): boolean {
-  const candidate = (error ?? {}) as ErrorLike;
-  const code = String(candidate.code || "").toUpperCase();
-  if (["42P01", "PGRST202", "PGRST205"].includes(code)) return true;
-  const text = [candidate.message, candidate.details, candidate.hint, error instanceof Error ? error.message : ""]
-    .filter(Boolean)
-    .join(" ");
-  return /ai_provider_credentials|repo_finisher_(?:store|read|delete)_ai_provider_secret/i.test(text)
-    && /does not exist|schema cache|could not find|not found/i.test(text);
-}
 
 async function providerSchemaAvailable(supabase: any): Promise<boolean> {
   const { error } = await supabase.from("ai_provider_credentials").select("provider").limit(1);

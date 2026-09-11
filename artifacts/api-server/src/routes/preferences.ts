@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
 import {
+  isProviderSchemaMissing,
   loadAiCredential,
   loadStoredAiProviderSecretId,
   normalizeAiProvider,
@@ -115,7 +116,7 @@ async function readProviderCredentialRows(
   if (error) {
     // Allow a rolling deploy to keep serving the legacy credential until the
     // migration reaches the database.
-    if ((error as { code?: string }).code === "42P01") return [];
+    if (isProviderSchemaMissing(error)) return [];
     throw new Error(`Failed to load provider credential metadata: ${error.message}`);
   }
 
@@ -158,7 +159,10 @@ async function saveProviderSecretReference(
       },
       { onConflict: "user_id,provider" },
     );
-  if (error) throw new Error(`Failed to save ${provider} credential reference: ${error.message}`);
+  if (error) {
+    if (isProviderSchemaMissing(error)) return;
+    throw new Error(`Failed to save ${provider} credential reference: ${error.message}`);
+  }
 }
 
 async function removeProviderSecretReference(
@@ -171,7 +175,10 @@ async function removeProviderSecretReference(
     .delete()
     .eq("user_id", userId)
     .eq("provider", provider);
-  if (error) throw new Error(`Failed to remove ${provider} credential reference: ${error.message}`);
+  if (error) {
+    if (isProviderSchemaMissing(error)) return;
+    throw new Error(`Failed to remove ${provider} credential reference: ${error.message}`);
+  }
 }
 
 async function storedProviderKey(
@@ -440,10 +447,15 @@ router.patch(
     ) as AiProvider;
 
     if ("custom_ai_key" in input) {
-      const existingProviderSecretId = await loadStoredAiProviderSecretId(req.supabase!, userId, targetProvider);
+      let existingProviderSecretId: string | null = null;
+      try {
+        existingProviderSecretId = await loadStoredAiProviderSecretId(req.supabase!, userId, targetProvider);
+      } catch (err) {
+        if (!isProviderSchemaMissing(err)) throw err;
+      }
       if (incomingKey === null || incomingKey === "") {
         if (existingProviderSecretId) {
-          await deleteAiVaultSecret(req.supabase!, userId, targetProvider, existingProviderSecretId);
+          await deleteAiVaultSecret(req.supabase!, userId, targetProvider, existingProviderSecretId).catch(() => undefined);
         }
         await removeProviderSecretReference(req.supabase!, userId, targetProvider);
       } else if (incomingKey !== undefined) {
@@ -460,7 +472,7 @@ router.patch(
           if (!existingProviderSecretId) {
             await deleteAiVaultSecret(req.supabase!, userId, targetProvider, vaultId).catch(() => undefined);
           }
-          throw error;
+          if (!isProviderSchemaMissing(error)) throw error;
         }
       }
     }

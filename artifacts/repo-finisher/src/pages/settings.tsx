@@ -205,7 +205,8 @@ export default function Settings() {
   const [filterLanguages, setFilterLanguages] = useState('');
   const [excludeArchived, setExcludeArchived] = useState(true);
   const [minStars, setMinStars] = useState('0');
-  const [maxRepos, setMaxRepos] = useState('');
+  const [maxRepos, setMaxRepos] = useState('1000');
+  const [filtersInitialized, setFiltersInitialized] = useState(false);
 
   useEffect(() => {
     getSession().then(session => {
@@ -214,16 +215,15 @@ export default function Settings() {
   }, [setLocation]);
 
   useEffect(() => {
-    if (preferences) {
-      setAiProvider(normalizeProvider(preferences.custom_ai_provider));
-      setAiKey('');
+    if (preferences && !filtersInitialized) {
       setAnalysisTier(preferences.analysis_tier || 'balanced');
       setFilterLanguages(preferences.filter_languages?.join(', ') || '');
       setExcludeArchived(preferences.filter_exclude_archived ?? true);
-      setMinStars(String(preferences.filter_min_stars || 0));
-      setMaxRepos(preferences.filter_max_repos ? String(preferences.filter_max_repos) : '');
+      setMinStars(String(preferences.filter_min_stars ?? 0));
+      setMaxRepos(preferences.filter_max_repos ? String(preferences.filter_max_repos) : '1000');
+      setFiltersInitialized(true);
     }
-  }, [preferences]);
+  }, [preferences, filtersInitialized]);
 
   const loadAiStatus = async () => {
     setAiStatusLoading(true);
@@ -242,9 +242,8 @@ export default function Settings() {
   };
 
   useEffect(() => {
-    if (preferences) void loadAiStatus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preferences]);
+    void loadAiStatus();
+  }, []);
 
   const loadOpenRouterModels = async () => {
     setOpenRouterModelsLoading(true);
@@ -274,20 +273,25 @@ export default function Settings() {
       .map(l => l.trim())
       .filter(Boolean);
 
+    const parsedMinStars = minStars.trim() !== '' && !isNaN(Number(minStars)) ? Math.max(0, parseInt(minStars, 10)) : 0;
+    const parsedMaxRepos = maxRepos ? Number(maxRepos) : 1000;
+
     updatePreferences.mutate(
       {
         data: {
           analysis_tier: analysisTier,
-          filter_languages: languagesArray.length > 0 ? languagesArray : undefined,
+          filter_languages: languagesArray,
           filter_exclude_archived: excludeArchived,
-          filter_min_stars: Number(minStars) || undefined,
-          filter_max_repos: maxRepos ? Number(maxRepos) : undefined,
+          filter_min_stars: parsedMinStars,
+          filter_max_repos: parsedMaxRepos,
         }
       },
       {
-        onSuccess: () => {
+        onSuccess: (updated) => {
           toast.success('Repository settings saved');
-          queryClient.invalidateQueries({ queryKey: getGetPreferencesQueryKey() });
+          if (updated) {
+            queryClient.setQueryData(getGetPreferencesQueryKey(), updated);
+          }
         },
         onError: (error) => {
           toast.error('Failed to save repository settings', { description: error.message });
@@ -314,7 +318,6 @@ export default function Settings() {
       setAiModel(saved.requested_model || '');
       setAiReasoningEffort(saved.requested_reasoning_effort || '');
       setAiKey('');
-      await queryClient.invalidateQueries({ queryKey: getGetPreferencesQueryKey() });
       toast.success(`${providerLabel(saved.active_provider)} settings saved`, {
         description: saved.configured
           ? `${credentialLabel(saved.credential_source)}${saved.active_model ? ` · ${saved.active_model}` : ''}`
@@ -344,7 +347,6 @@ export default function Settings() {
       });
       setAiStatus(saved);
       setAiKey('');
-      await queryClient.invalidateQueries({ queryKey: getGetPreferencesQueryKey() });
       toast.success('Stored API key removed');
     } catch (error) {
       toast.error('Failed to remove stored API key', {
@@ -876,6 +878,7 @@ export default function Settings() {
 
         <div className="flex justify-end">
           <Button
+            type="button"
             onClick={handleSave}
             disabled={updatePreferences.isPending}
             size="lg"

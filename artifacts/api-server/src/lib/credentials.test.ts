@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  isProviderSchemaMissing,
+  loadStoredAiProviderSecretId,
   normalizeAiProvider,
   platformAiKey,
   platformAiModel,
@@ -153,3 +155,67 @@ describe("blank platform credentials", () => {
     expect(platformAiKey("anthropic")).toBeNull();
   });
 });
+
+describe("isProviderSchemaMissing", () => {
+  it("recognizes postgres 42P01 table missing error", () => {
+    expect(isProviderSchemaMissing({ code: "42P01", message: "relation does not exist" })).toBe(true);
+  });
+
+  it("recognizes postgrest PGRST205 schema cache missing table error", () => {
+    expect(
+      isProviderSchemaMissing({
+        code: "PGRST205",
+        message: "Could not find the table 'public.ai_provider_credentials' in the schema cache",
+      }),
+    ).toBe(true);
+  });
+
+  it("recognizes postgrest PGRST202 schema cache missing function error", () => {
+    expect(
+      isProviderSchemaMissing({
+        code: "PGRST202",
+        message: "Could not find the function 'public.repo_finisher_store_ai_provider_secret' in the schema cache",
+      }),
+    ).toBe(true);
+  });
+
+  it("recognizes schema missing from descriptive error text", () => {
+    expect(
+      isProviderSchemaMissing(
+        new Error("Failed to load provider credential metadata: Could not find the table 'public.ai_provider_credentials' in the schema cache"),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not flag unrelated errors as schema missing", () => {
+    expect(isProviderSchemaMissing({ code: "42501", message: "permission denied" })).toBe(false);
+    expect(isProviderSchemaMissing(new Error("Connection timed out"))).toBe(false);
+    expect(isProviderSchemaMissing(null)).toBe(false);
+  });
+});
+
+describe("loadStoredAiProviderSecretId rolling deploy tolerance", () => {
+  it("returns null when ai_provider_credentials table is missing from schema cache", async () => {
+    const fakeSupabase = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: null,
+                error: {
+                  code: "PGRST205",
+                  message: "Could not find the table 'public.ai_provider_credentials' in the schema cache",
+                },
+              }),
+            }),
+          }),
+        }),
+      }),
+    };
+
+    const secretId = await loadStoredAiProviderSecretId(fakeSupabase as any, "user-123", "openrouter");
+    expect(secretId).toBeNull();
+  });
+});
+
