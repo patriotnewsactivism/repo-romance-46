@@ -11,6 +11,7 @@ import {
   DEFAULT_REQUEST_TIMEOUT_MS,
   FINAL_SYNTHESIS_TIMEOUT_MS,
 } from "../lib/ai-provider";
+import { parseModelJsonLenient } from "../lib/parse-model-json";
 import { captureException, flushSentry } from "../instrument";
 
 const router: IRouter = Router();
@@ -1762,13 +1763,75 @@ router.post(
   }),
 );
 
+export interface ActionPlanCachedState {
+  status: "not_started" | "running" | "completed" | "failed";
+  plan: Record<string, unknown> | null;
+  error: string | null;
+  updatedAt: string;
+}
+
+export const actionPlanStateCache = new Map<string, ActionPlanCachedState>();
+
+export function isActionPlanSchemaMissing(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const anyErr = err as { code?: string; message?: string; details?: string; hint?: string };
+  if (anyErr.code === "PGRST204" || anyErr.code === "PGRST205" || anyErr.code === "42703") {
+    return true;
+  }
+  const text = `${anyErr.message || ""} ${anyErr.details || ""} ${anyErr.hint || ""}`.toLowerCase();
+  return (
+    text.includes("action_plan") &&
+    (text.includes("column") ||
+      text.includes("schema cache") ||
+      text.includes("does not exist") ||
+      text.includes("could not find"))
+  );
+}
+
+async function saveActionPlanToInvestmentIntelligence(
+  supabase: SupabaseClient,
+  analysisId: string,
+  userId: string,
+  state: { status: string; plan: Record<string, unknown> | null; error: string | null },
+): Promise<void> {
+  try {
+    const { data: row } = await supabase
+      .from("analyses")
+      .select("investment_intelligence")
+      .eq("id", analysisId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const currentIntel =
+      row?.investment_intelligence && typeof row.investment_intelligence === "object"
+        ? (row.investment_intelligence as Record<string, unknown>)
+        : {};
+
+    const updatedIntel = {
+      ...currentIntel,
+      _action_plan: {
+        ...state,
+        updated_at: new Date().toISOString(),
+      },
+    };
+
+    await supabase
+      .from("analyses")
+      .update({ investment_intelligence: updatedIntel })
+      .eq("id", analysisId)
+      .eq("user_id", userId);
+  } catch (err) {
+    console.warn(`[action-plan ${analysisId}] failed to persist fallback to investment_intelligence:`, err);
+  }
+}
+
 // Action plan generation is a single LLM call over a potentially large
 // recommendation set — same class of "can outrun the gateway timeout" risk
 // as the main repo analysis, which already solved this via a fire-and-forget
 // background task + DB status column instead of blocking the request. This
 // mirrors that exact pattern (see startAnalysisJob above) rather than
 // inventing a new mechanism.
-async function runActionPlanJob(supabase: SupabaseClient, analysisId: string, userId: string): Promise<void> {
+export async function runActionPlanJob(supabase: SupabaseClient, analysisId: string, userId: string): Promise<void> {
   try {
     const { data: items, error: itemsErr } = await supabase
       .from("analysis_items")
@@ -1784,8 +1847,11 @@ async function runActionPlanJob(supabase: SupabaseClient, analysisId: string, us
 
     const recsText = items
       .map(
-        (r, i) =>
-          `${i + 1}. [${r.kind}] ${r.title} (effort: ${r.effort}/5, market: ${r.market_potential}/5)\n   Repos: ${(r.repos as string[]).join(", ")}\n   Pitch: ${r.pitch}\n   Next steps: ${(r.next_steps as string[]).join("; ")}`,
+        (r, i) => {
+          const reposStr = Array.isArray(r.repos) ? r.repos.join(", ") : String(r.repos ?? "");
+          const stepsStr = Array.isArray(r.next_steps) ? r.next_steps.join("; ") : String(r.next_steps ?? "");
+          return `${i + 1}. [${r.kind}] ${r.title} (effort: ${r.effort}/5, market: ${r.market_potential}/5)\n   Repos: ${reposStr}\n   Pitch: ${r.pitch || ""}\n   Next steps: ${stepsStr}`;
+        },
       )
       .join("\n\n");
 
@@ -1819,29 +1885,64 @@ Sequence phases from quick wins (low effort, high impact) to moonshots. Group re
           { role: "system", content: "You are a helpful product strategist assistant. Always respond with valid JSON." },
           { role: "user", content: prompt },
         ],
+        timeoutMs: 60_000,
       },
       aiConfig,
     );
 
-    const plan = JSON.parse(result.content || "{}");
+    const parsed = parseModelJsonLenient(result.content || "{}");
+    const plan = (parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}) as Record<string, unknown>;
 
-    await supabase
+    actionPlanStateCache.set(`${userId}:${analysisId}`, {
+      status: "completed",
+      plan,
+      error: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const { error: updateErr } = await supabase
       .from("analyses")
       .update({ action_plan: plan, action_plan_status: "completed", action_plan_error: null, action_plan_updated_at: new Date().toISOString() })
       .eq("id", analysisId)
       .eq("user_id", userId);
+
+    if (updateErr && isActionPlanSchemaMissing(updateErr)) {
+      await saveActionPlanToInvestmentIntelligence(supabase, analysisId, userId, {
+        status: "completed",
+        plan,
+        error: null,
+      });
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Action plan generation failed";
     console.error(`[action-plan ${analysisId}] failed:`, msg);
+
+    actionPlanStateCache.set(`${userId}:${analysisId}`, {
+      status: "failed",
+      plan: null,
+      error: msg,
+      updatedAt: new Date().toISOString(),
+    });
+
     captureException(e, {
       tags: { subsystem: "action-plan", analysis_id: analysisId },
       extra: { message: msg },
     });
-    await supabase
+
+    const { error: failErr } = await supabase
       .from("analyses")
       .update({ action_plan_status: "failed", action_plan_error: msg, action_plan_updated_at: new Date().toISOString() })
       .eq("id", analysisId)
       .eq("user_id", userId);
+
+    if (failErr && isActionPlanSchemaMissing(failErr)) {
+      await saveActionPlanToInvestmentIntelligence(supabase, analysisId, userId, {
+        status: "failed",
+        plan: null,
+        error: msg,
+      }).catch(() => {});
+    }
+
     await flushSentry();
   }
 }
@@ -1853,32 +1954,92 @@ router.post(
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     const userId = req.userId!;
 
+    let currentStatus: "not_started" | "running" | "completed" | "failed" = "not_started";
+    let currentPlan: Record<string, unknown> | null = null;
+    let schemaMissing = false;
+
     const { data: existing, error: existingErr } = await req.supabase!
       .from("analyses")
       .select("action_plan, action_plan_status")
       .eq("id", id)
       .eq("user_id", userId)
       .maybeSingle();
-    if (existingErr) throw new Error(existingErr.message);
-    if (!existing) throw Object.assign(new Error("Analysis not found"), { status: 404 });
+
+    if (existingErr) {
+      if (isActionPlanSchemaMissing(existingErr)) {
+        schemaMissing = true;
+        const { data: row, error: rowErr } = await req.supabase!
+          .from("analyses")
+          .select("id, investment_intelligence")
+          .eq("id", id)
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (rowErr) throw new Error(rowErr.message);
+        if (!row) throw Object.assign(new Error("Analysis not found"), { status: 404 });
+
+        const cached = actionPlanStateCache.get(`${userId}:${id}`);
+        if (cached) {
+          currentStatus = cached.status;
+          currentPlan = cached.plan;
+        } else if (
+          row.investment_intelligence &&
+          typeof row.investment_intelligence === "object" &&
+          (row.investment_intelligence as any)._action_plan
+        ) {
+          const fallback = (row.investment_intelligence as any)._action_plan;
+          currentStatus = fallback.status || "not_started";
+          currentPlan = fallback.plan || null;
+        }
+      } else {
+        throw new Error(existingErr.message);
+      }
+    } else {
+      if (!existing) throw Object.assign(new Error("Analysis not found"), { status: 404 });
+      currentStatus = (existing.action_plan_status as any) || "not_started";
+      currentPlan = (existing.action_plan as any) || null;
+
+      // Check cache in case cache has fresher state
+      const cached = actionPlanStateCache.get(`${userId}:${id}`);
+      if (cached && currentStatus === "not_started") {
+        currentStatus = cached.status;
+        currentPlan = cached.plan;
+      }
+    }
 
     // Already generated — return the cached result instantly, no re-run.
-    if (existing.action_plan_status === "completed" && existing.action_plan) {
-      res.json({ status: "completed", plan: existing.action_plan, error: null });
+    if (currentStatus === "completed" && currentPlan) {
+      res.json({ status: "completed", plan: currentPlan, error: null });
       return;
     }
     // Already in flight — don't kick off a second concurrent LLM call.
-    if (existing.action_plan_status === "running") {
+    if (currentStatus === "running") {
       res.json({ status: "running", plan: null, error: null });
       return;
     }
 
-    const { error: markErr } = await req.supabase!
-      .from("analyses")
-      .update({ action_plan_status: "running", action_plan_error: null, action_plan_updated_at: new Date().toISOString() })
-      .eq("id", id)
-      .eq("user_id", userId);
-    if (markErr) throw new Error(markErr.message);
+    actionPlanStateCache.set(`${userId}:${id}`, {
+      status: "running",
+      plan: null,
+      error: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    if (!schemaMissing) {
+      const { error: markErr } = await req.supabase!
+        .from("analyses")
+        .update({ action_plan_status: "running", action_plan_error: null, action_plan_updated_at: new Date().toISOString() })
+        .eq("id", id)
+        .eq("user_id", userId);
+      if (markErr && !isActionPlanSchemaMissing(markErr)) {
+        throw new Error(markErr.message);
+      }
+    } else {
+      await saveActionPlanToInvestmentIntelligence(req.supabase!, id, userId, {
+        status: "running",
+        plan: null,
+        error: null,
+      }).catch(() => {});
+    }
 
     runInBackground(runActionPlanJob(req.supabase!, id, userId), "action-plan-job");
 
@@ -1899,8 +2060,64 @@ router.get(
       .eq("id", id)
       .eq("user_id", userId)
       .maybeSingle();
-    if (error) throw new Error(error.message);
+
+    if (error) {
+      if (isActionPlanSchemaMissing(error)) {
+        const cached = actionPlanStateCache.get(`${userId}:${id}`);
+        if (cached) {
+          res.json({
+            status: cached.status,
+            plan: cached.plan,
+            error: cached.error,
+          });
+          return;
+        }
+
+        const { data: row, error: rowErr } = await req.supabase!
+          .from("analyses")
+          .select("id, investment_intelligence")
+          .eq("id", id)
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (rowErr) throw new Error(rowErr.message);
+        if (!row) throw Object.assign(new Error("Analysis not found"), { status: 404 });
+
+        if (
+          row.investment_intelligence &&
+          typeof row.investment_intelligence === "object" &&
+          (row.investment_intelligence as any)._action_plan
+        ) {
+          const fallback = (row.investment_intelligence as any)._action_plan;
+          res.json({
+            status: fallback.status ?? "not_started",
+            plan: fallback.plan ?? null,
+            error: fallback.error ?? null,
+          });
+          return;
+        }
+
+        res.json({
+          status: "not_started",
+          plan: null,
+          error: null,
+        });
+        return;
+      }
+      throw new Error(error.message);
+    }
+
     if (!data) throw Object.assign(new Error("Analysis not found"), { status: 404 });
+
+    const cached = actionPlanStateCache.get(`${userId}:${id}`);
+    const dbStatus = data.action_plan_status ?? "not_started";
+    if (dbStatus === "not_started" && cached && cached.status !== "not_started") {
+      res.json({
+        status: cached.status,
+        plan: cached.plan ?? data.action_plan ?? null,
+        error: cached.error ?? data.action_plan_error ?? null,
+      });
+      return;
+    }
 
     res.json({
       status: data.action_plan_status ?? "not_started",

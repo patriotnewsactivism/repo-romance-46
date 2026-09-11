@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getStageModels, profilingTimeoutMs } from "./analysis";
+import { getStageModels, profilingTimeoutMs, isActionPlanSchemaMissing, actionPlanStateCache } from "./analysis";
 import { DEFAULT_REQUEST_TIMEOUT_MS } from "../lib/ai-provider";
 
 describe("getStageModels", () => {
@@ -85,3 +85,73 @@ describe("profilingTimeoutMs", () => {
     expect(profilingTimeoutMs(2)).toBe(DEFAULT_REQUEST_TIMEOUT_MS + 15000);
   });
 });
+
+describe("isActionPlanSchemaMissing", () => {
+  it("detects PostgREST PGRST204 missing column error", () => {
+    expect(
+      isActionPlanSchemaMissing({
+        code: "PGRST204",
+        message: "Could not find the 'action_plan' column of 'analyses' in the schema cache",
+      }),
+    ).toBe(true);
+  });
+
+  it("detects PostgREST PGRST205 missing table/column error", () => {
+    expect(isActionPlanSchemaMissing({ code: "PGRST205", message: "schema cache lookup failed" })).toBe(true);
+  });
+
+  it("detects PostgreSQL 42703 undefined_column error", () => {
+    expect(
+      isActionPlanSchemaMissing({
+        code: "42703",
+        message: 'column "action_plan" does not exist',
+      }),
+    ).toBe(true);
+  });
+
+  it("detects error message mentioning action_plan and schema cache or column", () => {
+    expect(
+      isActionPlanSchemaMissing({
+        message: "Could not find the 'action_plan_status' column of 'analyses' in the schema cache",
+      }),
+    ).toBe(true);
+  });
+
+  it("does not false-positive on other unrelated errors", () => {
+    expect(isActionPlanSchemaMissing(null)).toBe(false);
+    expect(isActionPlanSchemaMissing(undefined)).toBe(false);
+    expect(isActionPlanSchemaMissing(new Error("Connection reset by peer"))).toBe(false);
+    expect(isActionPlanSchemaMissing({ code: "23505", message: "duplicate key value violates unique constraint" })).toBe(false);
+    expect(isActionPlanSchemaMissing({ message: "Analysis not found" })).toBe(false);
+  });
+});
+
+describe("actionPlanStateCache", () => {
+  it("stores and retrieves state by key", () => {
+    const key = "user-1:analysis-1";
+    actionPlanStateCache.set(key, {
+      status: "running",
+      plan: null,
+      error: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const cached = actionPlanStateCache.get(key);
+    expect(cached?.status).toBe("running");
+    expect(cached?.plan).toBeNull();
+
+    actionPlanStateCache.set(key, {
+      status: "completed",
+      plan: { total_weeks: 4, phases: [] },
+      error: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const updated = actionPlanStateCache.get(key);
+    expect(updated?.status).toBe("completed");
+    expect(updated?.plan?.total_weeks).toBe(4);
+
+    actionPlanStateCache.delete(key);
+  });
+});
+

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect } from 'react';
 import { useStartActionPlan, useGetActionPlanStatus, getGetActionPlanStatusQueryKey } from '@workspace/api-client-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,39 +11,75 @@ interface ActionPlanViewProps {
 }
 
 // Generation runs in the background on the server (see analysis.ts /
-// action-plan route) so a slow model can't 504 the request — this just
-// kicks the job off, then polls for the result instead of blocking on it.
+// action-plan route) so a slow model can't 504 the request — this kicks
+// the job off, then polls for the result instead of blocking on it.
 export function ActionPlanView({ analysisId }: ActionPlanViewProps) {
-  const [requested, setRequested] = useState(false);
   const startActionPlan = useStartActionPlan();
   const statusQuery = useGetActionPlanStatus(analysisId, {
     query: {
       queryKey: getGetActionPlanStatusQueryKey(analysisId),
-      enabled: requested,
       refetchInterval: (query) => (query.state.data?.status === 'running' ? 2000 : false),
     },
   });
 
+  const status = statusQuery.data?.status;
+
+  useEffect(() => {
+    if (status === 'failed' && statusQuery.data?.error) {
+      toast.error('Failed to generate action plan', { description: statusQuery.data.error });
+    }
+  }, [status, statusQuery.data?.error]);
+
   const handleGenerate = () => {
-    setRequested(true);
     startActionPlan.mutate(
       { id: analysisId },
       {
+        onSuccess: () => {
+          statusQuery.refetch();
+        },
         onError: (error) => {
           toast.error('Failed to generate action plan', { description: error.message });
-          setRequested(false);
         },
       }
     );
   };
 
-  const status = statusQuery.data?.status;
-
-  if (status === 'failed') {
-    toast.error('Failed to generate action plan', { description: statusQuery.data?.error ?? undefined });
+  if (statusQuery.isLoading) {
+    return (
+      <Card>
+        <CardContent className="pt-12 pb-12 text-center space-y-4">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto" />
+          <p className="text-muted-foreground">Checking action plan status...</p>
+        </CardContent>
+      </Card>
+    );
   }
 
-  if (!requested) {
+  if (startActionPlan.isPending || status === 'running') {
+    return (
+      <Card>
+        <CardContent className="pt-12 pb-12 text-center space-y-4">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto" />
+          <p className="text-muted-foreground">Generating your phased action plan...</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (status === 'failed') {
+    return (
+      <Card>
+        <CardContent className="pt-12 pb-12 text-center space-y-4">
+          <p className="text-muted-foreground">{statusQuery.data?.error ?? 'Action plan generation failed.'}</p>
+          <Button type="button" onClick={handleGenerate} variant="outline" data-testid="button-retry-action-plan">
+            Try again
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!status || status === 'not_started' || !statusQuery.data?.plan) {
     return (
       <Card>
         <CardHeader className="text-center">
@@ -58,41 +94,13 @@ export function ActionPlanView({ analysisId }: ActionPlanViewProps) {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex justify-center">
-          <Button onClick={handleGenerate} size="lg" data-testid="button-generate-action-plan">
+          <Button type="button" onClick={handleGenerate} size="lg" data-testid="button-generate-action-plan" disabled={startActionPlan.isPending}>
             <Sparkles className="w-4 h-4 mr-2" />
             Generate Plan
           </Button>
         </CardContent>
       </Card>
     );
-  }
-
-  if (status === 'failed') {
-    return (
-      <Card>
-        <CardContent className="pt-12 pb-12 text-center space-y-4">
-          <p className="text-muted-foreground">{statusQuery.data?.error ?? 'Action plan generation failed.'}</p>
-          <Button onClick={handleGenerate} variant="outline" data-testid="button-retry-action-plan">
-            Try again
-          </Button>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (startActionPlan.isPending || !status || status === 'running' || status === 'not_started') {
-    return (
-      <Card>
-        <CardContent className="pt-12 pb-12 text-center space-y-4">
-          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto" />
-          <p className="text-muted-foreground">Generating your phased action plan...</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (!statusQuery.data?.plan) {
-    return null;
   }
 
   const plan = statusQuery.data.plan;
