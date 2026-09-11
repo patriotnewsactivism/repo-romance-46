@@ -4,6 +4,7 @@ import {
   OPENROUTER_FREE_AGENT_CHAIN,
   OPENROUTER_PAID_AGENT_CHAIN,
   callAI,
+  providerRequestError,
   FINAL_SYNTHESIS_TIMEOUT_MS,
   resolveAIRequestTimeoutMs,
   sanitizeGeminiResponseSchema,
@@ -396,5 +397,40 @@ describe("Google structured-output compatibility", () => {
     expect(error!.code).toBe("AI_PROVIDER_ERROR");
     expect(error!.publicMessage).toMatch(/gemini-3\.7-flash/);
     expect(error!.publicMessage).not.toMatch(/schema rejected/);
+  });
+
+  it("parses OpenRouter 402 insufficient credits and returns clean message with payment required code", () => {
+    const rawError = JSON.stringify({
+      error: {
+        message: "Insufficient credits. Add more using https://openrouter.ai/settings/credits",
+        code: 402,
+        metadata: { limit_source: "openrouter_credits", remedy_hint: "Add credits at https://openrouter.ai/settings/credits" },
+      },
+    });
+
+    const err = providerRequestError("openrouter", "openai/gpt-oss-120b", 402, rawError);
+    expect(err.status).toBe(402);
+    expect(err.code).toBe("AI_PROVIDER_PAYMENT_REQUIRED");
+    expect(err.message).toBe(
+      'OpenRouter API error 402 for model "openai/gpt-oss-120b": Insufficient credits. Add more using https://openrouter.ai/settings/credits',
+    );
+    expect(err.publicMessage).toContain("credits exhausted");
+    expect(err.publicMessage).toContain("https://openrouter.ai/settings/credits");
+  });
+
+  it("parses 401 unauthorized errors with specific code and message", () => {
+    const rawError = JSON.stringify({
+      error: {
+        message: "Invalid API key provided",
+      },
+    });
+
+    const err = providerRequestError("openrouter", "nex-agi/nex-n2.5-mini:free", 401, rawError);
+    expect(err.status).toBe(401);
+    expect(err.code).toBe("AI_PROVIDER_UNAUTHORIZED");
+    expect(err.message).toBe(
+      'OpenRouter API error 401 for model "nex-agi/nex-n2.5-mini:free": Invalid API key provided',
+    );
+    expect(err.publicMessage).toContain("rejected the configured credential");
   });
 });

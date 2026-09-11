@@ -131,24 +131,59 @@ function providerDisplayName(provider: string) {
   return provider;
 }
 
-function providerRequestError(provider: string, model: string, status: number, detail: string): PublicHttpError {
+export function providerRequestError(provider: string, model: string, status: number, detail: string): PublicHttpError {
   const display = providerDisplayName(provider);
+
+  let cleanDetail = "";
+  try {
+    const parsed = JSON.parse(detail);
+    if (typeof parsed?.error?.message === "string") {
+      cleanDetail = parsed.error.message;
+    } else if (typeof parsed?.message === "string") {
+      cleanDetail = parsed.message;
+    }
+  } catch {}
+
+  const textToInspect = `${cleanDetail} ${detail}`.toLowerCase();
+  const isPaymentRequired =
+    status === 402 ||
+    textToInspect.includes("insufficient credits") ||
+    textToInspect.includes("exceeded your current quota") ||
+    textToInspect.includes("openrouter_credits");
+  const isUnauthorized =
+    status === 401 ||
+    (status === 403 &&
+      (textToInspect.includes("api key") || textToInspect.includes("unauthorized") || textToInspect.includes("permission")));
+
   let publicMessage: string;
-  if (status === 400) {
+  let code = "AI_PROVIDER_ERROR";
+  let httpStatus = 502;
+
+  if (isPaymentRequired) {
+    httpStatus = 402;
+    code = "AI_PROVIDER_PAYMENT_REQUIRED";
+    publicMessage = `${display} credits exhausted for model "${model}" (HTTP 402). Add credits at https://openrouter.ai/settings/credits or choose another configured provider in Settings.`;
+  } else if (isUnauthorized) {
+    httpStatus = 401;
+    code = "AI_PROVIDER_UNAUTHORIZED";
+    publicMessage = `${display} rejected the configured credential for model "${model}" (HTTP ${status}). Re-save the provider key in Settings or fix the server-side provider credential.`;
+  } else if (status === 400) {
     publicMessage = `${display} rejected the AI request for model "${model}". Verify that the configured model supports the requested structured-output features, then retry.`;
-  } else if (status === 401 || status === 403) {
-    publicMessage = `${display} rejected the configured credential for model "${model}". Re-save the provider key in Settings or fix the server-side provider credential.`;
   } else if (status === 429) {
+    httpStatus = 429;
+    code = "AI_PROVIDER_RATE_LIMITED";
     publicMessage = `${display} rate-limited model "${model}". Retry shortly or choose another configured model/provider.`;
   } else {
     publicMessage = `${display} failed while running model "${model}" (upstream HTTP ${status}). Retry or choose another configured model/provider.`;
   }
 
+  const effectiveDetail = cleanDetail || detail.slice(0, 300);
+
   return Object.assign(
-    new Error(`${display} API error ${status} for model "${model}": ${detail.slice(0, 300)}`),
+    new Error(`${display} API error ${status} for model "${model}": ${effectiveDetail}`),
     {
-      status: 502,
-      code: "AI_PROVIDER_ERROR",
+      status: httpStatus,
+      code,
       publicMessage,
     },
   );

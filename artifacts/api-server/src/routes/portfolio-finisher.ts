@@ -118,6 +118,32 @@ function stringList(value: unknown, max = 25) {
   return value.map(String).map((item) => item.trim()).filter(Boolean).slice(0, max);
 }
 
+export function isSystemicProviderError(error: unknown): boolean {
+  if (!error) return false;
+  const anyErr = error as { code?: string; status?: number; message?: string };
+  if (
+    anyErr.code === "AI_PROVIDER_PAYMENT_REQUIRED" ||
+    anyErr.code === "AI_PROVIDER_UNAUTHORIZED" ||
+    anyErr.code === "AI_PROVIDER_UNCONFIGURED"
+  ) {
+    return true;
+  }
+  if (anyErr.status === 402 || anyErr.status === 401) {
+    return true;
+  }
+  const text = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    text.includes("402") ||
+    text.includes("insufficient credits") ||
+    text.includes("openrouter_credits") ||
+    text.includes("401") ||
+    text.includes("unauthorized") ||
+    text.includes("ai_provider_payment_required") ||
+    text.includes("ai_provider_unauthorized") ||
+    text.includes("ai_provider_unconfigured")
+  );
+}
+
 async function recordCompletionEvent(
   supabase: SupabaseClient,
   userId: string,
@@ -469,6 +495,16 @@ async function processPortfolioItem(
         { portfolioRunId: portfolioRun.id },
       ).catch(() => undefined);
     }
+
+    if (isSystemicProviderError(error)) {
+      const cancelReason = "Cancelled: AI provider credits or credentials exhausted. Check provider balance or update Settings.";
+      await supabase
+        .from("portfolio_completion_items")
+        .update({ status: "cancelled", error: cancelReason, completed_at: completedAt, updated_at: completedAt })
+        .eq("portfolio_run_id", portfolioRun.id)
+        .eq("user_id", userId)
+        .eq("status", "queued");
+    }
   }
 }
 
@@ -643,6 +679,32 @@ async function processPortfolioRun(supabase: SupabaseClient, userId: string, run
         .eq("id", runId)
         .eq("user_id", userId)
         .eq("worker_token", lease.workerToken);
+
+      // Systemic error circuit breaker: stop immediately if any item failed due to credit/auth exhaustion
+      const { data: failedItems } = await supabase
+        .from("portfolio_completion_items")
+        .select("error")
+        .eq("portfolio_run_id", runId)
+        .eq("user_id", userId)
+        .eq("status", "failed");
+
+      const hasSystemic = (failedItems ?? []).some((i) => isSystemicProviderError((i as Record<string, unknown>).error));
+      if (hasSystemic) {
+        const cancelNow = new Date().toISOString();
+        await supabase
+          .from("portfolio_completion_items")
+          .update({
+            status: "cancelled",
+            error: "Cancelled: AI provider credits or credentials exhausted. Check provider balance or update Settings.",
+            completed_at: cancelNow,
+            updated_at: cancelNow,
+          })
+          .eq("portfolio_run_id", runId)
+          .eq("user_id", userId)
+          .eq("status", "queued");
+        await refreshPortfolioSummary(supabase, userId, portfolioRun);
+        break;
+      }
     }
 
     portfolioRun = await loadPortfolioRun(supabase, userId, runId);
@@ -688,6 +750,12 @@ async function portfolioRunResponse(supabase: SupabaseClient, userId: string, ru
     }
   }
 
+  const itemList = ((items ?? []) as PortfolioItemRow[]);
+  const liveSucceeded = itemList.filter((item) => item.status === "succeeded").length;
+  const liveFailed = itemList.filter((item) => item.status === "failed").length;
+  const liveVerifying = itemList.filter((item) => item.status === "verifying").length;
+  const liveSkipped = itemList.filter((item) => item.status === "skipped" || item.status === "cancelled").length;
+
   return {
     run: {
       id: run.id,
@@ -700,10 +768,10 @@ async function portfolioRunResponse(supabase: SupabaseClient, userId: string, ru
       stopOnFailure: run.stop_on_failure,
       requestedCount: run.requested_count,
       plannedCount: run.planned_count,
-      succeededCount: run.succeeded_count,
-      failedCount: run.failed_count,
-      verifyingCount: run.verifying_count,
-      skippedCount: run.skipped_count,
+      succeededCount: Math.max(run.succeeded_count, liveSucceeded),
+      failedCount: Math.max(run.failed_count, liveFailed),
+      verifyingCount: liveVerifying,
+      skippedCount: Math.max(run.skipped_count, liveSkipped),
       estimatedHoursSelected: run.estimated_hours_selected,
       estimatedCostSelected: run.estimated_cost_selected,
       autonomyAcknowledgedAt: run.autonomy_acknowledged_at,
@@ -712,7 +780,7 @@ async function portfolioRunResponse(supabase: SupabaseClient, userId: string, ru
       createdAt: run.created_at,
       updatedAt: run.updated_at,
     },
-    items: ((items ?? []) as PortfolioItemRow[]).map((item) => {
+    items: itemList.map((item) => {
       const completion = item.completion_run_id ? completionById.get(item.completion_run_id) : null;
       return {
         id: item.id,

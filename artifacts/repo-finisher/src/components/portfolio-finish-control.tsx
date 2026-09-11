@@ -106,16 +106,28 @@ export function PortfolioFinishControl({ analysisId, repoCount }: { analysisId: 
   const isActive = Boolean(run && ACTIVE.has(run.run.status));
   const selectedLabel = selection === 'all' ? `all ${repoCount}` : `top ${Math.min(Number(selection), repoCount)}`;
 
+  const failedCount = useMemo(() => {
+    if (!run) return 0;
+    const fromItems = run.items.filter((i) => i.status === 'failed').length;
+    return Math.max(run.run.failedCount, fromItems);
+  }, [run]);
+
+  const succeededCount = useMemo(() => {
+    if (!run) return 0;
+    const fromItems = run.items.filter((i) => i.status === 'succeeded').length;
+    return Math.max(run.run.succeededCount, fromItems);
+  }, [run]);
+
   const progress = useMemo(() => {
     if (!run || run.run.plannedCount <= 0) return 0;
-    const finished = run.run.succeededCount + run.run.failedCount;
+    const finished = succeededCount + failedCount;
     return Math.min(100, Math.round((finished / run.run.plannedCount) * 100));
-  }, [run]);
+  }, [run, succeededCount, failedCount]);
 
   const refresh = async (runId: string) => {
     try {
       let detail = await customFetch<PortfolioRunResponse>(`/api/repo-finisher/portfolio-runs/${runId}`, { responseType: 'json' });
-      if (detail.items.some((item) => item.status === 'failed' && item.completionRunId)) {
+      if (detail.items.some((item) => item.status === 'failed' && item.completionRunId && item.ciStatus === 'failed')) {
         const heal = await postJson<PortfolioHealResponse>(`/api/repo-finisher/portfolio-runs/${runId}/self-heal`).catch(() => null);
         if (heal && heal.scheduled > 0) {
           detail = await customFetch<PortfolioRunResponse>(`/api/repo-finisher/portfolio-runs/${runId}`, { responseType: 'json' });
@@ -256,9 +268,9 @@ export function PortfolioFinishControl({ analysisId, repoCount }: { analysisId: 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
             <div className="rounded border p-2"><div className="text-[11px] text-muted-foreground">Status</div><div className="font-medium capitalize">{run.run.status.replace('_', ' ')}</div></div>
             <div className="rounded border p-2"><div className="text-[11px] text-muted-foreground">Planned</div><div className="font-medium">{run.run.plannedCount}</div></div>
-            <div className="rounded border p-2"><div className="text-[11px] text-muted-foreground">Succeeded</div><div className="font-medium text-emerald-500">{run.run.succeededCount}</div></div>
+            <div className="rounded border p-2"><div className="text-[11px] text-muted-foreground">Succeeded</div><div className="font-medium text-emerald-500">{succeededCount}</div></div>
             <div className="rounded border p-2"><div className="text-[11px] text-muted-foreground">Verifying</div><div className="font-medium">{run.run.verifyingCount}</div></div>
-            <div className="rounded border p-2"><div className="text-[11px] text-muted-foreground">Failed</div><div className="font-medium text-red-500">{run.run.failedCount}</div></div>
+            <div className="rounded border p-2"><div className="text-[11px] text-muted-foreground">Failed</div><div className="font-medium text-red-500">{failedCount}</div></div>
             <div className="rounded border p-2"><div className="text-[11px] text-muted-foreground">Est. hours</div><div className="font-medium">{Math.round(run.run.estimatedHoursSelected)}</div></div>
             <div className="rounded border p-2"><div className="text-[11px] text-muted-foreground">Est. cost</div><div className="font-medium">{money(run.run.estimatedCostSelected)}</div></div>
           </div>
