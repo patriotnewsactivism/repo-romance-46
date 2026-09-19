@@ -1,9 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { runInBackground } from "./background-tasks";
-import { dispatchCompletionSessionJob } from "./cloud-run-jobs";
 import { processCompletionSession } from "./completion-session-worker";
 
-export type CompletionWorkerMode = "cloud-run-job" | "in-process" | "already-running";
+export type CompletionWorkerMode =
+  | "railway-worker"
+  | "in-process"
+  | "already-running";
 
 async function recentlyActive(supabase: SupabaseClient, userId: string, sessionId: string) {
   const { data, error } = await supabase
@@ -19,17 +21,19 @@ async function recentlyActive(supabase: SupabaseClient, userId: string, sessionI
   const leaseUntil = data.lease_expires_at ? new Date(String(data.lease_expires_at)).getTime() : 0;
   if (data.worker_token && Number.isFinite(leaseUntil) && leaseUntil > now) return true;
 
-  // A Cloud Run Job releases the row-level lease between polling cycles. Treat a
-  // very recent heartbeat as ownership too so ordinary UI polling does not spawn
-  // duplicate paid job executions during that small gap.
   const heartbeat = data.heartbeat_at ? new Date(String(data.heartbeat_at)).getTime() : 0;
   return Number.isFinite(heartbeat) && heartbeat > now - 30_000;
 }
 
+function workerMode() {
+  return String(process.env.REPOFINISHER_WORKER_MODE || "").trim().toLowerCase();
+}
+
 /**
- * Dispatch completion-session work to Cloud Run Jobs when the production worker
- * plane is configured. Local development and unconfigured deployments retain a
- * safe in-process fallback so the product remains usable during migration.
+ * Railway production uses a persistent worker service that polls durable
+ * completion-session state in Supabase. The API only needs to leave the session
+ * active/queued; the worker claims it using the existing row lease/heartbeat
+ * contract. Local development keeps the in-process fallback.
  */
 export async function scheduleCompletionSession(
   supabase: SupabaseClient,
@@ -38,17 +42,9 @@ export async function scheduleCompletionSession(
 ): Promise<CompletionWorkerMode> {
   if (await recentlyActive(supabase, userId, sessionId)) return "already-running";
 
-  try {
-    if (await dispatchCompletionSessionJob(userId, sessionId)) return "cloud-run-job";
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(JSON.stringify({
-      level: "error",
-      event: "completion_session_job_dispatch_failed",
-      sessionId,
-      message,
-      fallback: "in-process",
-    }));
+  const mode = workerMode();
+  if (mode === "railway-persistent" || mode === "railway-worker" || mode === "persistent") {
+    return "railway-worker";
   }
 
   runInBackground(processCompletionSession(supabase, userId, sessionId), `completion-session:${sessionId}`);
