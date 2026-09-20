@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getStageModels, profilingTimeoutMs, isActionPlanSchemaMissing, actionPlanStateCache } from "./analysis";
+import { ANALYSIS_BATCH_REQUEST_TIMEOUT_MS, aiBatchConcurrency, analysisBatchTimeoutMs, getStageModels, profilingTimeoutMs, isActionPlanSchemaMissing, actionPlanStateCache } from "./analysis";
 import { DEFAULT_REQUEST_TIMEOUT_MS } from "../lib/ai-provider";
 
 describe("getStageModels", () => {
@@ -11,7 +11,7 @@ describe("getStageModels", () => {
     for (const tier of ["fast", "balanced", "deep"]) {
       const stages = getStageModels("openrouter", tier);
       for (const model of [stages.profilerModel, stages.critiqueModel, stages.synthesisModel]) {
-        expect(model).toBe("minimax/minimax-m3:free");
+        expect(model).toBe("nex-agi/nex-n2.5-mini:free");
         expect(model).toContain("/");
       }
     }
@@ -83,6 +83,27 @@ describe("profilingTimeoutMs", () => {
   it("never drops below the floor for small portfolios", () => {
     expect(profilingTimeoutMs(0)).toBe(DEFAULT_REQUEST_TIMEOUT_MS + 15000);
     expect(profilingTimeoutMs(2)).toBe(DEFAULT_REQUEST_TIMEOUT_MS + 15000);
+  });
+});
+
+
+describe("OpenRouter portfolio batch runtime", () => {
+  it("limits OpenRouter analysis concurrency to two heavy requests", () => {
+    expect(aiBatchConcurrency("openrouter")).toBe(2);
+  });
+
+  it("gives each heavy analysis request the full 120 second provider budget", () => {
+    expect(ANALYSIS_BATCH_REQUEST_TIMEOUT_MS).toBe(120000);
+  });
+
+  it("budgets both retry attempts across all OpenRouter waves", () => {
+    // Six batches at concurrency two means three waves. Each wave can consume
+    // two 120s attempts plus retry/orchestration margin.
+    expect(analysisBatchTimeoutMs(6, 2)).toBe(810000);
+  });
+
+  it("keeps the outer analysis stage below the 25 minute job ceiling", () => {
+    expect(analysisBatchTimeoutMs(100, 2)).toBeLessThanOrEqual(900000);
   });
 });
 
