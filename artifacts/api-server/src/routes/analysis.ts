@@ -16,6 +16,12 @@ import { captureException, flushSentry } from "../instrument";
 
 const router: IRouter = Router();
 
+// Portfolio analysis produces much larger prompts and outputs than the small
+// provider readiness check. OpenRouter reasoning models can legitimately take
+// longer than the generic 45s request budget, especially when several batches
+// are queued at once.
+export const ANALYSIS_BATCH_REQUEST_TIMEOUT_MS = 120_000;
+
 const GH_API = "https://api.github.com";
 
 async function gh<T>(path: string, token: string): Promise<T> {
@@ -789,6 +795,7 @@ async function callBatchedAI(
         { role: "user", content: user },
       ],
       responseFormat: { type: "json_schema", json_schema: { name: "recommendations", strict: true, schema: AI_JSON_SCHEMA } },
+      timeoutMs: ANALYSIS_BATCH_REQUEST_TIMEOUT_MS,
     },
     aiConfig,
   );
@@ -820,13 +827,30 @@ async function callBatchedAIWithRetry(
   throw lastErr instanceof Error ? lastErr : new Error("AI batch failed");
 }
 
-function aiBatchConcurrency(provider: string): number {
+export function aiBatchConcurrency(provider: string): number {
   switch (provider) {
-    case "github_models": return 2;
+    case "github_models":
+    case "openrouter":
+      // Large OpenRouter portfolio prompts can queue behind provider capacity.
+      // Five concurrent 60k-token-class requests caused every batch to hit the
+      // old 45s deadline. Keep two in flight so the selected model has room to
+      // stream a complete structured response.
+      return 2;
     case "openai":
-    case "custom": return 4;
-    default: return 5;
+    case "custom":
+      return 4;
+    default:
+      return 5;
   }
+}
+
+export function analysisBatchTimeoutMs(batchCount: number, concurrency: number): number {
+  const waves = Math.max(1, Math.ceil(Math.max(1, batchCount) / Math.max(1, concurrency)));
+  // callBatchedAIWithRetry allows two attempts. Budget both attempts plus the
+  // retry delay and a small orchestration margin, but never consume the entire
+  // 25-minute job ceiling in this one stage.
+  const perWaveMs = ANALYSIS_BATCH_REQUEST_TIMEOUT_MS * 2 + 10_000;
+  return Math.min(900_000, Math.max(300_000, waves * perWaveMs + 60_000));
 }
 
 async function runBatchedAI(
@@ -1155,10 +1179,10 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
     await supabase.from("analyses").update({ error: msg, updated_at: new Date().toISOString() }).eq("id", analysisId);
   };
 
-  // Cloud Run completion workers / API instances can outlive the old Vercel
-  // maxDuration ceiling that originally motivated this guard. Keep a hard
-  // budget so hung AI calls still fail clearly, but allow large portfolios
-  // enough time to finish digests + synthesis + valuation kickoff.
+  // Railway API/worker processes can outlive the old serverless request
+  // ceiling that originally motivated this guard. Keep a hard budget so hung
+  // AI calls still fail clearly, but allow large portfolios enough time to
+  // finish digests + synthesis + valuation kickoff.
   const jobStartedAt = Date.now();
   const SAFE_BUDGET_MS = 1_500_000; // 25 min — Cloud Run–oriented safe ceiling
   const assertWithinBudget = (stage: string) => {
@@ -1358,7 +1382,7 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
         await reportProgress(`AI batch ${batchCompleted}/${batches.length} complete (${batch.length} repos)`);
         return result;
       }),
-      Math.max(120000, Math.ceil(digests.length / 10) * 45000 + 120000),
+      analysisBatchTimeoutMs(batches.length, batchConcurrency),
       "AI analysis",
     );
 
