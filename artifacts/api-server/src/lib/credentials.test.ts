@@ -3,6 +3,7 @@ import {
   isProviderSchemaMissing,
   loadStoredAiProviderSecretId,
   normalizeAiProvider,
+  normalizeSavedAiModel,
   platformAiKey,
   platformAiModel,
   platformAiProvider,
@@ -88,6 +89,20 @@ describe("platformAiProvider", () => {
 
   it("uses OpenRouter as the BYOK-oriented default when no platform key exists", () => {
     expect(platformAiProvider()).toBe("openrouter");
+  });
+});
+
+describe("saved model migration", () => {
+  it("switches the prior DeepSeek selection to GLM 5.3 FlashX", () => {
+    expect(normalizeSavedAiModel("openrouter", "~deepseek/deepseek-pro-latest"))
+      .toBe("z-ai/glm-5.3-flashx");
+  });
+
+  it("leaves unrelated model selections untouched", () => {
+    expect(normalizeSavedAiModel("openrouter", "openai/gpt-5.6-luna"))
+      .toBe("openai/gpt-5.6-luna");
+    expect(normalizeSavedAiModel("google", "gemini-3.8-flash"))
+      .toBe("gemini-3.8-flash");
   });
 });
 
