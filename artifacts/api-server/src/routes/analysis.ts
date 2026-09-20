@@ -634,7 +634,7 @@ function defaultStageModels(provider: string, tier: string): StageModels {
     openai: "gpt-4o",
     anthropic: "claude-sonnet-4-20250514",
     google: "gemini-3.7-flash",
-    openrouter: "minimax/minimax-m3:free",
+    openrouter: "nex-agi/nex-n2.5-mini:free",
     custom: "gpt-4o",
   };
   const base = DEFAULT[provider] ?? "gemini-3.7-flash";
@@ -1184,7 +1184,7 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
   // AI calls still fail clearly, but allow large portfolios enough time to
   // finish digests + synthesis + valuation kickoff.
   const jobStartedAt = Date.now();
-  const SAFE_BUDGET_MS = 1_500_000; // 25 min — Cloud Run–oriented safe ceiling
+  const SAFE_BUDGET_MS = 1_500_000; // 25 min — Railway worker/API safe ceiling
   const assertWithinBudget = (stage: string) => {
     const elapsed = Date.now() - jobStartedAt;
     if (elapsed > SAFE_BUDGET_MS) {
