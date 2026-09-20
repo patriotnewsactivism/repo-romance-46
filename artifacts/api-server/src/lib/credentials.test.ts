@@ -1,15 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { normalizeAiProvider, platformAiKey, platformAiProvider, platformAiStatus } from "./credentials";
+import {
+  isProviderSchemaMissing,
+  loadStoredAiProviderSecretId,
+  normalizeAiProvider,
+  platformAiKey,
+  platformAiModel,
+  platformAiProvider,
+  platformAiStatus,
+} from "./credentials";
 
 const AI_ENV_KEYS = [
   "AI_PROVIDER",
+  "AI_MODEL",
   "OPENROUTER_API_KEY",
   "OPENROUTER_FREE_API_KEY",
   "OPENROUTER_API_KEY_2",
+  "OPENROUTER_MODEL",
   "GEMINI_API_KEY",
   "GOOGLE_API_KEY",
+  "GEMINI_MODEL",
   "OPENAI_API_KEY",
+  "OPENAI_MODEL",
   "ANTHROPIC_API_KEY",
+  "ANTHROPIC_MODEL",
 ] as const;
 
 const originalAiEnv = new Map<string, string | undefined>();
@@ -78,9 +91,31 @@ describe("platformAiProvider", () => {
   });
 });
 
+describe("model resolution", () => {
+  it("uses application defaults when the app has no saved model", () => {
+    expect(platformAiModel("google")).toBe("gemini-3.8-flash");
+    expect(platformAiModel("openrouter")).toBe("nex-agi/nex-n2.5-mini:free");
+    expect(platformAiModel("openai")).toBe("gpt-4o");
+    expect(platformAiModel("anthropic")).toBe("claude-sonnet-4-20250514");
+  });
+
+  it("ignores all model ENV variables so model selection lives in the app", () => {
+    process.env.AI_MODEL = "poison/global-model";
+    process.env.GEMINI_MODEL = "gemini-env-model";
+    process.env.OPENROUTER_MODEL = "vendor/env-model";
+    process.env.OPENAI_MODEL = "openai-env-model";
+    process.env.ANTHROPIC_MODEL = "anthropic-env-model";
+
+    expect(platformAiModel("google")).toBe("gemini-3.8-flash");
+    expect(platformAiModel("openrouter")).toBe("nex-agi/nex-n2.5-mini:free");
+    expect(platformAiModel("openai")).toBe("gpt-4o");
+    expect(platformAiModel("anthropic")).toBe("claude-sonnet-4-20250514");
+  });
+});
+
 describe("blank platform credentials", () => {
-  // A Render env var that exists but holds only whitespace used to read as a
-  // configured credential all the way to the provider call.
+  // A deployment env var that exists but holds only whitespace must not count as
+  // a usable provider credential.
   it("does not treat a whitespace-only key as a configured platform credential", () => {
     process.env.OPENROUTER_API_KEY = "   ";
     expect(platformAiKey("openrouter")).toBeNull();
@@ -120,3 +155,67 @@ describe("blank platform credentials", () => {
     expect(platformAiKey("anthropic")).toBeNull();
   });
 });
+
+describe("isProviderSchemaMissing", () => {
+  it("recognizes postgres 42P01 table missing error", () => {
+    expect(isProviderSchemaMissing({ code: "42P01", message: "relation does not exist" })).toBe(true);
+  });
+
+  it("recognizes postgrest PGRST205 schema cache missing table error", () => {
+    expect(
+      isProviderSchemaMissing({
+        code: "PGRST205",
+        message: "Could not find the table 'public.ai_provider_credentials' in the schema cache",
+      }),
+    ).toBe(true);
+  });
+
+  it("recognizes postgrest PGRST202 schema cache missing function error", () => {
+    expect(
+      isProviderSchemaMissing({
+        code: "PGRST202",
+        message: "Could not find the function 'public.repo_finisher_store_ai_provider_secret' in the schema cache",
+      }),
+    ).toBe(true);
+  });
+
+  it("recognizes schema missing from descriptive error text", () => {
+    expect(
+      isProviderSchemaMissing(
+        new Error("Failed to load provider credential metadata: Could not find the table 'public.ai_provider_credentials' in the schema cache"),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not flag unrelated errors as schema missing", () => {
+    expect(isProviderSchemaMissing({ code: "42501", message: "permission denied" })).toBe(false);
+    expect(isProviderSchemaMissing(new Error("Connection timed out"))).toBe(false);
+    expect(isProviderSchemaMissing(null)).toBe(false);
+  });
+});
+
+describe("loadStoredAiProviderSecretId rolling deploy tolerance", () => {
+  it("returns null when ai_provider_credentials table is missing from schema cache", async () => {
+    const fakeSupabase = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: null,
+                error: {
+                  code: "PGRST205",
+                  message: "Could not find the table 'public.ai_provider_credentials' in the schema cache",
+                },
+              }),
+            }),
+          }),
+        }),
+      }),
+    };
+
+    const secretId = await loadStoredAiProviderSecretId(fakeSupabase as any, "user-123", "openrouter");
+    expect(secretId).toBeNull();
+  });
+});
+

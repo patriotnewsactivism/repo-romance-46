@@ -1,5 +1,6 @@
 // Centralized AI provider routing — handles Google Gemini, OpenAI, Anthropic, OpenRouter, and legacy/custom providers.
 
+import { DEFAULT_AI_MODELS } from "./ai-model-config";
 import type { OpenRouterReasoningEffort } from "./openrouter-models";
 
 export interface AIProviderConfig {
@@ -33,15 +34,31 @@ export interface AIResponse {
   model?: string;
 }
 
-// Operator policy 2026-09-04 (Don): FREE models only, most intelligent and
-// most-reasoning first. The platform OpenRouter key is a free-tier key and
-// must NEVER be used for paid model calls — a paid fallback may be added
-// only when the operator specifically authorizes it.
+// Operator policy 2026-09-10: capable free models first. MiniMax M3 Free and
+// GLM 5.2 Free were removed from OpenRouter and must never be silently replaced
+// with their paid slugs. OpenRouter accepts at most three fallback models per
+// request, so this six-model free roster becomes two native fallback batches.
 export const OPENROUTER_FREE_AGENT_CHAIN = [
-  "minimax/minimax-m3:free",
-  "nvidia/nemotron-3-ultra-550b-a55b:free",
-  "z-ai/glm-5.2:free",
+  "nex-agi/nex-n2.5-mini:free",
   "nvidia/nemotron-3-super-120b-a12b:free",
+  "poolside/laguna-s-2.1:free",
+  "nex-agi/nex-n2.5-pro:free",
+  "nvidia/nemotron-3.5-lightning:free",
+  "nvidia/nemotron-3-ultra-550b-a55b:free",
+] as const;
+
+// Explicitly authorized paid continuity tail. GPT-OSS is deliberately first as
+// the cheapest fast paid fallback; DeepSeek V4 Flash adds much stronger agentic
+// reasoning when needed, with V3.2 as a final ordinary paid fallback.
+export const OPENROUTER_PAID_AGENT_CHAIN = [
+  "openai/gpt-oss-120b",
+  "deepseek/deepseek-v4-flash-0731",
+  "deepseek/deepseek-v3.2",
+] as const;
+
+export const OPENROUTER_AGENT_CHAIN = [
+  ...OPENROUTER_FREE_AGENT_CHAIN,
+  ...OPENROUTER_PAID_AGENT_CHAIN,
 ] as const;
 
 type PublicHttpError = Error & {
@@ -51,10 +68,7 @@ type PublicHttpError = Error & {
 };
 
 const DEFAULT_MODELS: Record<string, string> = {
-  google: "gemini-3.7-flash",
-  openai: "gpt-4o",
-  anthropic: "claude-sonnet-4-20250514",
-  openrouter: OPENROUTER_FREE_AGENT_CHAIN[0],
+  ...DEFAULT_AI_MODELS,
   custom: "gpt-4o",
   // Kept only so old saved preferences fail gracefully until migrated.
   github_models: "gpt-4o-mini",
@@ -63,12 +77,8 @@ const DEFAULT_MODELS: Record<string, string> = {
 const MAX_RETRIES = 4;
 const INITIAL_BACKOFF_MS = 5000;
 const MAX_BACKOFF_MS = 10000;
-// Exported so callers that wrap a `callAI` call in their own outer timeout
-// (e.g. analysis.ts's `withTimeout`) can derive that outer budget from the
-// real inner one instead of hand-copying the number — see profilingTimeoutMs
-// in analysis.ts for why that mattered in production.
 export const DEFAULT_REQUEST_TIMEOUT_MS = 45000;
-const FINAL_SYNTHESIS_TIMEOUT_MS = 8000;
+export const FINAL_SYNTHESIS_TIMEOUT_MS = 8000;
 
 /**
  * Portfolio analysis already has a high-quality draft before its final polish
@@ -119,24 +129,59 @@ function providerDisplayName(provider: string) {
   return provider;
 }
 
-function providerRequestError(provider: string, model: string, status: number, detail: string): PublicHttpError {
+export function providerRequestError(provider: string, model: string, status: number, detail: string): PublicHttpError {
   const display = providerDisplayName(provider);
+
+  let cleanDetail = "";
+  try {
+    const parsed = JSON.parse(detail);
+    if (typeof parsed?.error?.message === "string") {
+      cleanDetail = parsed.error.message;
+    } else if (typeof parsed?.message === "string") {
+      cleanDetail = parsed.message;
+    }
+  } catch {}
+
+  const textToInspect = `${cleanDetail} ${detail}`.toLowerCase();
+  const isPaymentRequired =
+    status === 402 ||
+    textToInspect.includes("insufficient credits") ||
+    textToInspect.includes("exceeded your current quota") ||
+    textToInspect.includes("openrouter_credits");
+  const isUnauthorized =
+    status === 401 ||
+    (status === 403 &&
+      (textToInspect.includes("api key") || textToInspect.includes("unauthorized") || textToInspect.includes("permission")));
+
   let publicMessage: string;
-  if (status === 400) {
+  let code = "AI_PROVIDER_ERROR";
+  let httpStatus = 502;
+
+  if (isPaymentRequired) {
+    httpStatus = 402;
+    code = "AI_PROVIDER_PAYMENT_REQUIRED";
+    publicMessage = `${display} credits exhausted for model "${model}" (HTTP 402). Add credits at https://openrouter.ai/settings/credits or choose another configured provider in Settings.`;
+  } else if (isUnauthorized) {
+    httpStatus = 401;
+    code = "AI_PROVIDER_UNAUTHORIZED";
+    publicMessage = `${display} rejected the configured credential for model "${model}" (HTTP ${status}). Re-save the provider key in Settings or fix the server-side provider credential.`;
+  } else if (status === 400) {
     publicMessage = `${display} rejected the AI request for model "${model}". Verify that the configured model supports the requested structured-output features, then retry.`;
-  } else if (status === 401 || status === 403) {
-    publicMessage = `${display} rejected the configured credential for model "${model}". Re-save the provider key in Settings or fix the server-side provider credential.`;
   } else if (status === 429) {
+    httpStatus = 429;
+    code = "AI_PROVIDER_RATE_LIMITED";
     publicMessage = `${display} rate-limited model "${model}". Retry shortly or choose another configured model/provider.`;
   } else {
     publicMessage = `${display} failed while running model "${model}" (upstream HTTP ${status}). Retry or choose another configured model/provider.`;
   }
 
+  const effectiveDetail = cleanDetail || detail.slice(0, 300);
+
   return Object.assign(
-    new Error(`${display} API error ${status} for model "${model}": ${detail.slice(0, 300)}`),
+    new Error(`${display} API error ${status} for model "${model}": ${effectiveDetail}`),
     {
-      status: 502,
-      code: "AI_PROVIDER_ERROR",
+      status: httpStatus,
+      code,
       publicMessage,
     },
   );
@@ -156,10 +201,12 @@ async function fetchWithRetry(
   options: RequestInit,
   provider: string,
   timeoutMs: number,
+  retryBudget: number = MAX_RETRIES,
 ): Promise<Response> {
   let lastError = "";
   const singleAttemptOnly = timeoutMs <= FINAL_SYNTHESIS_TIMEOUT_MS;
-  const maxRetries = singleAttemptOnly ? 0 : MAX_RETRIES;
+  const boundedRetryBudget = Math.max(0, Math.min(MAX_RETRIES, Math.floor(retryBudget)));
+  const maxRetries = singleAttemptOnly ? 0 : boundedRetryBudget;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const controller = new AbortController();
@@ -168,6 +215,13 @@ async function fetchWithRetry(
 
     try {
       res = await fetch(url, { ...options, signal: controller.signal });
+
+      const body = await res.text();
+      res = new Response(body, {
+        status: res.status,
+        statusText: res.statusText,
+        headers: res.headers,
+      });
     } catch (error) {
       if (controller.signal.aborted) {
         const message = `${providerDisplayName(provider)} request exceeded ${Math.round(timeoutMs / 1000)}s and was cancelled to keep the analysis worker responsive.`;
@@ -221,18 +275,10 @@ const PROVIDER_ENDPOINTS: Record<string, string> = {
 };
 
 export async function callAI(request: AIRequest, config: AIProviderConfig): Promise<AIResponse> {
-  // Never silently fall back to OpenAI. Gemini is the explicit platform default.
-  const provider = config.provider || "google";
-  const model = request.model || config.model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.google;
+  const provider = config.provider || "openrouter";
+  const model = request.model || config.model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.openrouter;
   const requestTimeoutMs = resolveAIRequestTimeoutMs(request);
 
-  // Last line of defence for a blank-but-truthy credential. Sending one produces
-  // `Authorization: Bearer ` and a provider-side auth error that blames the
-  // request rather than the missing key — OpenRouter reports it as
-  // `401 Missing Authentication header`. Treating blank as absent lets the call
-  // fall through to this function's own "no usable credential" message, which
-  // names the provider and tells the operator what to configure. The trim also
-  // makes a key stored with stray surrounding whitespace work as intended.
   const apiKey = typeof config.apiKey === "string" && config.apiKey.trim().length > 0 ? config.apiKey.trim() : null;
 
   if (provider === "anthropic" && apiKey) {
@@ -322,6 +368,63 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     return { content };
   }
 
+  if (provider === "openrouter" && apiKey && model === OPENROUTER_FREE_AGENT_CHAIN[0]) {
+    // The reviewed default uses automatic free-first continuity. Exact custom
+    // user-selected models remain pinned and are never substituted.
+    //
+    // OpenRouter rejects fallback arrays longer than three models, so the nine
+    // model chain becomes three requests at most: free batch 1, free batch 2,
+    // then the cheap paid continuity batch. Each group gets a single network
+    // attempt because retrying an exhausted free group wastes quota and time.
+    const groups: string[][] = [];
+    for (let i = 0; i < OPENROUTER_AGENT_CHAIN.length; i += 3) {
+      groups.push([...OPENROUTER_AGENT_CHAIN.slice(i, i + 3)]);
+    }
+
+    let lastError: unknown;
+    for (const group of groups) {
+      const body: Record<string, unknown> = { model: group[0], messages: request.messages };
+      if (request.responseFormat) body.response_format = request.responseFormat;
+      if (config.reasoningEffort) body.reasoning = { effort: config.reasoningEffort };
+      body.models = group;
+
+      try {
+        const res = await fetchWithRetry(
+          PROVIDER_ENDPOINTS[provider],
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`,
+              "X-Title": "RepoFinisher",
+            },
+            body: JSON.stringify(body),
+          },
+          provider,
+          requestTimeoutMs,
+          0,
+        );
+
+        if (!res.ok) {
+          const text = await res.text();
+          throw providerRequestError(provider, group[0], res.status, text);
+        }
+
+        const json = (await res.json()) as {
+          model?: string;
+          choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
+        };
+        const raw = json.choices?.[0]?.message?.content;
+        if (typeof raw === "string") return { content: raw, model: json.model };
+        if (Array.isArray(raw)) return { content: raw.map((part) => part.text || "").join(""), model: json.model };
+        return { content: "", model: json.model };
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    throw lastError ?? new Error("OpenRouter agent chain exhausted with no error recorded");
+  }
+
   if (
     (provider === "github_models" || provider === "openai" || provider === "openrouter" || provider === "custom") &&
     apiKey
@@ -338,11 +441,6 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     };
     if (provider === "openrouter") {
       headers["X-Title"] = "RepoFinisher";
-      // Only the reviewed free-tier default gets an automatic fallback. Exact
-      // custom/user-selected models remain pinned and are never substituted.
-      if (model === OPENROUTER_FREE_AGENT_CHAIN[0]) {
-        body.models = [...OPENROUTER_FREE_AGENT_CHAIN];
-      }
     }
 
     const res = await fetchWithRetry(

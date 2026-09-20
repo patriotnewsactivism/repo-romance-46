@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { callAI } from "./ai-provider";
-import { parseModelJsonLenient } from "./parse-model-json";
-import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "./credentials";
+import { type AIProviderConfig } from "./ai-provider";
+import { callAIJson } from "./call-ai-json";
+import { loadAiCredential, loadGithubCredential, requireGithubCredential, toAiProviderConfig } from "./credentials";
 import { loadAdaptiveLearningContext } from "./adaptive-learning";
 import { prepareFinishPlan } from "./repo-finisher-engine";
 import { normalizeInvestmentMetrics } from "./run-outcome-score";
@@ -83,7 +83,7 @@ async function runReasoningAgent(
   role: string,
   objective: string,
   context: Record<string, unknown>,
-  ai: { provider: string; apiKey: string | null },
+  ai: AIProviderConfig,
   mutableStrategyGuidance: string,
 ): Promise<AgentResult> {
   const system = `You are the ${role} agent in an autonomous repository-completion council.
@@ -108,37 +108,38 @@ Operating rules:
 - Validation must state how CI, tests, isolated deployment, smoke checks, or other measurable evidence proves success.
 Return strict JSON.`;
 
-  const result = await callAI(
-    {
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: JSON.stringify(context) },
-      ],
-      responseFormat: {
-        type: "json_schema",
-        json_schema: {
-          name: `${role.replace(/[^a-z0-9]+/gi, "_").toLowerCase()}_review`,
-          strict: true,
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              summary: { type: "string" },
-              priorities: { type: "array", maxItems: 8, items: { type: "string" } },
-              risks: { type: "array", maxItems: 8, items: { type: "string" } },
-              validation: { type: "array", maxItems: 8, items: { type: "string" } },
+  try {
+    const parsed = await callAIJson<Record<string, unknown>>(
+      {
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: JSON.stringify(context) },
+        ],
+        responseFormat: {
+          type: "json_schema",
+          json_schema: {
+            name: `${role.replace(/[^a-z0-9]+/gi, "_").toLowerCase()}_review`,
+            strict: true,
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                summary: { type: "string" },
+                priorities: { type: "array", maxItems: 8, items: { type: "string" } },
+                risks: { type: "array", maxItems: 8, items: { type: "string" } },
+                validation: { type: "array", maxItems: 8, items: { type: "string" } },
+              },
+              required: ["summary", "priorities", "risks", "validation"],
             },
-            required: ["summary", "priorities", "risks", "validation"],
           },
         },
+        thinkingLevel: "high",
+        timeoutMs: 60_000,
       },
-      thinkingLevel: "high",
-      timeoutMs: 60_000,
-    },
-    ai,
-  );
-  try {
-    return normalizeAgentResult(role, parseModelJsonLenient(result.content || "{}"));
+      ai,
+      (value) => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null),
+    );
+    return normalizeAgentResult(role, parsed);
   } catch {
     return normalizeAgentResult(role, {});
   }
@@ -224,7 +225,7 @@ export async function createAgenticPreview(
     },
   };
 
-  const ai = { provider: aiCredential.provider, apiKey: aiCredential.apiKey };
+  const ai = toAiProviderConfig(aiCredential);
   if (!ai.apiKey) throw Object.assign(new Error(`No usable ${ai.provider} credential is configured for autonomous agent planning.`), { status: 400 });
 
   const architect = await runReasoningAgent("architect", coreObjective("architect"), sharedContext, ai, promptStrategy.guidance);

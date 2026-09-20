@@ -32,7 +32,7 @@ describe("generateFinishPlan — fenced/malformed model JSON handling", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       chatCompletion(JSON.stringify({ analysis: "fix it", changes: [{ path: "a.ts", status: "modified", content: "x", description: "d" }] })),
     );
-    const plan = await generateFinishPlan("owner/repo", repoData, [], ["do the thing"], "openrouter", "test-key");
+    const plan = await generateFinishPlan("owner/repo", repoData, [], ["do the thing"], { provider: "openrouter", model: "vendor/pinned", apiKey: "test-key" });
     expect(plan).toEqual({
       analysis: "fix it",
       changes: [{ path: "a.ts", status: "modified", content: "x", description: "d" }],
@@ -42,7 +42,7 @@ describe("generateFinishPlan — fenced/malformed model JSON handling", () => {
   it("parses a ```json-fenced plan the provider returned despite strict json_schema being requested", async () => {
     const fenced = '```json\n{"analysis":"fenced fix","changes":[{"path":"b.ts","status":"created","content":"y","description":"d2"}]}\n```';
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(chatCompletion(fenced));
-    const plan = await generateFinishPlan("owner/repo", repoData, [], ["do the thing"], "openrouter", "test-key");
+    const plan = await generateFinishPlan("owner/repo", repoData, [], ["do the thing"], { provider: "openrouter", model: "vendor/pinned", apiKey: "test-key" });
     expect(plan.analysis).toBe("fenced fix");
     expect(plan.changes).toHaveLength(1);
   });
@@ -58,7 +58,7 @@ describe("generateFinishPlan — fenced/malformed model JSON handling", () => {
         chatCompletion(JSON.stringify({ analysis: "repaired", changes: [{ path: "c.ts", status: "modified", content: "z", description: "d3" }] })),
       );
 
-    const plan = await generateFinishPlan("owner/repo", repoData, [], ["do the thing"], "openrouter", "test-key");
+    const plan = await generateFinishPlan("owner/repo", repoData, [], ["do the thing"], { provider: "openrouter", model: "vendor/pinned", apiKey: "test-key" });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(plan.analysis).toBe("repaired");
@@ -71,8 +71,22 @@ describe("generateFinishPlan — fenced/malformed model JSON handling", () => {
       .mockResolvedValueOnce(chatCompletion("also not json, sorry"));
 
     await expect(
-      generateFinishPlan("owner/repo", repoData, [], ["do the thing"], "openrouter", "test-key"),
-    ).rejects.toThrow(/could not be parsed into a valid finish plan after one repair attempt/);
+      generateFinishPlan("owner/repo", repoData, [], ["do the thing"], { provider: "openrouter", model: "vendor/pinned", apiKey: "test-key" }),
+    ).rejects.toThrow(/could not be parsed into the expected JSON after one repair attempt/);
+  });
+
+  it("sends the Settings model instead of the OpenRouter free-pool default", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      chatCompletion(JSON.stringify({ analysis: "pinned", changes: [{ path: "e.ts", status: "modified", content: "q", description: "d5" }] })),
+    );
+    await generateFinishPlan("owner/repo", repoData, [], ["do the thing"], {
+      provider: "openrouter",
+      model: "openai/gpt-5.6-sol",
+      apiKey: "test-key",
+    });
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.model).toBe("openai/gpt-5.6-sol");
+    expect(body.models).toBeUndefined();
   });
 
   it("rejects a plan that doesn't satisfy the finish-plan schema even though it is valid JSON, and repairs it", async () => {
@@ -82,7 +96,7 @@ describe("generateFinishPlan — fenced/malformed model JSON handling", () => {
         chatCompletion(JSON.stringify({ analysis: "shape fixed", changes: [{ path: "d.ts", status: "deleted", content: "", description: "d4" }] })),
       );
 
-    const plan = await generateFinishPlan("owner/repo", repoData, [], ["do the thing"], "openrouter", "test-key");
+    const plan = await generateFinishPlan("owner/repo", repoData, [], ["do the thing"], { provider: "openrouter", model: "vendor/pinned", apiKey: "test-key" });
     expect(plan.analysis).toBe("shape fixed");
   });
 });

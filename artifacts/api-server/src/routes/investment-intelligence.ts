@@ -22,8 +22,9 @@ import {
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
-import { callAI } from "../lib/ai-provider";
-import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "../lib/credentials";
+import { type AIProviderConfig } from "../lib/ai-provider";
+import { callAIJson } from "../lib/call-ai-json";
+import { loadAiCredential, loadGithubCredential, requireGithubCredential, toAiProviderConfig } from "../lib/credentials";
 import { recordRepoLearning } from "../lib/adaptive-learning";
 
 const router: IRouter = Router();
@@ -92,6 +93,7 @@ interface AnalysisItemContext {
   effort: number;
   estimatedHours: number | null;
   nextSteps: string[];
+  analysisItemRank: number | null;
 }
 
 function ghHeaders(token: string) {
@@ -191,14 +193,26 @@ async function fetchAcceptanceEvidence(token: string, repo: string, headSha: str
         (check) =>
           pattern.test(check.name) &&
           check.status === "completed" &&
-          ["success", "neutral", "skipped"].includes(check.conclusion || ""),
+          check.conclusion === "success",
       );
+    let deploymentSucceeded: boolean | undefined;
+    try {
+      const { data: deployments } = await ghJson<Array<{ id: number }>>(token, `/repos/${repo}/deployments?per_page=1`);
+      const latest = deployments[0];
+      if (latest) {
+        const { data: statuses } = await ghJson<Array<{ state: string }>>(token, `/repos/${repo}/deployments/${latest.id}/statuses?per_page=5`);
+        if (statuses.some((status) => status.state === "success")) deploymentSucceeded = true;
+      }
+    } catch {
+      deploymentSucceeded = undefined;
+    }
     return {
       buildPassed: passed(/build|ci|verify/i),
       typecheckPassed: passed(/type|tsc|ci|verify/i),
       testsPassed: passed(/test|ci|verify/i),
       securityBlockersResolved: passed(/security|codeql|sast|dependency/i) || undefined,
-      verifiedAt: checks.length > 0 ? new Date().toISOString() : undefined,
+      deploymentSucceeded,
+      verifiedAt: checks.length > 0 || deploymentSucceeded ? new Date().toISOString() : undefined,
     };
   } catch {
     return {};
@@ -379,7 +393,7 @@ async function generateMarketModel(
   repo: GhRepo,
   context: AnalysisItemContext | null,
   competition: CompetitionResult,
-  ai: { provider: string; apiKey: string | null },
+  ai: AIProviderConfig,
 ): Promise<MarketModel> {
   const fallback = fallbackMarketModel(repo, context, competition);
   if (!ai.apiKey) return fallback;
@@ -408,7 +422,7 @@ Return strict JSON only.`;
   });
 
   try {
-    const result = await callAI(
+    return await callAIJson<MarketModel>(
       {
         messages: [
           { role: "system", content: system },
@@ -476,8 +490,14 @@ Return strict JSON only.`;
         },
       },
       ai,
+      (value) => {
+        if (!value || typeof value !== "object") return null;
+        const row = value as MarketModel;
+        if (!Number.isFinite(row.market_need_score) || !Number.isFinite(row.demand_score) || !row.market_summary) return null;
+        if (!Array.isArray(row.scenarios) || row.scenarios.length < 3) return null;
+        return row;
+      },
     );
-    return JSON.parse(result.content || "{}") as MarketModel;
   } catch {
     return fallback;
   }
@@ -498,6 +518,7 @@ function contextByRepo(items: Array<Record<string, unknown>>): Map<string, Analy
         effort: Number(item.effort || 0),
         estimatedHours: item.estimated_hours == null ? null : Number(item.estimated_hours),
         nextSteps: Array.isArray(item.next_steps) ? item.next_steps.map(String) : [],
+        analysisItemRank: Number.isFinite(Number(item.rank)) ? Number(item.rank) : null,
       });
     }
   }
@@ -508,7 +529,7 @@ async function inspectOneRepo(
   token: string,
   repoName: string,
   context: AnalysisItemContext | null,
-  ai: { provider: string; apiKey: string | null },
+  ai: AIProviderConfig,
 ) {
   const { data: repo } = await ghJson<GhRepo>(token, `/repos/${repoName}`);
   const defaultBranch = repo.default_branch || "main";
@@ -636,12 +657,12 @@ async function inspectOneRepo(
       detail: market.market_summary,
     },
     {
-      class: competition.competitors.length > 0 ? "verified" : "insufficient",
-      label: "Competitive pressure proxy",
+      class: competition.competitors.length > 0 ? "derived" : "insufficient",
+      label: "Similar GitHub repositories",
       detail:
         competition.competitors.length > 0
-          ? `${competition.totalCount.toLocaleString()} GitHub search matches; ${competition.competitors.length} leading open-source alternatives sampled.`
-          : "No reliable GitHub competition sample was available; broader commercial competition is unknown.",
+          ? `${competition.totalCount.toLocaleString()} GitHub search matches; ${competition.competitors.length} similar public repositories sampled. This is not live commercial competitor research.`
+          : "No similar GitHub repositories were sampled; commercial competition is unknown without live research.",
     },
     {
       class: "insufficient",
@@ -685,6 +706,7 @@ async function inspectOneRepo(
     details: {
       repo: repoName,
       kind,
+      analysisItemRank: context?.analysisItemRank ?? null,
       classifications,
       completion,
       readiness,
@@ -742,7 +764,7 @@ export async function generateAndPersistInvestmentIntelligence(input: {
   userId: string;
   analysisId: string;
   githubToken: string;
-  ai: { provider: string; apiKey: string | null };
+  ai: AIProviderConfig;
   /** Soft cap — excess repos are skipped after rank order, not hard-failed. */
   repoLimit?: number;
 }): Promise<Record<string, unknown>> {
@@ -907,7 +929,7 @@ router.post(
       userId,
       analysisId: id,
       githubToken: github.token,
-      ai: { provider: aiCredential.provider, apiKey: aiCredential.apiKey },
+      ai: toAiProviderConfig(aiCredential),
     });
     res.json(result);
   }),

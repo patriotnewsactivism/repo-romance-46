@@ -3,9 +3,16 @@ import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
-import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "../lib/credentials";
+import { loadAiCredential, loadGithubCredential, normalizeAiProvider, requireGithubCredential } from "../lib/credentials";
+import { defaultAiModel } from "../lib/ai-model-config";
+import { callAIJson, validateWithZod } from "../lib/call-ai-json";
 import { runInBackground } from "../lib/background-tasks";
-import { callAI, type AIProviderConfig, DEFAULT_REQUEST_TIMEOUT_MS } from "../lib/ai-provider";
+import {
+  callAI,
+  type AIProviderConfig,
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  FINAL_SYNTHESIS_TIMEOUT_MS,
+} from "../lib/ai-provider";
 import { captureException, flushSentry } from "../instrument";
 
 const router: IRouter = Router();
@@ -356,15 +363,22 @@ function sleep(ms: number): Promise<void> {
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`${label} exceeded ${Math.round(ms / 1000)}s timeout. Try reducing max repos or switching AI provider.`)),
-        ms,
-      ),
-    ),
-  ]);
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} exceeded ${Math.round(ms / 1000)}s timeout.`)),
+      ms,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 /**
@@ -610,58 +624,18 @@ export function getStageModels(provider: string, tier: string, exactModel?: stri
 
 /** Per-stage fallbacks used only when no exact model identifier is configured. */
 function defaultStageModels(provider: string, tier: string): StageModels {
-  const DEFAULT: Record<string, string> = {
-    github_models: "gpt-4o-mini",
-    openai: "gpt-4o",
-    anthropic: "claude-sonnet-4-20250514",
-    google: "gemini-3.7-flash",
-    openrouter: "minimax/minimax-m3:free",
-    custom: "gpt-4o",
+  const base =
+    defaultAiModel(provider) ??
+    (provider === "github_models" || provider === "custom" ? "gpt-4o" : null) ??
+    defaultAiModel("openrouter")!;
+  const useThinking = provider === "anthropic" && tier === "deep";
+  return {
+    profilerModel: base,
+    critiqueModel: base,
+    synthesisModel: base,
+    useThinking,
+    thinkingBudget: useThinking ? 10_000 : 0,
   };
-  const base = DEFAULT[provider] ?? "gemini-3.7-flash";
-
-  if (tier === "fast") {
-    return { profilerModel: base, critiqueModel: base, synthesisModel: base, useThinking: false, thinkingBudget: 0 };
-  }
-
-  if (tier === "deep") {
-    switch (provider) {
-      case "openai":
-      case "custom":
-        return { profilerModel: "o3", critiqueModel: "o3", synthesisModel: "o3", useThinking: false, thinkingBudget: 0 };
-      case "anthropic":
-        return {
-          profilerModel: "claude-sonnet-4-20250514",
-          critiqueModel: "claude-sonnet-4-20250514",
-          synthesisModel: "claude-sonnet-4-20250514",
-          useThinking: true,
-          thinkingBudget: 10000,
-        };
-      case "google":
-        return { profilerModel: "gemini-3.7-flash", critiqueModel: "gemini-3.7-flash", synthesisModel: "gemini-3.7-flash", useThinking: false, thinkingBudget: 0 };
-      default: // openrouter and anything else: the provider's own default model
-        return { profilerModel: base, critiqueModel: base, synthesisModel: base, useThinking: false, thinkingBudget: 0 };
-    }
-  }
-
-  // balanced (default) — reasoning models for profiling/critique, best synthesis available
-  switch (provider) {
-    case "openai":
-    case "custom":
-      return { profilerModel: "o4-mini", critiqueModel: "o4-mini", synthesisModel: "o3-mini", useThinking: false, thinkingBudget: 0 };
-    case "anthropic":
-      return {
-        profilerModel: "claude-3-5-haiku-20241022",
-        critiqueModel: "claude-3-5-haiku-20241022",
-        synthesisModel: "claude-sonnet-4-20250514",
-        useThinking: false,
-        thinkingBudget: 0,
-      };
-    case "google":
-      return { profilerModel: "gemini-3.7-flash", critiqueModel: "gemini-3.7-flash", synthesisModel: "gemini-3.7-flash", useThinking: false, thinkingBudget: 0 };
-    default: // openrouter/github_models — no dedicated reasoning tier, use the provider's own default
-      return { profilerModel: base, critiqueModel: base, synthesisModel: base, useThinking: false, thinkingBudget: 0 };
-  }
 }
 
 // ─── Stage 1: Portfolio profiler ────────────────────────────────────────────
@@ -718,7 +692,7 @@ Respond ONLY with valid JSON. Do not wrap in markdown.`;
   const userContent = `GitHub portfolio (${repos.length} repos):\n${metaLines}`;
 
   try {
-    const result = await callAI(
+    return await callAIJson<PortfolioProfile>(
       {
         messages: [
           { role: "system", content: systemPrompt },
@@ -727,13 +701,16 @@ Respond ONLY with valid JSON. Do not wrap in markdown.`;
         model: stageModels.profilerModel,
       },
       aiConfig,
+      (value) => {
+        if (!value || typeof value !== "object") return null;
+        const parsed = value as PortfolioProfile;
+        if (!parsed.developer_profile || !parsed.custom_system_prompt) return null;
+        return {
+          ...parsed,
+          domain_clusters: Array.isArray(parsed.domain_clusters) ? parsed.domain_clusters : [],
+        };
+      },
     );
-    // Strip markdown code fences if present
-    const raw = result.content.replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
-    const parsed = JSON.parse(raw) as PortfolioProfile;
-    if (!parsed.developer_profile || !parsed.custom_system_prompt) throw new Error("Incomplete profile response");
-    if (!Array.isArray(parsed.domain_clusters)) parsed.domain_clusters = [];
-    return parsed;
   } catch (e) {
     console.warn("[analysis] Portfolio profiling failed, using default prompt:", e instanceof Error ? e.message : e);
     return defaultPortfolioProfile(repos);
@@ -769,7 +746,7 @@ async function callBatchedAI(
 ): Promise<z.infer<typeof RecommendationSchema>> {
   const user = `Here are the repo digests:\n\n${digests.join("\n\n=========\n\n")}`;
 
-  const aiResult = await callAI(
+  return callAIJson(
     {
       messages: [
         { role: "system", content: systemPrompt },
@@ -778,9 +755,8 @@ async function callBatchedAI(
       responseFormat: { type: "json_schema", json_schema: { name: "recommendations", strict: true, schema: AI_JSON_SCHEMA } },
     },
     aiConfig,
+    validateWithZod(RecommendationSchema),
   );
-  const parsed = JSON.parse(aiResult.content || "{}");
-  return RecommendationSchema.parse(parsed);
 }
 
 function isNonRetryableAIError(error: unknown): boolean {
@@ -917,7 +893,7 @@ Respond ONLY with valid JSON.`;
   const userContent = `Portfolio repos:\n${repoIndex}\n\nDraft recommendations to critique:\n${recsText}`;
 
   try {
-    const result = await callAI(
+    return await callAIJson<AnalysisCritique>(
       {
         messages: [
           { role: "system", content: systemPrompt },
@@ -926,14 +902,18 @@ Respond ONLY with valid JSON.`;
         model: stageModels.critiqueModel,
       },
       aiConfig,
+      (value) => {
+        if (!value || typeof value !== "object") return null;
+        const parsed = value as AnalysisCritique;
+        if (!parsed.refinement_notes) return null;
+        return {
+          ...parsed,
+          gaps: Array.isArray(parsed.gaps) ? parsed.gaps : [],
+          too_generic: Array.isArray(parsed.too_generic) ? parsed.too_generic : [],
+          missed_synergies: Array.isArray(parsed.missed_synergies) ? parsed.missed_synergies : [],
+        };
+      },
     );
-    const raw = result.content.replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
-    const parsed = JSON.parse(raw) as AnalysisCritique;
-    if (!parsed.refinement_notes) throw new Error("Incomplete critique");
-    if (!Array.isArray(parsed.gaps)) parsed.gaps = [];
-    if (!Array.isArray(parsed.too_generic)) parsed.too_generic = [];
-    if (!Array.isArray(parsed.missed_synergies)) parsed.missed_synergies = [];
-    return parsed;
   } catch (e) {
     console.warn("[analysis] Critique pass failed, skipping:", e instanceof Error ? e.message : e);
     return {
@@ -1004,13 +984,17 @@ Respond with valid JSON matching the exact schema. No markdown wrapping.`;
   const userContent = `Portfolio repos:\n${repoIndex}\n\nDraft recommendations:\n${recsText}\n\nCritique and guidance:\n${critiqueText}\n\nProduce the final best recommendations.`;
 
   try {
-    const result = await callAI(
+    return await callAIJson(
       {
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userContent },
         ],
         model: stageModels.synthesisModel,
+        // Final polish is optional: completed batch recommendations are a
+        // valid durable result. Keep the provider deadline explicit instead
+        // of relying on a system-prompt heuristic to select it.
+        timeoutMs: FINAL_SYNTHESIS_TIMEOUT_MS,
         thinkingBudgetTokens: stageModels.useThinking ? stageModels.thinkingBudget : undefined,
         // Note: extended thinking (Anthropic) is incompatible with json_schema response_format;
         // for other providers we enforce the schema client-side via Zod.
@@ -1019,10 +1003,8 @@ Respond with valid JSON matching the exact schema. No markdown wrapping.`;
           : { responseFormat: { type: "json_schema" as const, json_schema: { name: "recommendations", strict: true, schema: AI_JSON_SCHEMA } } }),
       },
       aiConfig,
+      validateWithZod(RecommendationSchema),
     );
-    const raw = result.content.replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
-    const parsed = JSON.parse(raw);
-    return RecommendationSchema.parse(parsed);
   } catch (e) {
     console.warn("[analysis] Synthesis failed, using draft recommendations:", e instanceof Error ? e.message : e);
     return RecommendationSchema.parse({
@@ -1067,7 +1049,7 @@ Return JSON with the same schema as before (summary_md + recommendations array).
 Only include NEW FINISH recommendations that improve repo coverage. If completion coverage is already adequate, return an empty recommendations array.`;
 
   try {
-    const result = await callAI(
+    const validated = await callAIJson(
       {
         messages: [
           { role: "system", content: "You are a product strategist. Always respond with valid JSON." },
@@ -1076,9 +1058,8 @@ Only include NEW FINISH recommendations that improve repo coverage. If completio
         responseFormat: { type: "json_schema", json_schema: { name: "synthesis", strict: true, schema: AI_JSON_SCHEMA } },
       },
       aiConfig,
+      validateWithZod(RecommendationSchema),
     );
-    const parsed = JSON.parse(result.content || "{}");
-    const validated = RecommendationSchema.parse(parsed);
     return validated.recommendations;
   } catch {
     console.warn("[analysis] Cross-batch synthesis failed, continuing with batch results");
@@ -1109,7 +1090,7 @@ interface AnalysisContext {
 
 async function createAnalysisRow(ctx: AnalysisContext): Promise<string> {
   const { supabase, userId, prefs, triggerType } = ctx;
-  const provider = prefs?.custom_ai_provider || "google";
+  const provider = normalizeAiProvider(prefs?.custom_ai_provider);
   const tier = prefs?.analysis_tier || "balanced";
   const models = getStageModels(provider, tier, prefs?.custom_ai_model);
   const { data: analysis, error: aErr } = await supabase
@@ -1179,7 +1160,7 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
       );
     }
 
-    const provider = prefs?.custom_ai_provider || "google";
+    const provider = normalizeAiProvider(prefs?.custom_ai_provider);
     const aiKey = prefs?.custom_ai_key || null;
     const aiConfig: AIProviderConfig = {
       provider,
@@ -1425,9 +1406,18 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
     await reportProgress("Synthesizing final insights…");
     const finalResult = await withTimeout(
       synthesizeWithReasoning(draftRecommendations, critique, repoIndex, aiConfig, stageModels),
-      120000,
+      // The inner provider call has a strict eight-second deadline. This
+      // small outer guard covers unexpected local stalls while preserving the
+      // completed draft instead of failing the full analysis after two minutes.
+      FINAL_SYNTHESIS_TIMEOUT_MS + 7_000,
       "Final synthesis",
-    );
+    ).catch((error) => {
+      console.warn("[analysis] Final synthesis watchdog fired, using draft recommendations:", error);
+      return RecommendationSchema.parse({
+        recommendations: draftRecommendations,
+        summary_md: firstSummary || "Analysis complete.",
+      });
+    });
 
     finalResult.portfolio_stats = computePortfolioStats(shortlist);
 
@@ -1515,7 +1505,7 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
             userId,
             analysisId,
             githubToken: token,
-            ai: { provider, apiKey: aiKey },
+            ai: aiConfig,
           });
           await supabase
             .from("analyses")
@@ -1526,10 +1516,15 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
             .eq("id", analysisId);
           console.log(`[analysis ${analysisId}] investment intelligence auto-generated`);
         } catch (error) {
-          console.warn(
-            `[analysis ${analysisId}] investment intelligence auto-run skipped:`,
-            error instanceof Error ? error.message : error,
-          );
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn(`[analysis ${analysisId}] investment intelligence auto-run skipped:`, message);
+          await supabase
+            .from("analyses")
+            .update({
+              error: `Analysis completed, but Full Portfolio Value scoring failed: ${message.slice(0, 400)}. Open Finish, Value & Reports and run it again so finish-until-target has measured scores.`,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", analysisId);
         }
       })(),
       "analysis-investment-intelligence",
@@ -1737,29 +1732,95 @@ router.post(
   }),
 );
 
-router.post(
-  "/analysis/:id/action-plan",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
-    const userId = req.userId!;
+export interface ActionPlanCachedState {
+  status: "not_started" | "running" | "completed" | "failed";
+  plan: Record<string, unknown> | null;
+  error: string | null;
+  updatedAt: string;
+}
 
-    const { data: items, error: itemsErr } = await req.supabase!
+export const actionPlanStateCache = new Map<string, ActionPlanCachedState>();
+
+export function isActionPlanSchemaMissing(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const anyErr = err as { code?: string; message?: string; details?: string; hint?: string };
+  if (anyErr.code === "PGRST204" || anyErr.code === "PGRST205" || anyErr.code === "42703") {
+    return true;
+  }
+  const text = `${anyErr.message || ""} ${anyErr.details || ""} ${anyErr.hint || ""}`.toLowerCase();
+  return (
+    text.includes("action_plan") &&
+    (text.includes("column") ||
+      text.includes("schema cache") ||
+      text.includes("does not exist") ||
+      text.includes("could not find"))
+  );
+}
+
+async function saveActionPlanToInvestmentIntelligence(
+  supabase: SupabaseClient,
+  analysisId: string,
+  userId: string,
+  state: { status: string; plan: Record<string, unknown> | null; error: string | null },
+): Promise<void> {
+  try {
+    const { data: row } = await supabase
+      .from("analyses")
+      .select("investment_intelligence")
+      .eq("id", analysisId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const currentIntel =
+      row?.investment_intelligence && typeof row.investment_intelligence === "object"
+        ? (row.investment_intelligence as Record<string, unknown>)
+        : {};
+
+    const updatedIntel = {
+      ...currentIntel,
+      _action_plan: {
+        ...state,
+        updated_at: new Date().toISOString(),
+      },
+    };
+
+    await supabase
+      .from("analyses")
+      .update({ investment_intelligence: updatedIntel })
+      .eq("id", analysisId)
+      .eq("user_id", userId);
+  } catch (err) {
+    console.warn(`[action-plan ${analysisId}] failed to persist fallback to investment_intelligence:`, err);
+  }
+}
+
+// Action plan generation is a single LLM call over a potentially large
+// recommendation set — same class of "can outrun the gateway timeout" risk
+// as the main repo analysis, which already solved this via a fire-and-forget
+// background task + DB status column instead of blocking the request. This
+// mirrors that exact pattern (see startAnalysisJob above) rather than
+// inventing a new mechanism.
+export async function runActionPlanJob(supabase: SupabaseClient, analysisId: string, userId: string): Promise<void> {
+  try {
+    const { data: items, error: itemsErr } = await supabase
       .from("analysis_items")
       .select("title, kind, repos, pitch, effort, market_potential, next_steps, tech_stack, rank")
-      .eq("analysis_id", id)
+      .eq("analysis_id", analysisId)
       .eq("user_id", userId)
       .order("rank", { ascending: true });
     if (itemsErr) throw new Error(itemsErr.message);
     if (!items || items.length === 0) throw Object.assign(new Error("No recommendations found for this analysis."), { status: 400 });
 
-    const githubCredential = await loadGithubCredential(req.supabase!, userId);
-    const aiConfig = await loadAiCredential(req.supabase!, userId, githubCredential?.token ?? null);
+    const githubCredential = await loadGithubCredential(supabase, userId);
+    const aiConfig = await loadAiCredential(supabase, userId, githubCredential?.token ?? null);
 
     const recsText = items
       .map(
-        (r, i) =>
-          `${i + 1}. [${r.kind}] ${r.title} (effort: ${r.effort}/5, market: ${r.market_potential}/5)\n   Repos: ${(r.repos as string[]).join(", ")}\n   Pitch: ${r.pitch}\n   Next steps: ${(r.next_steps as string[]).join("; ")}`,
+        (r, i) => {
+          const reposStr = Array.isArray(r.repos) ? r.repos.join(", ") : String(r.repos ?? "");
+          const stepsStr = Array.isArray(r.next_steps) ? r.next_steps.join("; ") : String(r.next_steps ?? "");
+          return `${i + 1}. [${r.kind}] ${r.title} (effort: ${r.effort}/5, market: ${r.market_potential}/5)\n   Repos: ${reposStr}\n   Pitch: ${r.pitch || ""}\n   Next steps: ${stepsStr}`;
+        },
       )
       .join("\n\n");
 
@@ -1787,17 +1848,249 @@ Return JSON with this exact shape:
 
 Sequence phases from quick wins (low effort, high impact) to moonshots. Group related items. Be practical.`;
 
-    const result = await callAI(
+    const plan = await callAIJson<Record<string, unknown>>(
       {
         messages: [
           { role: "system", content: "You are a helpful product strategist assistant. Always respond with valid JSON." },
           { role: "user", content: prompt },
         ],
+        timeoutMs: 60_000,
       },
       aiConfig,
+      (value) => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null),
     );
 
-    res.json(JSON.parse(result.content || "{}"));
+    actionPlanStateCache.set(`${userId}:${analysisId}`, {
+      status: "completed",
+      plan,
+      error: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const { error: updateErr } = await supabase
+      .from("analyses")
+      .update({ action_plan: plan, action_plan_status: "completed", action_plan_error: null, action_plan_updated_at: new Date().toISOString() })
+      .eq("id", analysisId)
+      .eq("user_id", userId);
+
+    if (updateErr && isActionPlanSchemaMissing(updateErr)) {
+      await saveActionPlanToInvestmentIntelligence(supabase, analysisId, userId, {
+        status: "completed",
+        plan,
+        error: null,
+      });
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Action plan generation failed";
+    console.error(`[action-plan ${analysisId}] failed:`, msg);
+
+    actionPlanStateCache.set(`${userId}:${analysisId}`, {
+      status: "failed",
+      plan: null,
+      error: msg,
+      updatedAt: new Date().toISOString(),
+    });
+
+    captureException(e, {
+      tags: { subsystem: "action-plan", analysis_id: analysisId },
+      extra: { message: msg },
+    });
+
+    const { error: failErr } = await supabase
+      .from("analyses")
+      .update({ action_plan_status: "failed", action_plan_error: msg, action_plan_updated_at: new Date().toISOString() })
+      .eq("id", analysisId)
+      .eq("user_id", userId);
+
+    if (failErr && isActionPlanSchemaMissing(failErr)) {
+      await saveActionPlanToInvestmentIntelligence(supabase, analysisId, userId, {
+        status: "failed",
+        plan: null,
+        error: msg,
+      }).catch(() => {});
+    }
+
+    await flushSentry();
+  }
+}
+
+router.post(
+  "/analysis/:id/action-plan",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const userId = req.userId!;
+
+    let currentStatus: "not_started" | "running" | "completed" | "failed" = "not_started";
+    let currentPlan: Record<string, unknown> | null = null;
+    let schemaMissing = false;
+
+    const { data: existing, error: existingErr } = await req.supabase!
+      .from("analyses")
+      .select("action_plan, action_plan_status")
+      .eq("id", id)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (existingErr) {
+      if (isActionPlanSchemaMissing(existingErr)) {
+        schemaMissing = true;
+        const { data: row, error: rowErr } = await req.supabase!
+          .from("analyses")
+          .select("id, investment_intelligence")
+          .eq("id", id)
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (rowErr) throw new Error(rowErr.message);
+        if (!row) throw Object.assign(new Error("Analysis not found"), { status: 404 });
+
+        const cached = actionPlanStateCache.get(`${userId}:${id}`);
+        if (cached) {
+          currentStatus = cached.status;
+          currentPlan = cached.plan;
+        } else if (
+          row.investment_intelligence &&
+          typeof row.investment_intelligence === "object" &&
+          (row.investment_intelligence as any)._action_plan
+        ) {
+          const fallback = (row.investment_intelligence as any)._action_plan;
+          currentStatus = fallback.status || "not_started";
+          currentPlan = fallback.plan || null;
+        }
+      } else {
+        throw new Error(existingErr.message);
+      }
+    } else {
+      if (!existing) throw Object.assign(new Error("Analysis not found"), { status: 404 });
+      currentStatus = (existing.action_plan_status as any) || "not_started";
+      currentPlan = (existing.action_plan as any) || null;
+
+      // Check cache in case cache has fresher state
+      const cached = actionPlanStateCache.get(`${userId}:${id}`);
+      if (cached && currentStatus === "not_started") {
+        currentStatus = cached.status;
+        currentPlan = cached.plan;
+      }
+    }
+
+    // Already generated — return the cached result instantly, no re-run.
+    if (currentStatus === "completed" && currentPlan) {
+      res.json({ status: "completed", plan: currentPlan, error: null });
+      return;
+    }
+    // Already in flight — don't kick off a second concurrent LLM call.
+    if (currentStatus === "running") {
+      res.json({ status: "running", plan: null, error: null });
+      return;
+    }
+
+    actionPlanStateCache.set(`${userId}:${id}`, {
+      status: "running",
+      plan: null,
+      error: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    if (!schemaMissing) {
+      const { error: markErr } = await req.supabase!
+        .from("analyses")
+        .update({ action_plan_status: "running", action_plan_error: null, action_plan_updated_at: new Date().toISOString() })
+        .eq("id", id)
+        .eq("user_id", userId);
+      if (markErr && !isActionPlanSchemaMissing(markErr)) {
+        throw new Error(markErr.message);
+      }
+    } else {
+      await saveActionPlanToInvestmentIntelligence(req.supabase!, id, userId, {
+        status: "running",
+        plan: null,
+        error: null,
+      }).catch(() => {});
+    }
+
+    runInBackground(runActionPlanJob(req.supabase!, id, userId), "action-plan-job");
+
+    res.json({ status: "running", plan: null, error: null });
+  }),
+);
+
+router.get(
+  "/analysis/:id/action-plan",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const userId = req.userId!;
+
+    const { data, error } = await req.supabase!
+      .from("analyses")
+      .select("action_plan, action_plan_status, action_plan_error")
+      .eq("id", id)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error) {
+      if (isActionPlanSchemaMissing(error)) {
+        const cached = actionPlanStateCache.get(`${userId}:${id}`);
+        if (cached) {
+          res.json({
+            status: cached.status,
+            plan: cached.plan,
+            error: cached.error,
+          });
+          return;
+        }
+
+        const { data: row, error: rowErr } = await req.supabase!
+          .from("analyses")
+          .select("id, investment_intelligence")
+          .eq("id", id)
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (rowErr) throw new Error(rowErr.message);
+        if (!row) throw Object.assign(new Error("Analysis not found"), { status: 404 });
+
+        if (
+          row.investment_intelligence &&
+          typeof row.investment_intelligence === "object" &&
+          (row.investment_intelligence as any)._action_plan
+        ) {
+          const fallback = (row.investment_intelligence as any)._action_plan;
+          res.json({
+            status: fallback.status ?? "not_started",
+            plan: fallback.plan ?? null,
+            error: fallback.error ?? null,
+          });
+          return;
+        }
+
+        res.json({
+          status: "not_started",
+          plan: null,
+          error: null,
+        });
+        return;
+      }
+      throw new Error(error.message);
+    }
+
+    if (!data) throw Object.assign(new Error("Analysis not found"), { status: 404 });
+
+    const cached = actionPlanStateCache.get(`${userId}:${id}`);
+    const dbStatus = data.action_plan_status ?? "not_started";
+    if (dbStatus === "not_started" && cached && cached.status !== "not_started") {
+      res.json({
+        status: cached.status,
+        plan: cached.plan ?? data.action_plan ?? null,
+        error: cached.error ?? data.action_plan_error ?? null,
+      });
+      return;
+    }
+
+    res.json({
+      status: data.action_plan_status ?? "not_started",
+      plan: data.action_plan ?? null,
+      error: data.action_plan_error ?? null,
+    });
   }),
 );
 
@@ -1843,7 +2136,7 @@ Return JSON with this exact shape:
 
 Include actual git commands (clone, remote add, merge --allow-unrelated-histories, etc). Be specific about conflict resolution strategy.`;
 
-    const result = await callAI(
+    const parsed = await callAIJson<Record<string, unknown>>(
       {
         messages: [
           { role: "system", content: "You are a helpful senior engineer. Always respond with valid JSON." },
@@ -1851,9 +2144,10 @@ Include actual git commands (clone, remote add, merge --allow-unrelated-historie
         ],
       },
       aiConfig,
+      (value) => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null),
     );
 
-    res.json(JSON.parse(result.content || "{}"));
+    res.json(parsed);
   }),
 );
 

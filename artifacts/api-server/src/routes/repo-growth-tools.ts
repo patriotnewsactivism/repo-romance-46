@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
-import { callAI } from "../lib/ai-provider";
+import { callAI, type AIProviderConfig } from "../lib/ai-provider";
 import { createAgenticPreview } from "../lib/agentic-preview";
 import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "../lib/credentials";
 import {
@@ -271,7 +271,7 @@ export function isDocumentationPath(path: string) {
 export async function generateGrowthAnalysis(
   system: string,
   user: string,
-  aiCredential: { provider: string; apiKey: string | null },
+  aiCredential: AIProviderConfig,
 ): Promise<AiGrowth> {
   const response = await callAI(
     {
@@ -280,7 +280,7 @@ export async function generateGrowthAnalysis(
       thinkingLevel: "high",
       timeoutMs: 90_000,
     },
-    { provider: aiCredential.provider, apiKey: aiCredential.apiKey },
+    aiCredential,
   );
 
   const parsed = await parseModelJsonWithRepair<AiGrowth>(response.content || "", {
@@ -305,7 +305,7 @@ export async function generateGrowthAnalysis(
           thinkingLevel: "low",
           timeoutMs: 60_000,
         },
-        { provider: aiCredential.provider, apiKey: aiCredential.apiKey },
+        aiCredential,
       );
       return repairResult.content || "";
     },

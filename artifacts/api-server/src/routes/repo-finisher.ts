@@ -2,8 +2,9 @@ import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
-import { callAI } from "../lib/ai-provider";
-import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "../lib/credentials";
+import { type AIProviderConfig } from "../lib/ai-provider";
+import { callAIJson } from "../lib/call-ai-json";
+import { loadAiCredential, loadGithubCredential, requireGithubCredential, toAiProviderConfig } from "../lib/credentials";
 
 const router: IRouter = Router();
 
@@ -309,8 +310,7 @@ async function generateFinishPlan(
   },
   files: { path: string; content: string }[],
   nextSteps: string[],
-  aiProvider: string,
-  aiKey: string | null,
+  ai: AIProviderConfig,
 ): Promise<AIFinishPlan> {
   const fileSummaries = files.map((f) => `--- FILE: ${f.path} ---\n${f.content.slice(0, 3000)}`).join("\n\n");
 
@@ -353,7 +353,7 @@ ${nextSteps.map((s) => `- ${s}`).join("\n")}
 Current source files (top ${files.length}):
 ${fileSummaries}`;
 
-  const aiResult = await callAI(
+  return callAIJson<AIFinishPlan>(
     {
       messages: [
         { role: "system", content: system },
@@ -390,9 +390,14 @@ ${fileSummaries}`;
         },
       },
     },
-    { provider: aiProvider, apiKey: aiKey },
+    ai,
+    (value) => {
+      if (!value || typeof value !== "object") return null;
+      const row = value as AIFinishPlan;
+      if (!row.analysis || !Array.isArray(row.changes)) return null;
+      return row;
+    },
   );
-  return JSON.parse(aiResult.content || "{}") as AIFinishPlan;
 }
 
 async function fetchKeyFiles(
@@ -515,8 +520,7 @@ export async function finishRepoCore(
     repoData,
     files,
     nextSteps,
-    aiCredential.provider,
-    aiCredential.apiKey,
+    toAiProviderConfig(aiCredential),
   );
 
   const changes = validatePlanChanges(plan.changes, repoTree);

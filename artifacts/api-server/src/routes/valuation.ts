@@ -2,8 +2,9 @@ import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
-import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "../lib/credentials";
-import { callAI } from "../lib/ai-provider";
+import { loadAiCredential, loadGithubCredential, requireGithubCredential, toAiProviderConfig } from "../lib/credentials";
+import type { AIProviderConfig } from "../lib/ai-provider";
+import { callAIJson } from "../lib/call-ai-json";
 
 const router: IRouter = Router();
 
@@ -136,8 +137,7 @@ async function generateValuation(
     estimated_hours: number | null;
     next_steps: string[];
   } | null,
-  aiProvider: string,
-  aiKey: string | null,
+  ai: AIProviderConfig,
 ): Promise<Valuation> {
   const system = `You are a technology investment analyst and M&A advisor specializing in codebase and software project valuations.
 You value software projects the way a VC or acquirer would — based on:
@@ -189,7 +189,7 @@ Analysis Context:
 - Next steps: ${analysisItem.next_steps.join("; ")}`
     : "";
 
-  const aiResult = await callAI(
+  return callAIJson<Valuation>(
     {
       messages: [
         { role: "system", content: system },
@@ -260,9 +260,14 @@ Analysis Context:
         },
       },
     },
-    { provider: aiProvider, apiKey: aiKey },
+    ai,
+    (value) => {
+      if (!value || typeof value !== "object") return null;
+      const row = value as Valuation;
+      if (!Number.isFinite(row.estimated_value_low) || !Number.isFinite(row.estimated_value_high) || !row.summary) return null;
+      return row;
+    },
   );
-  return JSON.parse(aiResult.content || "{}") as Valuation;
 }
 
 router.post(
@@ -319,7 +324,7 @@ router.post(
             }
           : null;
 
-        const valuation = await generateValuation(repo, metrics, analysisContext, ai.provider, ai.apiKey);
+        const valuation = await generateValuation(repo, metrics, analysisContext, toAiProviderConfig(ai));
         // Assigned here rather than trusted from the AI response — we already
         // know which repo this is from the loop, and the AI JSON schema
         // doesn't ask for it.
@@ -338,7 +343,7 @@ router.post(
 
     valuations.sort((a, b) => b.estimated_value_high - a.estimated_value_high);
 
-    const topPicksResult = valuations.slice(0, 3).map((v, i) => ({ repo: `Pick #${i + 1}`, reason: v.summary }));
+    const topPicksResult = valuations.slice(0, 3).map((v) => ({ repo: v.repo, reason: v.summary }));
 
     const result: PortfolioValuation = {
       total_estimated_value_low: totalLow,

@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { runInBackground } from "./background-tasks";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { callAI } from "./ai-provider";
-import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "./credentials";
+import { type AIProviderConfig } from "./ai-provider";
+import { callAIJson } from "./call-ai-json";
+import { loadAiCredential, loadGithubCredential, requireGithubCredential, toAiProviderConfig } from "./credentials";
 import { loadOperationalMemory, memoryGuidance, recordOperationalMemory } from "./learning-memory";
 import { IMMUTABLE_AGENT_SAFETY_POLICY } from "./prompt-strategy-evolution";
 import {
@@ -273,10 +274,10 @@ function changesFingerprint(changes: Array<{ path: string; status: string; conte
 }
 
 async function diagnoseFailure(
-  ai: { provider: string; apiKey: string | null },
+  ai: AIProviderConfig,
   input: Record<string, unknown>,
 ): Promise<RepairDiagnosis> {
-  const result = await callAI({
+  return callAIJson<RepairDiagnosis>({
     messages: [
       {
         role: "system",
@@ -307,8 +308,19 @@ async function diagnoseFailure(
     },
     thinkingLevel: "high",
     timeoutMs: 60_000,
-  }, ai);
-  return JSON.parse(result.content || "{}") as RepairDiagnosis;
+  }, ai, (value) => {
+    if (!value || typeof value !== "object") return null;
+    const row = value as RepairDiagnosis;
+    if (!row.rootCause || !Number.isFinite(row.confidence)) return null;
+    return {
+      ...row,
+      evidence: Array.isArray(row.evidence) ? row.evidence : [],
+      rejectedCauses: Array.isArray(row.rejectedCauses) ? row.rejectedCauses : [],
+      repairStrategy: Array.isArray(row.repairStrategy) ? row.repairStrategy : [],
+      regressionRisks: Array.isArray(row.regressionRisks) ? row.regressionRisks : [],
+      stopIf: Array.isArray(row.stopIf) ? row.stopIf : [],
+    };
+  });
 }
 
 async function prepareRepairPlan(
@@ -350,7 +362,7 @@ async function prepareRepairPlan(
   if (!aiCredential.apiKey) throw new Error(`No usable ${aiCredential.provider} credential is configured for CI repair.`);
   const memory = memoryGuidance(memoriesResult, 12);
   const prior = previousAttempts.data ?? [];
-  const ai = { provider: aiCredential.provider, apiKey: aiCredential.apiKey };
+  const ai = toAiProviderConfig(aiCredential);
   const diagnosisInput = {
     repository: run.repo,
     branch: run.branch_name,
@@ -371,7 +383,7 @@ async function prepareRepairPlan(
 
   const system = `You are RepoFinisher's bounded CI repair coding agent. A separate diagnostician already analyzed the failure. Implement the smallest patch that addresses the accepted root cause and nothing else.\n\n${IMMUTABLE_AGENT_SAFETY_POLICY}\n\nNON-NEGOTIABLE REPAIR RULES:\n- Never weaken, remove, skip, mute, or rewrite tests.\n- Never modify GitHub Actions workflows, CODEOWNERS, SECURITY.md, lockfiles, credential files, or secrets.\n- Never delete files.\n- Never change existing package.json test, lint, or typecheck scripts.\n- Fix product/source/build configuration rather than changing acceptance criteria.\n- Use only supplied repository files, CI evidence, measured operational memory, and the diagnosis. Do not invent APIs or dependencies.\n- Do not repeat a prior failed repair unchanged.\n- Keep the patch minimal and directly tied to the root cause.\n- Return strict JSON only.`;
 
-  const result = await callAI(
+  const generated = await callAIJson<{ analysis?: string; changes?: AIFileChange[] }>(
     {
       messages: [
         { role: "system", content: system },
@@ -415,8 +427,13 @@ async function prepareRepairPlan(
       timeoutMs: 60_000,
     },
     ai,
+    (value) => {
+      if (!value || typeof value !== "object") return null;
+      const row = value as { analysis?: string; changes?: AIFileChange[] };
+      if (!Array.isArray(row.changes) || row.changes.length === 0) return null;
+      return row;
+    },
   );
-  const generated = JSON.parse(result.content || "{}") as { analysis?: string; changes?: AIFileChange[] };
   const changes = validatePlanChanges(generated.changes ?? [], tree);
   assertRepairSafety(changes, before);
 

@@ -226,9 +226,13 @@ paths:
 
   /analysis/{id}/action-plan:
     post:
-      operationId: getActionPlan
+      operationId: startActionPlan
       tags: [analysis]
-      summary: Generate a phased action plan for recommendations
+      summary: >-
+        Kick off phased action plan generation in the background. Returns
+        immediately (200) with the current status instead of blocking on the
+        LLM call — poll GET /analysis/{id}/action-plan for the result. If a
+        completed plan is already cached, it is returned right away.
       security:
         - bearerAuth: []
       parameters:
@@ -239,11 +243,31 @@ paths:
             type: string
       responses:
         "200":
-          description: Action plan
+          description: Action plan generation started (or already cached/running)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ActionPlan"
+                $ref: "#/components/schemas/ActionPlanStatus"
+
+    get:
+      operationId: getActionPlanStatus
+      tags: [analysis]
+      summary: Poll the status/result of an in-progress or completed action plan
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current action plan status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActionPlanStatus"
 
   /analysis/{id}/merge-instructions:
     post:
@@ -813,6 +837,20 @@ components:
           type: array
           items:
             type: string
+
+    ActionPlanStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [not_started, running, completed, failed]
+        plan:
+          allOf:
+            - $ref: "#/components/schemas/ActionPlan"
+          nullable: true
+        error:
+          type: ["string", "null"]
 
     MergeInput:
       type: object

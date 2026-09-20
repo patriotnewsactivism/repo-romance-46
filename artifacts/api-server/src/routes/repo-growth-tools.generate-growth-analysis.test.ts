@@ -41,6 +41,24 @@ afterEach(() => {
 });
 
 describe("generateGrowthAnalysis — fenced/malformed model JSON handling (Defect 3)", () => {
+  it("uses the exact configured model and reasoning effort instead of silently falling back to the platform default", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(chatCompletion(JSON.stringify(validGrowthPayload())));
+
+    await generateGrowthAnalysis("system", "user", {
+      provider: "openrouter",
+      apiKey: "test-key",
+      model: "z-ai/glm-5.2:free",
+      reasoningEffort: "high",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const body = JSON.parse(String(request.body)) as Record<string, unknown>;
+    expect(body.model).toBe("z-ai/glm-5.2:free");
+    expect(body.reasoning).toEqual({ effort: "high" });
+    expect(body.models).toBeUndefined();
+  });
+
   it("parses a plain unfenced JSON growth analysis on the first attempt", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(chatCompletion(JSON.stringify(validGrowthPayload())));
     const result = await generateGrowthAnalysis("system", "user", aiCredential);

@@ -9,7 +9,7 @@ import {
   getListAnalysesQueryKey,
 } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { getSession, signInWithGitHub } from '@/lib/auth';
+import { getSession, signInWithGitHub, signOut } from '@/lib/auth';
 import { AppHeader } from '@/components/app-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -65,9 +65,15 @@ export default function Dashboard() {
     });
   };
 
+  const handleSignOut = async () => {
+    await signOut();
+    setLocation('/auth');
+  };
+
   if (githubLoading) {
     return (
       <div className="min-h-screen bg-background dark">
+        <AppHeader section="Portfolio" onSignOut={() => void handleSignOut()} />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <Skeleton className="h-8 w-64 mb-8" />
           <div className="grid gap-4 md:grid-cols-3 mb-8">
@@ -82,18 +88,21 @@ export default function Dashboard() {
 
   if (!githubStatus?.connected) {
     return (
-      <div className="min-h-screen bg-background dark flex items-center justify-center p-4">
-        <Card className="max-w-md">
-          <CardHeader>
-            <CardTitle>GitHub Not Connected</CardTitle>
-            <CardDescription>Please connect your GitHub account to continue</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button className="w-full" onClick={() => signInWithGitHub()} data-testid="button-connect-github">
-              Connect GitHub
-            </Button>
-          </CardContent>
-        </Card>
+      <div className="min-h-screen bg-background dark">
+        <AppHeader section="Portfolio" onSignOut={() => void handleSignOut()} />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 flex justify-center">
+          <Card className="max-w-md w-full">
+            <CardHeader>
+              <CardTitle>GitHub Not Connected</CardTitle>
+              <CardDescription>Connect GitHub with repo write access so analysis and draft PRs can run.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button className="w-full" onClick={() => signInWithGitHub()} data-testid="button-connect-github">
+                Connect GitHub
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     );
   }
@@ -107,6 +116,7 @@ export default function Dashboard() {
           displayName: githubStatus.displayName,
           avatarUrl: githubStatus.avatarUrl,
         }}
+        onSignOut={() => void handleSignOut()}
       />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-8">
@@ -169,7 +179,7 @@ export default function Dashboard() {
           <CardHeader>
             <CardTitle>Run New Analysis</CardTitle>
             <CardDescription>
-              Analyze the portfolio, rank completion and value, then finish individual repositories with one autonomous action.
+              Score completion and readiness, put an honest number on the portfolio, then finish ranked repositories with draft PRs.
             </CardDescription>
           </CardHeader>
           <CardContent>

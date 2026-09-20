@@ -189,6 +189,49 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
   }, [loadRun, runId]);
 
   useEffect(() => {
+    let cancelled = false;
+    const params = new URLSearchParams({ repo, limit: "1" });
+    if (analysisId) params.set("analysisId", analysisId);
+    customFetch<Array<{ id: string }>>(`/api/repo-finisher/runs?${params.toString()}`, { responseType: "json" })
+      .then(async (runs) => {
+        if (cancelled || !Array.isArray(runs) || runs.length === 0) return;
+        const loaded = await loadRun(runs[0].id);
+        if (!cancelled) setShowPlan(Boolean(loaded.run.summary));
+      })
+      .catch(() => undefined);
+
+    const promptParams = new URLSearchParams({ repo, limit: "1" });
+    if (analysisId) promptParams.set("analysisId", analysisId);
+    customFetch<Array<{ id: string }>>(`/api/repo-finisher/external-prompts?${promptParams.toString()}`, { responseType: "json" })
+      .then(async (prompts) => {
+        if (cancelled || !Array.isArray(prompts) || prompts.length === 0) return;
+        const full = await customFetch<{
+          id: string;
+          created_at: string;
+          prompt_md: string;
+          provider_hint: ExternalPromptProvider;
+          prompt_version: string;
+          assessment: ExternalPromptResponse["assessment"];
+        }>(`/api/repo-finisher/external-prompts/${prompts[0].id}`, { responseType: "json" });
+        if (cancelled || !full.prompt_md) return;
+        setExternalPrompt({
+          id: full.id,
+          createdAt: full.created_at,
+          prompt: full.prompt_md,
+          provider: full.provider_hint,
+          promptVersion: full.prompt_version,
+          assessment: full.assessment,
+          note: "Restored from the last generated handoff for this repository.",
+        });
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [analysisId, loadRun, repo]);
+
+  useEffect(() => {
     if (!runId || (status !== "executing" && status !== "verifying" && status !== "repairing")) return;
     const timer = window.setInterval(() => void refreshRun(true), 4000);
     return () => window.clearInterval(timer);

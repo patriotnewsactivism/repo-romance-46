@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_AI_MODELS } from "./ai-model-config";
 import {
+  OPENROUTER_AGENT_CHAIN,
   OPENROUTER_FREE_AGENT_CHAIN,
+  OPENROUTER_PAID_AGENT_CHAIN,
   callAI,
+  providerRequestError,
+  FINAL_SYNTHESIS_TIMEOUT_MS,
   resolveAIRequestTimeoutMs,
   sanitizeGeminiResponseSchema,
   type AIRequest,
@@ -27,11 +32,44 @@ describe("resolveAIRequestTimeoutMs", () => {
       resolveAIRequestTimeoutMs(
         request("You are a world-class product strategist performing the final synthesis of a developer portfolio analysis."),
       ),
-    ).toBe(8000);
+    ).toBe(FINAL_SYNTHESIS_TIMEOUT_MS);
   });
 
   it("uses the normal request timeout for other AI stages", () => {
     expect(resolveAIRequestTimeoutMs(request("You are the portfolio profiler."))).toBe(45000);
+  });
+
+  it("keeps the request deadline active until the response body is complete", async () => {
+    const body = JSON.stringify({ choices: [{ message: { content: "body-complete" } }] });
+    const response = new Response(body, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+    let releaseBody: (() => void) | undefined;
+    vi.spyOn(response, "text").mockImplementation(
+      () => new Promise<string>((resolve) => {
+        releaseBody = () => resolve(body);
+      }),
+    );
+    vi.spyOn(response, "json").mockResolvedValue({ choices: [{ message: { content: "header-only" } }] });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response);
+
+    const pending = callAI(request("provider test", { timeoutMs: 1000 }), {
+      provider: "openrouter",
+      model: "example/vendor-model",
+      apiKey: "test-api-key",
+    });
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    releaseBody?.();
+    await expect(pending).resolves.toEqual({ content: "body-complete", model: undefined });
   });
 
   it("honors an explicit bounded timeout", () => {
@@ -42,6 +80,11 @@ describe("resolveAIRequestTimeoutMs", () => {
 });
 
 describe("OpenRouter routing", () => {
+  it("keeps the in-code OpenRouter default on the free agent-pool sentinel", () => {
+    expect(DEFAULT_AI_MODELS.openrouter).toBe(OPENROUTER_FREE_AGENT_CHAIN[0]);
+    expect(DEFAULT_AI_MODELS.google).toBe("gemini-3.8-flash");
+  });
+
   it("uses the saved provider model and OpenRouter bearer endpoint", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ choices: [{ message: { content: "ready" } }] }), {
@@ -67,7 +110,7 @@ describe("OpenRouter routing", () => {
     expect(body.models).toBeUndefined();
   });
 
-  it("routes the reviewed MiniMax default through Nemotron fallback and records the served model", async () => {
+  it("routes the reviewed Nex Mini default through the fast free fallback batch and records the served model", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({ model: OPENROUTER_FREE_AGENT_CHAIN[1], choices: [{ message: { content: "fallback-ready" } }] }),
@@ -84,8 +127,81 @@ describe("OpenRouter routing", () => {
     const [, init] = fetchMock.mock.calls[0];
     const body = JSON.parse(String(init?.body));
     expect(body.model).toBe(OPENROUTER_FREE_AGENT_CHAIN[0]);
-    expect(body.models).toEqual([...OPENROUTER_FREE_AGENT_CHAIN]);
+    expect(body.models).toEqual(OPENROUTER_FREE_AGENT_CHAIN.slice(0, 3));
     expect(result).toEqual({ content: "fallback-ready", model: OPENROUTER_FREE_AGENT_CHAIN[1] });
+  });
+
+  it("falls back to the second free chunk when every model in the first chunk fails", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: "nope", code: 404 } }), { status: 404 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ model: OPENROUTER_FREE_AGENT_CHAIN[3], choices: [{ message: { content: "second-chunk" } }] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+
+    const result = await callAI(request("chunked fallback", { timeoutMs: 1000 }), {
+      provider: "openrouter",
+      model: OPENROUTER_FREE_AGENT_CHAIN[0],
+      apiKey: "test-api-key",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [, secondInit] = fetchMock.mock.calls[1];
+    const secondBody = JSON.parse(String(secondInit?.body));
+    expect(secondBody.models).toEqual(OPENROUTER_FREE_AGENT_CHAIN.slice(3, 6));
+    expect(result).toEqual({ content: "second-chunk", model: OPENROUTER_FREE_AGENT_CHAIN[3] });
+  });
+
+  it("reaches the cheap paid continuity batch only after both free batches fail", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("free-1-unavailable", { status: 503 }))
+      .mockResolvedValueOnce(new Response("free-2-unavailable", { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ model: OPENROUTER_PAID_AGENT_CHAIN[0], choices: [{ message: { content: "paid-continuity" } }] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+
+    const result = await callAI(request("paid continuity", { timeoutMs: 1000 }), {
+      provider: "openrouter",
+      model: OPENROUTER_FREE_AGENT_CHAIN[0],
+      apiKey: "test-api-key",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const [, thirdInit] = fetchMock.mock.calls[2];
+    const thirdBody = JSON.parse(String(thirdInit?.body));
+    expect(thirdBody.models).toEqual(OPENROUTER_PAID_AGENT_CHAIN);
+    expect(OPENROUTER_AGENT_CHAIN.slice(6)).toEqual(OPENROUTER_PAID_AGENT_CHAIN);
+    expect(result).toEqual({ content: "paid-continuity", model: OPENROUTER_PAID_AGENT_CHAIN[0] });
+  });
+
+  it("does not retry an exhausted OpenRouter fallback group before moving to the next group", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("quota", { status: 429 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ model: OPENROUTER_FREE_AGENT_CHAIN[3], choices: [{ message: { content: "next-group" } }] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+
+    const result = await callAI(request("quota fallback", { timeoutMs: 1000 }), {
+      provider: "openrouter",
+      model: OPENROUTER_FREE_AGENT_CHAIN[0],
+      apiKey: "test-api-key",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.content).toBe("next-group");
   });
 
   it("sends the saved OpenRouter reasoning effort without changing the exact model slug", async () => {
@@ -127,11 +243,6 @@ describe("OpenRouter routing", () => {
 });
 
 describe("credential normalization", () => {
-  // Production regression: a blank-but-present OpenRouter credential was sent as
-  // `Authorization: Bearer `, and OpenRouter answered
-  // `401 {"error":{"message":"Missing Authentication header","code":401}}`.
-  // That surfaced in the UI as a provider integration failure rather than the
-  // real problem, which was that no usable key was configured.
   it.each([" ", "   ", "\t", "\n", ""])(
     "treats a blank credential (%j) as no credential instead of sending an empty bearer",
     async (blank) => {
@@ -292,5 +403,40 @@ describe("Google structured-output compatibility", () => {
     expect(error!.code).toBe("AI_PROVIDER_ERROR");
     expect(error!.publicMessage).toMatch(/gemini-3\.7-flash/);
     expect(error!.publicMessage).not.toMatch(/schema rejected/);
+  });
+
+  it("parses OpenRouter 402 insufficient credits and returns clean message with payment required code", () => {
+    const rawError = JSON.stringify({
+      error: {
+        message: "Insufficient credits. Add more using https://openrouter.ai/settings/credits",
+        code: 402,
+        metadata: { limit_source: "openrouter_credits", remedy_hint: "Add credits at https://openrouter.ai/settings/credits" },
+      },
+    });
+
+    const err = providerRequestError("openrouter", "openai/gpt-oss-120b", 402, rawError);
+    expect(err.status).toBe(402);
+    expect(err.code).toBe("AI_PROVIDER_PAYMENT_REQUIRED");
+    expect(err.message).toBe(
+      'OpenRouter API error 402 for model "openai/gpt-oss-120b": Insufficient credits. Add more using https://openrouter.ai/settings/credits',
+    );
+    expect(err.publicMessage).toContain("credits exhausted");
+    expect(err.publicMessage).toContain("https://openrouter.ai/settings/credits");
+  });
+
+  it("parses 401 unauthorized errors with specific code and message", () => {
+    const rawError = JSON.stringify({
+      error: {
+        message: "Invalid API key provided",
+      },
+    });
+
+    const err = providerRequestError("openrouter", "nex-agi/nex-n2.5-mini:free", 401, rawError);
+    expect(err.status).toBe(401);
+    expect(err.code).toBe("AI_PROVIDER_UNAUTHORIZED");
+    expect(err.message).toBe(
+      'OpenRouter API error 401 for model "nex-agi/nex-n2.5-mini:free": Invalid API key provided',
+    );
+    expect(err.publicMessage).toContain("rejected the configured credential");
   });
 });

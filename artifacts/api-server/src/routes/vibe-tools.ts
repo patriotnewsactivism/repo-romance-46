@@ -3,8 +3,8 @@ import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
-import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "../lib/credentials";
-import { callAI } from "../lib/ai-provider";
+import { loadAiCredential, loadGithubCredential, requireGithubCredential, toAiProviderConfig } from "../lib/credentials";
+import { callAIJson, validateWithZod } from "../lib/call-ai-json";
 
 const router: IRouter = Router();
 
@@ -30,11 +30,10 @@ async function loadItem(supabase: SupabaseClient, analysisId: string, itemRank: 
   };
 }
 
-/** Sealed-aware provider/key resolution; see `lib/credentials`. */
-async function loadPrefs(supabase: SupabaseClient, userId: string) {
+/** Sealed-aware provider/model/key resolution; see `lib/credentials`. */
+async function loadAi(supabase: SupabaseClient, userId: string) {
   const credential = await loadGithubCredential(supabase, userId);
-  const ai = await loadAiCredential(supabase, userId, credential?.token ?? null);
-  return { custom_ai_provider: ai.provider, custom_ai_key: ai.apiKey };
+  return toAiProviderConfig(await loadAiCredential(supabase, userId, credential?.token ?? null));
 }
 
 async function updateItem(supabase: SupabaseClient, itemId: string, patch: Record<string, unknown>) {
@@ -319,7 +318,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const data = idInput.parse(req.body);
     const item = await loadItem(req.supabase!, data.analysisId, data.itemRank);
-    const prefs = await loadPrefs(req.supabase!, req.userId!);
+    const ai = await loadAi(req.supabase!, req.userId!);
     const githubToken = await loadGhToken(req.supabase!, req.userId!);
     const evidenceResults = await Promise.allSettled(
       item.repos.slice(0, 5).map((repo) => loadRepositoryEvidence(githubToken, repo)),
@@ -364,7 +363,7 @@ Repositories whose evidence was unavailable: ${unavailableRepositories.join(", "
 
 Treat missing evidence as missing. Do not convert it into a positive claim.`;
 
-    const resp = await callAI(
+    const parsed = await callAIJson(
       {
         messages: [
           { role: "system", content: sys },
@@ -372,15 +371,32 @@ Treat missing evidence as missing. Do not convert it into a positive claim.`;
         ],
         responseFormat: { type: "json_schema", json_schema: { name: "market_and_value", strict: true, schema: marketSchema } },
       },
-      { provider: prefs?.custom_ai_provider || "openai", apiKey: prefs?.custom_ai_key || null },
+      ai,
+      validateWithZod(marketResultSchema),
     );
-
-    const parsed = marketResultSchema.parse(JSON.parse(resp.content || "{}"));
     const { valuation, ...market } = parsed;
+    const sourcedCompetitors = (market.competitors ?? []).filter((competitor) => {
+      try {
+        const url = new URL(competitor.url);
+        return (url.protocol === "https:" || url.protocol === "http:") && competitor.url.trim().length > 8;
+      } catch {
+        return false;
+      }
+    });
+    const honestMarket = {
+      ...market,
+      competitors: sourcedCompetitors,
+      risks: [
+        ...(market.risks ?? []),
+        sourcedCompetitors.length === 0
+          ? "Named competitors were omitted here because this path has no live source-backed research. Use Research market & growth when Tavily is configured."
+          : "",
+      ].filter(Boolean),
+    };
 
-    await updateItem(req.supabase!, item.id, { market_analysis: market, valuation });
+    await updateItem(req.supabase!, item.id, { market_analysis: honestMarket, valuation });
 
-    res.json({ market, valuation });
+    res.json({ market: honestMarket, valuation });
   }),
 );
 
@@ -410,7 +426,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const data = idInput.parse(req.body);
     const item = await loadItem(req.supabase!, data.analysisId, data.itemRank);
-    const prefs = await loadPrefs(req.supabase!, req.userId!);
+    const ai = await loadAi(req.supabase!, req.userId!);
 
     const sys = `You are a product engineer and copywriter. Turn a GitHub-derived project idea into a ready-to-ship spec:
 - product_name: short, memorable
@@ -427,7 +443,7 @@ Tech stack: ${item.tech_stack.join(", ") || "flexible"}
 Kind: ${item.kind}
 Existing next steps: ${item.next_steps.join(" | ")}`;
 
-    const resp = await callAI(
+    const spec = await callAIJson<Record<string, unknown>>(
       {
         messages: [
           { role: "system", content: sys },
@@ -435,10 +451,9 @@ Existing next steps: ${item.next_steps.join(" | ")}`;
         ],
         responseFormat: { type: "json_schema", json_schema: { name: "vibe_spec", strict: true, schema: vibeSchema } },
       },
-      { provider: prefs?.custom_ai_provider || "openai", apiKey: prefs?.custom_ai_key || null },
+      ai,
+      (value) => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null),
     );
-
-    const spec = JSON.parse(resp.content || "{}");
     await updateItem(req.supabase!, item.id, { vibe_spec: spec });
     res.json(spec);
   }),
@@ -453,7 +468,7 @@ router.post(
     if (item.repos.length < 2) throw Object.assign(new Error("Need at least 2 repos to combine."), { status: 400 });
 
     const token = await loadGhToken(req.supabase!, req.userId!);
-    const prefs = await loadPrefs(req.supabase!, req.userId!);
+    const ai = await loadAi(req.supabase!, req.userId!);
 
     const planSchema = {
       type: "object",
@@ -477,7 +492,14 @@ router.post(
       required: ["repo_name", "description", "readme_md", "structure", "integration_plan_md", "first_pr_title"],
     };
 
-    const planResp = await callAI(
+    const plan = await callAIJson<{
+      repo_name: string;
+      description: string;
+      readme_md: string;
+      structure: { path: string; purpose: string }[];
+      integration_plan_md: string;
+      first_pr_title: string;
+    }>(
       {
         messages: [
           {
@@ -492,17 +514,21 @@ router.post(
         ],
         responseFormat: { type: "json_schema", json_schema: { name: "combine_plan", strict: true, schema: planSchema } },
       },
-      { provider: prefs?.custom_ai_provider || "openai", apiKey: prefs?.custom_ai_key || null },
+      ai,
+      (value) => {
+        if (!value || typeof value !== "object") return null;
+        const row = value as Record<string, unknown>;
+        if (typeof row.repo_name !== "string" || typeof row.readme_md !== "string") return null;
+        return row as {
+          repo_name: string;
+          description: string;
+          readme_md: string;
+          structure: { path: string; purpose: string }[];
+          integration_plan_md: string;
+          first_pr_title: string;
+        };
+      },
     );
-
-    const plan = JSON.parse(planResp.content || "{}") as {
-      repo_name: string;
-      description: string;
-      readme_md: string;
-      structure: { path: string; purpose: string }[];
-      integration_plan_md: string;
-      first_pr_title: string;
-    };
 
     const meRes = await gh(token, "/user");
     if (!meRes.ok) throw new Error("GitHub /user failed");

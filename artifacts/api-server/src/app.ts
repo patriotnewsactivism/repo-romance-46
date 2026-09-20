@@ -4,6 +4,7 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import pinoHttp from "pino-http";
 import router from "./routes";
+import aiSettingsRolloutRouter from "./routes/ai-settings-rollout";
 import { logger } from "./lib/logger";
 import { config } from "./lib/config";
 import { flushSentry, installExpressErrorHandler } from "./instrument";
@@ -91,6 +92,10 @@ app.use(
   expensiveLimiter,
 );
 
+// Keep AI settings usable during a rolling Supabase migration. These focused
+// handlers run before the main router and fall back to the encrypted legacy
+// preference column only when provider-scoped schema/RPCs are not available.
+app.use("/api", aiSettingsRolloutRouter);
 app.use("/api", router);
 
 // Sentry's Express handler must sit after routes and before our final handler.

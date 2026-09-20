@@ -404,6 +404,29 @@ router.post(
 );
 
 router.get(
+  "/repo-finisher/runs",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const query = z.object({
+      repo: z.string().regex(/^[A-Za-z0-9.-]+\/[A-Za-z0-9._-]+$/).optional(),
+      analysisId: z.string().uuid().optional(),
+      limit: z.coerce.number().int().min(1).max(50).default(10),
+    }).parse(req.query);
+    let request = req.supabase!
+      .from("completion_runs")
+      .select("id, repo, status, analysis_id, item_rank, pr_url, ci_status, error, created_at, updated_at")
+      .eq("user_id", req.userId!)
+      .order("created_at", { ascending: false })
+      .limit(query.limit);
+    if (query.repo) request = request.eq("repo", query.repo);
+    if (query.analysisId) request = request.eq("analysis_id", query.analysisId);
+    const { data, error } = await request;
+    if (error) throw dbError("Failed to list completion runs", error);
+    res.json(data ?? []);
+  }),
+);
+
+router.get(
   "/repo-finisher/runs/:runId",
   requireAuth,
   asyncHandler(async (req, res) => {
