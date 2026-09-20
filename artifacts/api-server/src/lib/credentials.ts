@@ -248,14 +248,17 @@ export async function loadAiCredential(
     // Persist the operator-approved migration with the same authenticated
     // Supabase client. A transient RLS/network failure must not block the
     // current request: the migrated model is already used in-memory.
-    await supabase
-      .from("user_preferences")
-      .update({ custom_ai_model: normalizedSavedModel, updated_at: new Date().toISOString() })
-      .eq("user_id", userId)
-      .then(({ error }) => {
-        if (error) console.warn("[ai-settings] Could not persist model migration:", error.message);
-      })
-      .catch(() => undefined);
+    try {
+      const { error: migrationError } = await supabase
+        .from("user_preferences")
+        .update({ custom_ai_model: normalizedSavedModel, updated_at: new Date().toISOString() })
+        .eq("user_id", userId);
+      if (migrationError) {
+        console.warn("[ai-settings] Could not persist model migration:", migrationError.message);
+      }
+    } catch {
+      // The in-memory selection is already migrated for this request.
+    }
   }
 
   const reasoningEffort = provider === "openrouter"
