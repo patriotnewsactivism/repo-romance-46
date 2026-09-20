@@ -141,6 +141,22 @@ export function platformAiModel(provider: string): string | null {
   return defaultAiModel(provider);
 }
 
+const SAVED_MODEL_MIGRATIONS: Record<string, Record<string, string>> = {
+  openrouter: {
+    "~deepseek/deepseek-pro-latest": "z-ai/glm-5.3-flashx",
+  },
+};
+
+/**
+ * Apply explicit operator-approved model migrations to persisted user choices.
+ * This never changes credentials and never substitutes arbitrary models.
+ */
+export function normalizeSavedAiModel(provider: string, model: string | null | undefined): string | null {
+  const trimmed = typeof model === "string" ? model.trim() : "";
+  if (!trimmed) return null;
+  return SAVED_MODEL_MIGRATIONS[provider]?.[trimmed] ?? trimmed;
+}
+
 /** Safe platform readiness metadata. Never includes credential values. */
 export function platformAiStatus() {
   return {
@@ -224,7 +240,24 @@ export async function loadAiCredential(
 
   const fallbackProvider = platformAiProvider();
   const provider = normalizeAiProvider(row?.custom_ai_provider, fallbackProvider);
-  const model = row?.custom_ai_model?.trim() || platformAiModel(provider);
+  const savedModel = row?.custom_ai_model?.trim() || null;
+  const normalizedSavedModel = normalizeSavedAiModel(provider, savedModel);
+  const model = normalizedSavedModel || platformAiModel(provider);
+
+  if (savedModel && normalizedSavedModel && normalizedSavedModel !== savedModel) {
+    // Persist the operator-approved migration with the same authenticated
+    // Supabase client. A transient RLS/network failure must not block the
+    // current request: the migrated model is already used in-memory.
+    await supabase
+      .from("user_preferences")
+      .update({ custom_ai_model: normalizedSavedModel, updated_at: new Date().toISOString() })
+      .eq("user_id", userId)
+      .then(({ error }) => {
+        if (error) console.warn("[ai-settings] Could not persist model migration:", error.message);
+      })
+      .catch(() => undefined);
+  }
+
   const reasoningEffort = provider === "openrouter"
     ? normalizeOpenRouterReasoningEffort(row?.custom_ai_reasoning_effort)
     : null;
