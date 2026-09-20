@@ -76,6 +76,24 @@ export function FinishUntilTargetControl({
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    customFetch<FinishSession[]>(`/api/repo-finisher/completion-sessions?repo=${encodeURIComponent(repo)}`, { responseType: "json" })
+      .then(async (sessions) => {
+        if (cancelled || !Array.isArray(sessions) || sessions.length === 0) return;
+        const recent = sessions.find((candidate) => candidate.status === "active") ?? sessions[0];
+        const loaded = await load(recent.id, true);
+        if (!cancelled) {
+          setDetail(loaded);
+          if (loaded.session.status === "active") setExpanded(true);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [load, repo]);
+
+  useEffect(() => {
     const session = detail?.session;
     if (!session || session.status !== "active") return;
     const timer = window.setInterval(() => void load(session.id, true).catch(() => undefined), 5000);
@@ -106,7 +124,23 @@ export function FinishUntilTargetControl({
         toast.success(`Finish-until-target started using ${result.workerMode || "the configured worker"}.`);
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message.slice(0, 240) : "Unable to start finish-until-target.");
+      const message = error instanceof Error ? error.message : "Unable to start finish-until-target.";
+      if (/already exists/i.test(message)) {
+        try {
+          const sessions = await customFetch<FinishSession[]>(`/api/repo-finisher/completion-sessions?repo=${encodeURIComponent(repo)}`, { responseType: "json" });
+          const recent = sessions.find((candidate) => candidate.status === "active") ?? sessions[0];
+          if (recent) {
+            const loaded = await load(recent.id, true);
+            setDetail(loaded);
+            setExpanded(true);
+            toast.success("Resumed the existing finish-until-target session.");
+            return;
+          }
+        } catch {
+          /* fall through to the original error */
+        }
+      }
+      toast.error(message.slice(0, 240));
     } finally {
       setBusy(null);
     }

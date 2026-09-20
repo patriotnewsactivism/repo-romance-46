@@ -9,6 +9,7 @@ import { FinishUntilTargetControl } from '@/components/finish-until-target-contr
 import { PortfolioFinishControl } from '@/components/portfolio-finish-control';
 import { TieredIntelligencePanel } from '@/components/tiered-intelligence-panel';
 import { PortfolioValuationV2Panel } from '@/components/portfolio-valuation-v2-panel';
+import { DualNeedleGauge } from '@/components/dual-needle-gauge';
 import { RepositoryGrowthToolsPanel } from '@/components/repository-growth-tools-panel';
 import {
   AlertTriangle,
@@ -50,6 +51,9 @@ interface RankingItem {
     kind?: string;
     title?: string;
     pitch?: string;
+    analysisItemRank?: number | null;
+    scoringPass?: string;
+    completion?: { overall?: number; evidenceCeiling?: number | null };
     recommendedNextSteps?: string[];
     valueImprovements?: Array<{
       id: string;
@@ -208,6 +212,18 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
             <h3 className="text-lg sm:text-xl font-semibold break-words">{data.recommendation}</h3>
             <p className="text-xs text-muted-foreground leading-relaxed">{data.evidencePolicy}</p>
           </div>
+          {data.ranking.length > 0 && (
+            <DualNeedleGauge
+              completionPct={data.ranking.reduce((sum, item) => sum + item.completionPct, 0) / data.ranking.length}
+              readinessPct={data.ranking.reduce((sum, item) => sum + item.productionReadinessPct, 0) / data.ranking.length}
+              evidenceCeiling={(() => {
+                const ceilings = data.ranking
+                  .map((item) => item.details?.completion?.evidenceCeiling)
+                  .filter((value): value is number => typeof value === "number");
+                return ceilings.length > 0 ? Math.min(...ceilings) : null;
+              })()}
+            />
+          )}
           <Button variant="outline" size="sm" onClick={run} disabled={running} className="gap-2 shrink-0">
             {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Refresh full portfolio
@@ -273,6 +289,8 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
                 <Badge variant="outline">#{item.rank}</Badge>
                 <span className="font-mono font-semibold break-all">{item.repo}</span>
                 {item.details?.kind && <Badge variant="secondary">{item.details.kind}</Badge>}
+                {item.details?.scoringPass === "coverage" && <Badge variant="outline">coverage estimate</Badge>}
+                {item.details?.scoringPass === "measured" && <Badge variant="outline">measured</Badge>}
               </div>
               {item.details?.pitch && <p className="mt-2 text-sm text-muted-foreground leading-relaxed">{item.details.pitch}</p>}
               {item.rationale.length > 0 && <p className="mt-2 text-xs text-muted-foreground">{item.rationale.join(' • ')}</p>}
@@ -284,7 +302,7 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
           </div>
 
           <div className="grid gap-2 grid-cols-2 xl:grid-cols-4">
-            <div className="rounded border p-3"><div className="text-xs text-muted-foreground">Completion</div><div className="font-semibold">{item.completionPct}%</div><div className="text-[11px] text-muted-foreground">Readiness {item.productionReadinessPct}%</div></div>
+            <div className="rounded border p-3"><div className="text-xs text-muted-foreground">Completion</div><div className="font-semibold">{item.completionPct}%</div><div className="text-[11px] text-muted-foreground">Readiness {item.productionReadinessPct}%{item.details?.completion?.evidenceCeiling != null ? ` · evidence ceiling ${item.details.completion.evidenceCeiling}%` : ""}</div></div>
             <div className="rounded border p-3"><div className="text-xs text-muted-foreground">Standalone present → potential</div><div className="font-semibold break-words">{money(item.presentValueUsd.low)}–{money(item.presentValueUsd.high)}</div><div className="text-[11px] text-emerald-500 break-words">→ {money(item.potentialValueUsd.low)}–{money(item.potentialValueUsd.high)}</div></div>
             <div className="rounded border p-3"><div className="text-xs text-muted-foreground">Remaining work</div><div className="font-semibold">~{Math.round(item.remainingWork.hours)}h</div><div className="text-[11px] text-muted-foreground break-words">{money(item.remainingWork.costUsd.low)}–{money(item.remainingWork.costUsd.high)}</div></div>
             <div className="rounded border p-3"><div className="text-xs text-muted-foreground">Commercialization</div><div className="font-semibold">{item.commercializationProbability}%</div><div className="text-[11px] text-muted-foreground">Evidence {item.evidenceConfidence}/100</div></div>
@@ -323,10 +341,24 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
             <p className="text-xs text-muted-foreground leading-relaxed">
               A single finish pass opens one draft PR. To actually drive the repo to finished targets, use <span className="font-medium text-foreground">Finish until target</span> — it re-scores and iterates until 95% completion / 90% readiness or a safe stop.
             </p>
-            <FinishUntilTargetControl repo={item.repo} nextSteps={item.details?.recommendedNextSteps ?? []} analysisId={analysisId} />
+            <FinishUntilTargetControl
+              repo={item.repo}
+              nextSteps={item.details?.recommendedNextSteps ?? []}
+              analysisId={analysisId}
+              itemRank={typeof item.details?.analysisItemRank === "number" ? item.details.analysisItemRank : undefined}
+            />
           </div>
-          <FinishRepoAction repo={item.repo} nextSteps={item.details?.recommendedNextSteps ?? []} analysisId={analysisId} />
-          <RepositoryGrowthToolsPanel analysisId={analysisId} itemRank={item.rank} repo={item.repo} />
+          <FinishRepoAction
+            repo={item.repo}
+            nextSteps={item.details?.recommendedNextSteps ?? []}
+            analysisId={analysisId}
+            itemRank={typeof item.details?.analysisItemRank === "number" ? item.details.analysisItemRank : undefined}
+          />
+          <RepositoryGrowthToolsPanel
+            analysisId={analysisId}
+            itemRank={typeof item.details?.analysisItemRank === "number" ? item.details.analysisItemRank : item.rank}
+            repo={item.repo}
+          />
 
           <details className="rounded border p-3">
             <summary className="cursor-pointer text-sm font-medium flex items-center gap-2"><DollarSign className="h-4 w-4" /> Evidence ledger</summary>

@@ -2,13 +2,13 @@ import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../lib/async-handler";
 import { requireAuth } from "../middlewares/auth";
-import { loadBaselineInvestmentMetrics } from "../lib/post-run-evolution";
 import {
   listCompletionSessionEvents,
   loadCompletionSession,
   retryBlockedIteration,
 } from "../lib/completion-session-worker";
 import { scheduleCompletionSession } from "../lib/completion-session-scheduler";
+import { startCompletionSession } from "../lib/start-completion-session";
 
 const router: IRouter = Router();
 
@@ -31,83 +31,24 @@ router.post(
   asyncHandler(async (req, res) => {
     const input = createSchema.parse(req.body);
     const userId = req.userId!;
-    const existing = await req.supabase!
-      .from("repo_completion_sessions")
-      .select("id, status, phase, created_at")
-      .eq("user_id", userId)
-      .eq("repo", input.repo)
-      .eq("status", "active")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (existing.error) throw new Error(`Failed to check active completion sessions: ${existing.error.message}`);
-    if (existing.data) {
-      throw Object.assign(new Error(`An active finish-until-target session already exists for ${input.repo}. Resume or cancel that session before starting another.`), { status: 409 });
-    }
-
-    const baseline = await loadBaselineInvestmentMetrics(req.supabase!, userId, input.analysisId, input.repo);
-    if (!baseline || baseline.completionPct === null || baseline.productionReadinessPct === null) {
-      throw Object.assign(new Error("Finish-until-target requires a current Investment Intelligence analysis with measured completion and production-readiness scores for this repository."), { status: 409 });
-    }
-    const now = new Date().toISOString();
-    const alreadyComplete = baseline.completionPct >= input.targetCompletionPct &&
-      baseline.productionReadinessPct >= input.targetReadinessPct;
-    const { data: session, error } = await req.supabase!
-      .from("repo_completion_sessions")
-      .insert({
-        user_id: userId,
-        repo: input.repo,
-        analysis_id: input.analysisId,
-        status: alreadyComplete ? "succeeded" : "active",
-        phase: alreadyComplete ? "complete" : "queued",
-        target_completion_pct: input.targetCompletionPct,
-        target_readiness_pct: input.targetReadinessPct,
-        max_iterations: input.maxIterations,
-        max_no_progress_iterations: input.maxNoProgressIterations,
-        iteration_count: 0,
-        no_progress_count: 0,
-        last_completion_pct: baseline.completionPct,
-        last_readiness_pct: baseline.productionReadinessPct,
-        max_estimated_cost_usd: input.maxEstimatedCostUsd ?? null,
-        estimated_cost_used_usd: 0,
-        requested_next_steps: input.nextSteps,
-        item_rank: input.itemRank ?? null,
-        autonomy_acknowledged_at: now,
-        last_progress_at: now,
-        stop_reason: alreadyComplete
-          ? `Targets were already satisfied at session creation: completion ${baseline.completionPct}% and readiness ${baseline.productionReadinessPct}%.`
-          : null,
-        completed_at: alreadyComplete ? now : null,
-        created_at: now,
-        updated_at: now,
-      })
-      .select("*")
-      .single();
-    if (error || !session) throw new Error(`Failed to create completion session: ${error?.message ?? "unknown database error"}`);
-
-    await req.supabase!.from("repo_completion_session_events").insert({
-      session_id: session.id,
-      user_id: userId,
-      iteration: null,
-      kind: "session_created",
-      status: alreadyComplete ? "success" : "info",
-      message: alreadyComplete
-        ? `Repository already meets the requested completion/readiness targets; no branch write was necessary.`
-        : `Bounded finish-until-target session created. It may perform up to ${input.maxIterations} exact-plan iterations on one draft PR, with bounded CI repair, no-progress stopping, and automatic merge disabled.`,
-      metadata: {
-        baseline,
-        targets: { completionPct: input.targetCompletionPct, readinessPct: input.targetReadinessPct },
-        maxIterations: input.maxIterations,
-        maxNoProgressIterations: input.maxNoProgressIterations,
-        maxEstimatedCostUsd: input.maxEstimatedCostUsd ?? null,
-        automaticMerge: false,
-      },
+    const started = await startCompletionSession(req.supabase!, userId, {
+      repo: input.repo,
+      analysisId: input.analysisId,
+      itemRank: input.itemRank,
+      nextSteps: input.nextSteps,
+      targetCompletionPct: input.targetCompletionPct,
+      targetReadinessPct: input.targetReadinessPct,
+      maxIterations: input.maxIterations,
+      maxNoProgressIterations: input.maxNoProgressIterations,
+      maxEstimatedCostUsd: input.maxEstimatedCostUsd,
     });
-
-    const workerMode = alreadyComplete
-      ? null
-      : await scheduleCompletionSession(req.supabase!, userId, String(session.id));
-    res.status(201).json({ session, baseline, scheduled: !alreadyComplete, workerMode, automaticMerge: false });
+    res.status(201).json({
+      session: started.session,
+      baseline: started.baseline,
+      scheduled: started.scheduled,
+      workerMode: started.workerMode,
+      automaticMerge: false,
+    });
   }),
 );
 

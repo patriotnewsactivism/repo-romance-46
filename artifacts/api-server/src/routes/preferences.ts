@@ -23,6 +23,9 @@ import {
   OPENROUTER_MODEL_SORTS,
   OPENROUTER_REASONING_EFFORTS,
 } from "../lib/openrouter-models";
+import { marketResearchConfigured } from "../lib/tavily-market-research";
+import { cloudRunJobsEnabled } from "../lib/cloud-run-jobs";
+import { OPENROUTER_FREE_AGENT_POOL_MODEL } from "../lib/ai-model-config";
 
 const router: IRouter = Router();
 const AI_PROVIDERS = ["google", "openai", "anthropic", "openrouter"] as const;
@@ -261,6 +264,9 @@ async function aiStatus(supabase: NonNullable<Parameters<typeof loadAiCredential
     requested_reasoning_effort: raw?.custom_ai_reasoning_effort ?? null,
     platform_default: platform.defaultProvider,
     providers: platform.providers,
+    live_research_configured: marketResearchConfigured(),
+    completion_worker: cloudRunJobsEnabled() ? "cloud-run-job" : "in-process",
+    free_agent_pool: credential.provider === "openrouter" && credential.model === OPENROUTER_FREE_AGENT_POOL_MODEL,
   };
 }
 

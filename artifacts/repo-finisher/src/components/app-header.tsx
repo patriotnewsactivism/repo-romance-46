@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'wouter';
-import { GitBranch, LayoutDashboard, Menu, Settings } from 'lucide-react';
+import { GitBranch, LayoutDashboard, LogOut, Menu, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -21,9 +21,10 @@ interface AppHeaderProps {
   section?: string;
   user?: HeaderUser | null;
   actions?: ReactNode;
+  onSignOut?: () => void;
 }
 
-export function AppHeader({ section, user, actions }: AppHeaderProps) {
+export function AppHeader({ section, user, actions, onSignOut }: AppHeaderProps) {
   const userLabel = user?.displayName || user?.login || null;
 
   return (
@@ -81,6 +82,12 @@ export function AppHeader({ section, user, actions }: AppHeaderProps) {
               Settings
             </Button>
           </Link>
+          {onSignOut ? (
+            <Button variant="ghost" size="sm" className="gap-2 text-white hover:bg-white/10 hover:text-white" onClick={onSignOut}>
+              <LogOut className="h-4 w-4" />
+              Sign out
+            </Button>
+          ) : null}
         </nav>
 
         <DropdownMenu>
@@ -120,6 +127,12 @@ export function AppHeader({ section, user, actions }: AppHeaderProps) {
                 Settings
               </Link>
             </DropdownMenuItem>
+            {onSignOut ? (
+              <DropdownMenuItem onSelect={() => onSignOut()} className="cursor-pointer gap-2">
+                <LogOut className="h-4 w-4" />
+                Sign out
+              </DropdownMenuItem>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

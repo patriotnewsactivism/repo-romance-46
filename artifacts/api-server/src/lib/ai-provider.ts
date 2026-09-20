@@ -1,5 +1,6 @@
 // Centralized AI provider routing — handles Google Gemini, OpenAI, Anthropic, OpenRouter, and legacy/custom providers.
 
+import { DEFAULT_AI_MODELS } from "./ai-model-config";
 import type { OpenRouterReasoningEffort } from "./openrouter-models";
 
 export interface AIProviderConfig {
@@ -67,10 +68,7 @@ type PublicHttpError = Error & {
 };
 
 const DEFAULT_MODELS: Record<string, string> = {
-  google: "gemini-3.7-flash",
-  openai: "gpt-4o",
-  anthropic: "claude-sonnet-4-20250514",
-  openrouter: OPENROUTER_FREE_AGENT_CHAIN[0],
+  ...DEFAULT_AI_MODELS,
   custom: "gpt-4o",
   // Kept only so old saved preferences fail gracefully until migrated.
   github_models: "gpt-4o-mini",
@@ -277,9 +275,8 @@ const PROVIDER_ENDPOINTS: Record<string, string> = {
 };
 
 export async function callAI(request: AIRequest, config: AIProviderConfig): Promise<AIResponse> {
-  // Never silently fall back to OpenAI. Gemini is the explicit platform default.
-  const provider = config.provider || "google";
-  const model = request.model || config.model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.google;
+  const provider = config.provider || "openrouter";
+  const model = request.model || config.model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.openrouter;
   const requestTimeoutMs = resolveAIRequestTimeoutMs(request);
 
   const apiKey = typeof config.apiKey === "string" && config.apiKey.trim().length > 0 ? config.apiKey.trim() : null;

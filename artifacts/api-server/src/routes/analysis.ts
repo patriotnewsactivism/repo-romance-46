@@ -3,7 +3,9 @@ import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
-import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "../lib/credentials";
+import { loadAiCredential, loadGithubCredential, normalizeAiProvider, requireGithubCredential } from "../lib/credentials";
+import { defaultAiModel } from "../lib/ai-model-config";
+import { callAIJson, validateWithZod } from "../lib/call-ai-json";
 import { runInBackground } from "../lib/background-tasks";
 import {
   callAI,
@@ -11,7 +13,6 @@ import {
   DEFAULT_REQUEST_TIMEOUT_MS,
   FINAL_SYNTHESIS_TIMEOUT_MS,
 } from "../lib/ai-provider";
-import { parseModelJsonLenient } from "../lib/parse-model-json";
 import { captureException, flushSentry } from "../instrument";
 
 const router: IRouter = Router();
@@ -623,58 +624,18 @@ export function getStageModels(provider: string, tier: string, exactModel?: stri
 
 /** Per-stage fallbacks used only when no exact model identifier is configured. */
 function defaultStageModels(provider: string, tier: string): StageModels {
-  const DEFAULT: Record<string, string> = {
-    github_models: "gpt-4o-mini",
-    openai: "gpt-4o",
-    anthropic: "claude-sonnet-4-20250514",
-    google: "gemini-3.7-flash",
-    openrouter: "minimax/minimax-m3:free",
-    custom: "gpt-4o",
+  const base =
+    defaultAiModel(provider) ??
+    (provider === "github_models" || provider === "custom" ? "gpt-4o" : null) ??
+    defaultAiModel("openrouter")!;
+  const useThinking = provider === "anthropic" && tier === "deep";
+  return {
+    profilerModel: base,
+    critiqueModel: base,
+    synthesisModel: base,
+    useThinking,
+    thinkingBudget: useThinking ? 10_000 : 0,
   };
-  const base = DEFAULT[provider] ?? "gemini-3.7-flash";
-
-  if (tier === "fast") {
-    return { profilerModel: base, critiqueModel: base, synthesisModel: base, useThinking: false, thinkingBudget: 0 };
-  }
-
-  if (tier === "deep") {
-    switch (provider) {
-      case "openai":
-      case "custom":
-        return { profilerModel: "o3", critiqueModel: "o3", synthesisModel: "o3", useThinking: false, thinkingBudget: 0 };
-      case "anthropic":
-        return {
-          profilerModel: "claude-sonnet-4-20250514",
-          critiqueModel: "claude-sonnet-4-20250514",
-          synthesisModel: "claude-sonnet-4-20250514",
-          useThinking: true,
-          thinkingBudget: 10000,
-        };
-      case "google":
-        return { profilerModel: "gemini-3.7-flash", critiqueModel: "gemini-3.7-flash", synthesisModel: "gemini-3.7-flash", useThinking: false, thinkingBudget: 0 };
-      default: // openrouter and anything else: the provider's own default model
-        return { profilerModel: base, critiqueModel: base, synthesisModel: base, useThinking: false, thinkingBudget: 0 };
-    }
-  }
-
-  // balanced (default) — reasoning models for profiling/critique, best synthesis available
-  switch (provider) {
-    case "openai":
-    case "custom":
-      return { profilerModel: "o4-mini", critiqueModel: "o4-mini", synthesisModel: "o3-mini", useThinking: false, thinkingBudget: 0 };
-    case "anthropic":
-      return {
-        profilerModel: "claude-3-5-haiku-20241022",
-        critiqueModel: "claude-3-5-haiku-20241022",
-        synthesisModel: "claude-sonnet-4-20250514",
-        useThinking: false,
-        thinkingBudget: 0,
-      };
-    case "google":
-      return { profilerModel: "gemini-3.7-flash", critiqueModel: "gemini-3.7-flash", synthesisModel: "gemini-3.7-flash", useThinking: false, thinkingBudget: 0 };
-    default: // openrouter/github_models — no dedicated reasoning tier, use the provider's own default
-      return { profilerModel: base, critiqueModel: base, synthesisModel: base, useThinking: false, thinkingBudget: 0 };
-  }
 }
 
 // ─── Stage 1: Portfolio profiler ────────────────────────────────────────────
@@ -731,7 +692,7 @@ Respond ONLY with valid JSON. Do not wrap in markdown.`;
   const userContent = `GitHub portfolio (${repos.length} repos):\n${metaLines}`;
 
   try {
-    const result = await callAI(
+    return await callAIJson<PortfolioProfile>(
       {
         messages: [
           { role: "system", content: systemPrompt },
@@ -740,13 +701,16 @@ Respond ONLY with valid JSON. Do not wrap in markdown.`;
         model: stageModels.profilerModel,
       },
       aiConfig,
+      (value) => {
+        if (!value || typeof value !== "object") return null;
+        const parsed = value as PortfolioProfile;
+        if (!parsed.developer_profile || !parsed.custom_system_prompt) return null;
+        return {
+          ...parsed,
+          domain_clusters: Array.isArray(parsed.domain_clusters) ? parsed.domain_clusters : [],
+        };
+      },
     );
-    // Strip markdown code fences if present
-    const raw = result.content.replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
-    const parsed = JSON.parse(raw) as PortfolioProfile;
-    if (!parsed.developer_profile || !parsed.custom_system_prompt) throw new Error("Incomplete profile response");
-    if (!Array.isArray(parsed.domain_clusters)) parsed.domain_clusters = [];
-    return parsed;
   } catch (e) {
     console.warn("[analysis] Portfolio profiling failed, using default prompt:", e instanceof Error ? e.message : e);
     return defaultPortfolioProfile(repos);
@@ -782,7 +746,7 @@ async function callBatchedAI(
 ): Promise<z.infer<typeof RecommendationSchema>> {
   const user = `Here are the repo digests:\n\n${digests.join("\n\n=========\n\n")}`;
 
-  const aiResult = await callAI(
+  return callAIJson(
     {
       messages: [
         { role: "system", content: systemPrompt },
@@ -791,9 +755,8 @@ async function callBatchedAI(
       responseFormat: { type: "json_schema", json_schema: { name: "recommendations", strict: true, schema: AI_JSON_SCHEMA } },
     },
     aiConfig,
+    validateWithZod(RecommendationSchema),
   );
-  const parsed = JSON.parse(aiResult.content || "{}");
-  return RecommendationSchema.parse(parsed);
 }
 
 function isNonRetryableAIError(error: unknown): boolean {
@@ -930,7 +893,7 @@ Respond ONLY with valid JSON.`;
   const userContent = `Portfolio repos:\n${repoIndex}\n\nDraft recommendations to critique:\n${recsText}`;
 
   try {
-    const result = await callAI(
+    return await callAIJson<AnalysisCritique>(
       {
         messages: [
           { role: "system", content: systemPrompt },
@@ -939,14 +902,18 @@ Respond ONLY with valid JSON.`;
         model: stageModels.critiqueModel,
       },
       aiConfig,
+      (value) => {
+        if (!value || typeof value !== "object") return null;
+        const parsed = value as AnalysisCritique;
+        if (!parsed.refinement_notes) return null;
+        return {
+          ...parsed,
+          gaps: Array.isArray(parsed.gaps) ? parsed.gaps : [],
+          too_generic: Array.isArray(parsed.too_generic) ? parsed.too_generic : [],
+          missed_synergies: Array.isArray(parsed.missed_synergies) ? parsed.missed_synergies : [],
+        };
+      },
     );
-    const raw = result.content.replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
-    const parsed = JSON.parse(raw) as AnalysisCritique;
-    if (!parsed.refinement_notes) throw new Error("Incomplete critique");
-    if (!Array.isArray(parsed.gaps)) parsed.gaps = [];
-    if (!Array.isArray(parsed.too_generic)) parsed.too_generic = [];
-    if (!Array.isArray(parsed.missed_synergies)) parsed.missed_synergies = [];
-    return parsed;
   } catch (e) {
     console.warn("[analysis] Critique pass failed, skipping:", e instanceof Error ? e.message : e);
     return {
@@ -1017,7 +984,7 @@ Respond with valid JSON matching the exact schema. No markdown wrapping.`;
   const userContent = `Portfolio repos:\n${repoIndex}\n\nDraft recommendations:\n${recsText}\n\nCritique and guidance:\n${critiqueText}\n\nProduce the final best recommendations.`;
 
   try {
-    const result = await callAI(
+    return await callAIJson(
       {
         messages: [
           { role: "system", content: systemPrompt },
@@ -1036,10 +1003,8 @@ Respond with valid JSON matching the exact schema. No markdown wrapping.`;
           : { responseFormat: { type: "json_schema" as const, json_schema: { name: "recommendations", strict: true, schema: AI_JSON_SCHEMA } } }),
       },
       aiConfig,
+      validateWithZod(RecommendationSchema),
     );
-    const raw = result.content.replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
-    const parsed = JSON.parse(raw);
-    return RecommendationSchema.parse(parsed);
   } catch (e) {
     console.warn("[analysis] Synthesis failed, using draft recommendations:", e instanceof Error ? e.message : e);
     return RecommendationSchema.parse({
@@ -1084,7 +1049,7 @@ Return JSON with the same schema as before (summary_md + recommendations array).
 Only include NEW FINISH recommendations that improve repo coverage. If completion coverage is already adequate, return an empty recommendations array.`;
 
   try {
-    const result = await callAI(
+    const validated = await callAIJson(
       {
         messages: [
           { role: "system", content: "You are a product strategist. Always respond with valid JSON." },
@@ -1093,9 +1058,8 @@ Only include NEW FINISH recommendations that improve repo coverage. If completio
         responseFormat: { type: "json_schema", json_schema: { name: "synthesis", strict: true, schema: AI_JSON_SCHEMA } },
       },
       aiConfig,
+      validateWithZod(RecommendationSchema),
     );
-    const parsed = JSON.parse(result.content || "{}");
-    const validated = RecommendationSchema.parse(parsed);
     return validated.recommendations;
   } catch {
     console.warn("[analysis] Cross-batch synthesis failed, continuing with batch results");
@@ -1126,7 +1090,7 @@ interface AnalysisContext {
 
 async function createAnalysisRow(ctx: AnalysisContext): Promise<string> {
   const { supabase, userId, prefs, triggerType } = ctx;
-  const provider = prefs?.custom_ai_provider || "google";
+  const provider = normalizeAiProvider(prefs?.custom_ai_provider);
   const tier = prefs?.analysis_tier || "balanced";
   const models = getStageModels(provider, tier, prefs?.custom_ai_model);
   const { data: analysis, error: aErr } = await supabase
@@ -1196,7 +1160,7 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
       );
     }
 
-    const provider = prefs?.custom_ai_provider || "google";
+    const provider = normalizeAiProvider(prefs?.custom_ai_provider);
     const aiKey = prefs?.custom_ai_key || null;
     const aiConfig: AIProviderConfig = {
       provider,
@@ -1541,7 +1505,7 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
             userId,
             analysisId,
             githubToken: token,
-            ai: { provider, apiKey: aiKey },
+            ai: aiConfig,
           });
           await supabase
             .from("analyses")
@@ -1552,10 +1516,15 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
             .eq("id", analysisId);
           console.log(`[analysis ${analysisId}] investment intelligence auto-generated`);
         } catch (error) {
-          console.warn(
-            `[analysis ${analysisId}] investment intelligence auto-run skipped:`,
-            error instanceof Error ? error.message : error,
-          );
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn(`[analysis ${analysisId}] investment intelligence auto-run skipped:`, message);
+          await supabase
+            .from("analyses")
+            .update({
+              error: `Analysis completed, but Full Portfolio Value scoring failed: ${message.slice(0, 400)}. Open Finish, Value & Reports and run it again so finish-until-target has measured scores.`,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", analysisId);
         }
       })(),
       "analysis-investment-intelligence",
@@ -1879,7 +1848,7 @@ Return JSON with this exact shape:
 
 Sequence phases from quick wins (low effort, high impact) to moonshots. Group related items. Be practical.`;
 
-    const result = await callAI(
+    const plan = await callAIJson<Record<string, unknown>>(
       {
         messages: [
           { role: "system", content: "You are a helpful product strategist assistant. Always respond with valid JSON." },
@@ -1888,10 +1857,8 @@ Sequence phases from quick wins (low effort, high impact) to moonshots. Group re
         timeoutMs: 60_000,
       },
       aiConfig,
+      (value) => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null),
     );
-
-    const parsed = parseModelJsonLenient(result.content || "{}");
-    const plan = (parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}) as Record<string, unknown>;
 
     actionPlanStateCache.set(`${userId}:${analysisId}`, {
       status: "completed",
@@ -2169,7 +2136,7 @@ Return JSON with this exact shape:
 
 Include actual git commands (clone, remote add, merge --allow-unrelated-histories, etc). Be specific about conflict resolution strategy.`;
 
-    const result = await callAI(
+    const parsed = await callAIJson<Record<string, unknown>>(
       {
         messages: [
           { role: "system", content: "You are a helpful senior engineer. Always respond with valid JSON." },
@@ -2177,9 +2144,10 @@ Include actual git commands (clone, remote add, merge --allow-unrelated-historie
         ],
       },
       aiConfig,
+      (value) => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null),
     );
 
-    res.json(JSON.parse(result.content || "{}"));
+    res.json(parsed);
   }),
 );
 

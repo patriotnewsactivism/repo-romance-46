@@ -4,8 +4,8 @@ import { Router, type IRouter } from "express";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { asyncHandler } from "../lib/async-handler";
-import { callAI } from "../lib/ai-provider";
-import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "../lib/credentials";
+import { callAIJson } from "../lib/call-ai-json";
+import { loadAiCredential, loadGithubCredential, requireGithubCredential, toAiProviderConfig } from "../lib/credentials";
 import { requireAuth } from "../middlewares/auth";
 
 const router: IRouter = Router();
@@ -208,7 +208,7 @@ async function analyzeCandidate(
   const system = council
     ? `You are the senior review council for RepoFinisher. Evaluate this already top-ranked repository from three lenses at once: principal software architect, product/commercialization strategist, and quality/security reviewer. Use only the supplied repository evidence. Produce a decisive refinement of the existing deterministic portfolio score. Do not invent users, revenue, customers, TAM, security findings, or market traction. Lower confidence when evidence is thin. Return strict JSON only.`
     : `You are RepoFinisher's deep source-analysis agent. Refine an existing deterministic portfolio ranking by inspecting selected source/configuration files. Judge architecture, product readiness, monetization readiness, maintainability, differentiation signals, and technical risk from evidence only. Do not invent revenue, customers, market facts, or vulnerabilities. Return strict JSON only.`;
-  const response = await callAI(
+  const result = await callAIJson<Record<string, unknown>>(
     {
       messages: [
         { role: "system", content: system },
@@ -258,9 +258,9 @@ async function analyzeCandidate(
       thinkingLevel: council ? "high" : "medium",
       timeoutMs: council ? 60_000 : 45_000,
     },
-    { provider: ai.provider, apiKey: ai.apiKey },
+    toAiProviderConfig(ai),
+    (value) => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null),
   );
-  const result = JSON.parse(response.content || "{}") as Record<string, unknown>;
   const opportunityQuality = clamp(
     (Number(result.architecture_quality) + Number(result.product_readiness) + Number(result.monetization_readiness) + Number(result.maintainability) + Number(result.differentiation_signal)) / 5 - Number(result.technical_risk) * 0.22,
   );

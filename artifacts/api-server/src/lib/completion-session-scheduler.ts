@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { runInBackground } from "./background-tasks";
-import { dispatchCompletionSessionJob } from "./cloud-run-jobs";
+import { cloudRunJobsEnabled, dispatchCompletionSessionJob } from "./cloud-run-jobs";
 import { processCompletionSession } from "./completion-session-worker";
 
 export type CompletionWorkerMode = "cloud-run-job" | "in-process" | "already-running";
@@ -37,6 +37,14 @@ export async function scheduleCompletionSession(
   sessionId: string,
 ): Promise<CompletionWorkerMode> {
   if (await recentlyActive(supabase, userId, sessionId)) return "already-running";
+
+  if (cloudRunJobsEnabled()) {
+    const dispatched = await dispatchCompletionSessionJob(userId, sessionId);
+    if (!dispatched) {
+      throw new Error("Cloud Run completion-session job dispatch did not start.");
+    }
+    return "cloud-run-job";
+  }
 
   try {
     if (await dispatchCompletionSessionJob(userId, sessionId)) return "cloud-run-job";

@@ -11,6 +11,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { decryptSecret } from "./secrets";
 import { readAiVaultSecret } from "./ai-secret-store";
 import { defaultAiModel } from "./ai-model-config";
+import type { AIProviderConfig } from "./ai-provider";
 import { normalizeOpenRouterReasoningEffort, type OpenRouterReasoningEffort } from "./openrouter-models";
 
 export interface GithubCredential {
@@ -50,6 +51,16 @@ export function requireGithubCredential(credential: GithubCredential | null): Gi
     throw Object.assign(new Error("Connect GitHub first."), { status: 400 });
   }
   return credential;
+}
+
+/** Pass the saved Settings model, not only provider+key, into every LLM call. */
+export function toAiProviderConfig(credential: AiCredential): AIProviderConfig {
+  return {
+    provider: credential.provider,
+    model: credential.model,
+    apiKey: credential.apiKey,
+    reasoningEffort: credential.reasoningEffort,
+  };
 }
 
 export type AiCredentialSource = "byok" | "platform" | "none";

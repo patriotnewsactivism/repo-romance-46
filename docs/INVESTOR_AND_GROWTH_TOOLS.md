@@ -4,7 +4,7 @@ RepoFinisher separates analysis, external market research, planning estimates, a
 
 ## Investor PDF export
 
-After Full Portfolio Value has produced repository-level investment intelligence, the Confidence-adjusted Portfolio Value panel exposes **Export investor PDF**.
+After Full Portfolio Value has produced repository-level investment intelligence, the Confidence-adjusted Portfolio Value panel exposes **Export investor PDF**. If a V2 snapshot was saved, the PDF uses that snapshot instead of silently rebuilding a different number.
 
 The authenticated PDF endpoint is:
 
@@ -90,7 +90,7 @@ This mode exists so README/AGENTS/PLAN/ROADMAP content can evolve with the actua
 
 ## Finish until target
 
-RepoFinisher already has a durable multi-iteration completion-session engine. The frontend now exposes it as **Finish until target**.
+RepoFinisher already has a durable multi-iteration completion-session engine. The frontend now exposes it as **Finish until target**. **Finish Portfolio** launches the same finish-until-target sessions across the ranked set rather than one-shot in-process PRs.
 
 After a portfolio analysis completes, RepoFinisher automatically kicks off Investment Intelligence for the top ranked repositories (soft-capped for budget). That gives finish-until-target the measured completion/readiness baseline it requires, without a second manual valuation click. You can still refresh Full Portfolio Value manually.
 
