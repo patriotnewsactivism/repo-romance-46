@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   OPENROUTER_AGENT_CHAIN,
+  OPENROUTER_FLASHX_MODEL,
+  OPENROUTER_FLASH_FALLBACK_MODEL,
   OPENROUTER_FREE_AGENT_CHAIN,
   OPENROUTER_PAID_AGENT_CHAIN,
   callAI,
@@ -102,6 +104,67 @@ describe("OpenRouter routing", () => {
     const body = JSON.parse(String(init?.body));
     expect(body.model).toBe("example/vendor-model");
     expect(body.models).toBeUndefined();
+  });
+
+
+
+  it("fails over immediately from FlashX on 429 and reports the served GLM Flash model", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: "rate limited" } }), { status: 429 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            model: OPENROUTER_FLASH_FALLBACK_MODEL,
+            choices: [{ message: { content: '{"ready":true}' } }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+
+    const result = await callAI(
+      request("structured FlashX test", {
+        timeoutMs: 1000,
+        responseFormat: {
+          type: "json_schema",
+          json_schema: {
+            name: "ready_test",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: { ready: { type: "boolean" } },
+              required: ["ready"],
+            },
+          },
+        },
+      }),
+      {
+        provider: "openrouter",
+        model: OPENROUTER_FLASHX_MODEL,
+        apiKey: "test-api-key",
+        reasoningEffort: "high",
+      },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const [, firstInit] = fetchMock.mock.calls[0];
+    const firstBody = JSON.parse(String(firstInit?.body));
+    expect(firstBody.model).toBe(OPENROUTER_FLASHX_MODEL);
+    expect(firstBody.response_format).toEqual({ type: "json_object" });
+    expect(firstBody.reasoning).toEqual({ effort: "high" });
+
+    const [, secondInit] = fetchMock.mock.calls[1];
+    const secondBody = JSON.parse(String(secondInit?.body));
+    expect(secondBody.model).toBe(OPENROUTER_FLASH_FALLBACK_MODEL);
+    expect(secondBody.response_format.type).toBe("json_schema");
+
+    expect(result).toEqual({
+      content: '{"ready":true}',
+      model: OPENROUTER_FLASH_FALLBACK_MODEL,
+    });
   });
 
   it("routes the reviewed Nex Mini default through the fast free fallback batch and records the served model", async () => {
