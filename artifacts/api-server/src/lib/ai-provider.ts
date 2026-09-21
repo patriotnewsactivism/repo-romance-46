@@ -93,7 +93,7 @@ export const FINAL_SYNTHESIS_TIMEOUT_MS = 8000;
 export function resolveAIRequestTimeoutMs(request: AIRequest): number {
   if (request.timeoutMs !== undefined) {
     const requested = Number(request.timeoutMs);
-    if (Number.isFinite(requested)) return Math.max(1000, Math.min(120000, Math.round(requested)));
+    if (Number.isFinite(requested)) return Math.max(1000, Math.min(600000, Math.round(requested)));
   }
 
   const systemText = request.messages
