@@ -60,6 +60,9 @@ export const OPENROUTER_AGENT_CHAIN = [
   ...OPENROUTER_PAID_AGENT_CHAIN,
 ] as const;
 
+export const OPENROUTER_FLASHX_MODEL = "z-ai/glm-5.3-flashx";
+export const OPENROUTER_FLASH_FALLBACK_MODEL = "z-ai/glm-5.3-flash";
+
 type PublicHttpError = Error & {
   status?: number;
   code?: string;
@@ -369,6 +372,89 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     const json = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
     const content = json.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "";
     return { content };
+  }
+
+  if (provider === "openrouter" && apiKey && model === OPENROUTER_FLASHX_MODEL) {
+    // GLM 5.3 FlashX currently has a single OpenRouter upstream (Z.AI).
+    // A 429/5xx therefore has no provider-level redundancy. Keep FlashX as the
+    // requested primary, but fail over immediately to the same-family GLM 5.3
+    // Flash model, which OpenRouter can serve through many upstreams.
+    const candidates = [OPENROUTER_FLASHX_MODEL, OPENROUTER_FLASH_FALLBACK_MODEL] as const;
+    let lastError: unknown;
+
+    for (const candidate of candidates) {
+      const body: Record<string, unknown> = { model: candidate, messages: request.messages };
+
+      if (request.responseFormat) {
+        // FlashX supports JSON response_format but not strict JSON-schema
+        // enforcement. GLM 5.3 Flash supports the full schema contract.
+        body.response_format =
+          candidate === OPENROUTER_FLASHX_MODEL
+            ? { type: "json_object" }
+            : request.responseFormat;
+      }
+
+      if (config.reasoningEffort) {
+        body.reasoning = { effort: config.reasoningEffort };
+      }
+
+      const res = await fetchWithRetry(
+        PROVIDER_ENDPOINTS.openrouter,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+            "X-Title": "RepoFinisher",
+          },
+          body: JSON.stringify(body),
+        },
+        "openrouter",
+        requestTimeoutMs,
+        0,
+      );
+
+      if (!res.ok) {
+        const text = await res.text();
+        const error = providerRequestError("openrouter", candidate, res.status, text);
+        lastError = error;
+
+        if (
+          candidate === OPENROUTER_FLASHX_MODEL &&
+          (res.status === 429 || res.status >= 500)
+        ) {
+          console.warn(
+            `[ai-provider] ${OPENROUTER_FLASHX_MODEL} unavailable (${res.status}); failing over to ${OPENROUTER_FLASH_FALLBACK_MODEL}`,
+          );
+          continue;
+        }
+
+        throw error;
+      }
+
+      const json = (await res.json()) as {
+        model?: string;
+        choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
+      };
+      const raw = json.choices?.[0]?.message?.content;
+
+      if (candidate !== OPENROUTER_FLASHX_MODEL) {
+        console.warn(
+          `[ai-provider] served ${json.model || candidate} after ${OPENROUTER_FLASHX_MODEL} fallback`,
+        );
+      }
+
+      if (typeof raw === "string") return { content: raw, model: json.model || candidate };
+      if (Array.isArray(raw)) {
+        return {
+          content: raw.map((part) => part.text || "").join(""),
+          model: json.model || candidate,
+        };
+      }
+      return { content: "", model: json.model || candidate };
+    }
+
+    throw lastError ?? new Error("GLM 5.3 FlashX fallback chain exhausted with no error recorded");
   }
 
   if (provider === "openrouter" && apiKey && model === OPENROUTER_FREE_AGENT_CHAIN[0]) {
