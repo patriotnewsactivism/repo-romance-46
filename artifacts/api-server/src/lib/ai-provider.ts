@@ -242,7 +242,12 @@ async function fetchWithRetry(
     }
 
     if (res.status !== 429 && res.status < 500) return res;
-    if (res.status >= 500 && attempt === maxRetries) return res;
+    // Return the final transient response to the caller so model-specific
+    // routing can inspect the real status and choose an alternate model.
+    // This is especially important when retryBudget=0: the caller asked for
+    // one attempt, not for the transport helper to replace HTTP 429 with a
+    // generic retry-exhausted exception.
+    if ((res.status === 429 || res.status >= 500) && attempt === maxRetries) return res;
 
     const retryAfter = res.headers.get("Retry-After");
     let waitMs: number;
