@@ -76,7 +76,7 @@ describe("resolveAIRequestTimeoutMs", () => {
   it("honors an explicit bounded timeout", () => {
     expect(resolveAIRequestTimeoutMs(request("custom", { timeoutMs: 12000 }))).toBe(12000);
     expect(resolveAIRequestTimeoutMs(request("custom", { timeoutMs: 10 }))).toBe(1000);
-    expect(resolveAIRequestTimeoutMs(request("custom", { timeoutMs: 999999 }))).toBe(120000);
+    expect(resolveAIRequestTimeoutMs(request("custom", { timeoutMs: 999999 }))).toBe(600000);
   });
 });
 
