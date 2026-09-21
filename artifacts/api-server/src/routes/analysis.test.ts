@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ANALYSIS_BATCH_REQUEST_TIMEOUT_MS, aiBatchConcurrency, analysisBatchTimeoutMs, getStageModels, profilingTimeoutMs, isActionPlanSchemaMissing, actionPlanStateCache } from "./analysis";
+import { ANALYSIS_BATCH_REQUEST_TIMEOUT_MS, aiBatchConcurrency, analysisBatchTimeoutMs, analysisJobBudgetMs, getStageModels, profilingProviderTimeoutMs, profilingTimeoutMs, isActionPlanSchemaMissing, actionPlanStateCache } from "./analysis";
 import { DEFAULT_REQUEST_TIMEOUT_MS } from "../lib/ai-provider";
 
 describe("getStageModels", () => {
@@ -54,35 +54,22 @@ describe("getStageModels", () => {
 });
 
 describe("profilingTimeoutMs", () => {
-  // Production regression: "Portfolio profiling" used a flat 30_000ms outer
-  // timeout, which is *less* than DEFAULT_REQUEST_TIMEOUT_MS (45_000ms) —
-  // the single-attempt budget callAI itself gives this exact call (see
-  // ai-provider.test.ts's "uses the normal request timeout for other AI
-  // stages" case, which asserts 45000 for the portfolio-profiler prompt).
-  // The outer race fired before the inner call could ever use the time it
-  // was actually given, so every run failed with "Portfolio profiling
-  // exceeded 30s timeout..." once the call legitimately took over 30s —
-  // which larger portfolios and slower (e.g. Deep-tier) models made routine.
-  it("always allows more time than the inner AI request timeout", () => {
-    for (const repoCount of [0, 1, 5, 50, 98, 500]) {
+  it("gives large portfolios multi-minute provider time", () => {
+    expect(profilingProviderTimeoutMs(50)).toBe(160000);
+    expect(profilingProviderTimeoutMs(100)).toBe(200000);
+    expect(profilingProviderTimeoutMs(230)).toBe(300000);
+  });
+
+  it("keeps the outer watchdog above the provider deadline", () => {
+    for (const repoCount of [0, 1, 5, 50, 100, 230, 500]) {
+      expect(profilingTimeoutMs(repoCount)).toBeGreaterThan(profilingProviderTimeoutMs(repoCount));
       expect(profilingTimeoutMs(repoCount)).toBeGreaterThan(DEFAULT_REQUEST_TIMEOUT_MS);
     }
   });
 
-  it("grows with portfolio size", () => {
-    expect(profilingTimeoutMs(500)).toBeGreaterThan(profilingTimeoutMs(50));
-    expect(profilingTimeoutMs(50)).toBeGreaterThan(profilingTimeoutMs(5));
-  });
-
-  it("matches the exact budget for a 98-repo portfolio (the reported production case)", () => {
-    // DEFAULT_REQUEST_TIMEOUT_MS (45_000) + 98 * 500 = 94_000ms — comfortably
-    // above the old flat 30_000ms ceiling that always failed for this user.
-    expect(profilingTimeoutMs(98)).toBe(94000);
-  });
-
-  it("never drops below the floor for small portfolios", () => {
-    expect(profilingTimeoutMs(0)).toBe(DEFAULT_REQUEST_TIMEOUT_MS + 15000);
-    expect(profilingTimeoutMs(2)).toBe(DEFAULT_REQUEST_TIMEOUT_MS + 15000);
+  it("caps profiling at five provider minutes plus watchdog margin", () => {
+    expect(profilingProviderTimeoutMs(500)).toBe(300000);
+    expect(profilingTimeoutMs(500)).toBe(345000);
   });
 });
 
@@ -92,18 +79,27 @@ describe("OpenRouter portfolio batch runtime", () => {
     expect(aiBatchConcurrency("openrouter")).toBe(2);
   });
 
-  it("gives each heavy analysis request the full 120 second provider budget", () => {
-    expect(ANALYSIS_BATCH_REQUEST_TIMEOUT_MS).toBe(120000);
+  it("gives each heavy analysis request seven minutes", () => {
+    expect(ANALYSIS_BATCH_REQUEST_TIMEOUT_MS).toBe(420000);
   });
 
   it("budgets both retry attempts across all OpenRouter waves", () => {
     // Six batches at concurrency two means three waves. Each wave can consume
-    // two 120s attempts plus retry/orchestration margin.
-    expect(analysisBatchTimeoutMs(6, 2)).toBe(810000);
+    // two seven-minute attempts plus retry/orchestration margin.
+    expect(analysisBatchTimeoutMs(6, 2)).toBe(2685000);
   });
 
-  it("keeps the outer analysis stage below the 25 minute job ceiling", () => {
-    expect(analysisBatchTimeoutMs(100, 2)).toBeLessThanOrEqual(900000);
+  it("caps the heavy batch stage at 75 minutes", () => {
+    expect(analysisBatchTimeoutMs(100, 2)).toBe(4500000);
+  });
+});
+
+describe("analysisJobBudgetMs", () => {
+  it("scales from ordinary portfolios up to a 90 minute full-portfolio cap", () => {
+    expect(analysisJobBudgetMs(50)).toBe(1900000);
+    expect(analysisJobBudgetMs(100)).toBe(2900000);
+    expect(analysisJobBudgetMs(230)).toBe(5400000);
+    expect(analysisJobBudgetMs(1000)).toBe(5400000);
   });
 });
 
