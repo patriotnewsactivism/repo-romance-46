@@ -20,7 +20,11 @@ const router: IRouter = Router();
 // provider readiness check. OpenRouter reasoning models can legitimately take
 // longer than the generic 45s request budget, especially when several batches
 // are queued at once.
-export const ANALYSIS_BATCH_REQUEST_TIMEOUT_MS = 120_000;
+// Heavy portfolio batches can contain tens of thousands of input tokens and
+// produce many implementation-grade recommendations. Two minutes proved too
+// short for 100-230 repo portfolios, especially when OpenRouter has to route
+// through a fallback provider.
+export const ANALYSIS_BATCH_REQUEST_TIMEOUT_MS = 420_000;
 
 const GH_API = "https://api.github.com";
 
@@ -406,8 +410,24 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
  * can't silently drift apart again, and scales with repo count the same way
  * repo digestion and AI batch analysis already do below.
  */
+export function profilingProviderTimeoutMs(repoCount: number): number {
+  const count = Math.max(0, repoCount);
+  // 2.5 minute floor; scale toward five minutes for very large portfolios.
+  return Math.min(300_000, Math.max(150_000, 120_000 + count * 800));
+}
+
 export function profilingTimeoutMs(repoCount: number): number {
-  return DEFAULT_REQUEST_TIMEOUT_MS + Math.max(15000, repoCount * 500);
+  // Keep the outer watchdog comfortably above the provider's own deadline so
+  // it never wins the race and abandons a still-valid provider request.
+  return profilingProviderTimeoutMs(repoCount) + 45_000;
+}
+
+export function analysisJobBudgetMs(repoCount: number): number {
+  const count = Math.max(0, repoCount);
+  // 30 minute minimum for ordinary portfolios; scale to a hard 90 minute cap
+  // for full portfolios around 230 repos. Railway can sustain this work, while
+  // the cap still protects against a genuinely stuck analysis.
+  return Math.min(5_400_000, Math.max(1_800_000, 900_000 + count * 20_000));
 }
 
 interface FilterPrefs {
@@ -744,6 +764,7 @@ Respond ONLY with valid JSON. Do not wrap in markdown.`;
           { role: "user", content: userContent },
         ],
         model: stageModels.profilerModel,
+        timeoutMs: profilingProviderTimeoutMs(repos.length),
       },
       aiConfig,
     );
@@ -846,11 +867,11 @@ export function aiBatchConcurrency(provider: string): number {
 
 export function analysisBatchTimeoutMs(batchCount: number, concurrency: number): number {
   const waves = Math.max(1, Math.ceil(Math.max(1, batchCount) / Math.max(1, concurrency)));
-  // callBatchedAIWithRetry allows two attempts. Budget both attempts plus the
-  // retry delay and a small orchestration margin, but never consume the entire
-  // 25-minute job ceiling in this one stage.
-  const perWaveMs = ANALYSIS_BATCH_REQUEST_TIMEOUT_MS * 2 + 10_000;
-  return Math.min(900_000, Math.max(300_000, waves * perWaveMs + 60_000));
+  // callBatchedAIWithRetry allows two attempts. Budget both attempts for every
+  // concurrency wave. Large portfolios legitimately need tens of minutes here,
+  // so use a 75-minute hard ceiling rather than the old 15-minute ceiling.
+  const perWaveMs = ANALYSIS_BATCH_REQUEST_TIMEOUT_MS * 2 + 15_000;
+  return Math.min(4_500_000, Math.max(900_000, waves * perWaveMs + 120_000));
 }
 
 async function runBatchedAI(
@@ -1184,13 +1205,13 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
   // AI calls still fail clearly, but allow large portfolios enough time to
   // finish digests + synthesis + valuation kickoff.
   const jobStartedAt = Date.now();
-  const SAFE_BUDGET_MS = 1_500_000; // 25 min — Railway worker/API safe ceiling
+  let safeBudgetMs = analysisJobBudgetMs(prefs?.filter_max_repos || 1000);
   const assertWithinBudget = (stage: string) => {
     const elapsed = Date.now() - jobStartedAt;
-    if (elapsed > SAFE_BUDGET_MS) {
+    if (elapsed > safeBudgetMs) {
       throw new Error(
-        `Analysis exceeded its safe execution budget before "${stage}" (${Math.round(elapsed / 1000)}s elapsed). ` +
-          `This portfolio is too large for a single run — try the "Fast" analysis tier, lower "Max repos to analyze" in Settings, or re-run after a partial success.`,
+        `Analysis exceeded its scaled execution budget before "${stage}" (${Math.round(elapsed / 1000)}s elapsed; ${Math.round(safeBudgetMs / 60000)}m budget). ` +
+          `The provider or GitHub remained too slow for this run; retrying will resume with a fresh execution window.`,
       );
     }
   };
@@ -1213,6 +1234,8 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
           }
         : null,
     );
+
+    safeBudgetMs = analysisJobBudgetMs(shortlist.length);
 
     if (shortlist.length < 2) {
       throw new Error(
@@ -1243,10 +1266,11 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
             { role: "user", content: "AI provider preflight." },
           ],
           model: stageModels.profilerModel,
+          timeoutMs: 60_000,
         },
         aiConfig,
       ),
-      15000,
+      75_000,
       "AI provider preflight",
     );
 
@@ -1329,7 +1353,7 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
         }
         return digest;
       }),
-      Math.max(30000, deepRepos.length * 2000 + 10000),
+      Math.min(600_000, Math.max(120_000, deepRepos.length * 5_000 + 60_000)),
       "Repo digestion",
     );
 
