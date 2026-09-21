@@ -419,10 +419,13 @@ router.post(
 
       if (!response.content.trim()) throw new Error("AI provider returned an empty readiness response");
 
+      const servedModel = response.model || credential.model;
       res.json({
         ok: true,
         provider: credential.provider,
-        model: credential.model,
+        model: servedModel,
+        requested_model: credential.model,
+        fallback_used: Boolean(servedModel && credential.model && servedModel !== credential.model),
         credential_source: credential.source,
         latency_ms: Date.now() - started,
       });
