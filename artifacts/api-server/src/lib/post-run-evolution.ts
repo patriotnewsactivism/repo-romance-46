@@ -162,6 +162,28 @@ async function fetchIndexFiles(token: string, repo: GhRepo, tree: GhTreeEntry[],
   return files;
 }
 
+/** Stamp verification only after an accepted check succeeds or the inspected SHA deployed. */
+export function acceptanceVerifiedAt(
+  checks: Array<{ name: string; status: string; conclusion: string | null }>,
+  deploymentSucceeded?: boolean,
+  now = new Date().toISOString(),
+): string | undefined {
+  const passed = (pattern: RegExp) =>
+    checks.some(
+      (check) =>
+        pattern.test(check.name) &&
+        check.status === "completed" &&
+        check.conclusion === "success",
+    );
+  const accepted =
+    passed(/build|ci|verify/i) ||
+    passed(/type|tsc|ci|verify/i) ||
+    passed(/test|ci|verify/i) ||
+    passed(/security|codeql|sast|dependency/i) ||
+    deploymentSucceeded === true;
+  return accepted ? now : undefined;
+}
+
 async function fetchAcceptanceEvidence(token: string, repo: string, headSha: string): Promise<AcceptanceEvidence> {
   try {
     const data = await ghJson<{ check_runs?: Array<{ name: string; status: string; conclusion: string | null }> }>(
@@ -196,7 +218,7 @@ async function fetchAcceptanceEvidence(token: string, repo: string, headSha: str
       testsPassed: passed(/test|ci|verify/i),
       securityBlockersResolved: passed(/security|codeql|sast|dependency/i) || undefined,
       deploymentSucceeded,
-      verifiedAt: checks.length > 0 || deploymentSucceeded ? new Date().toISOString() : undefined,
+      verifiedAt: acceptanceVerifiedAt(checks, deploymentSucceeded),
     };
   } catch {
     return {};

@@ -15,6 +15,14 @@ import { asyncHandler } from "../lib/async-handler";
 import { loadGithubCredential, requireGithubCredential } from "../lib/credentials";
 import { recordRepoLearning } from "../lib/adaptive-learning";
 
+/** Null is typeof "object" in JS; treat it as missing intelligence rather than a snapshot. */
+export function storedInvestmentIntelligence(value: unknown): Record<string, unknown> {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return {};
+}
+
 const router: IRouter = Router();
 const GH_API = "https://api.github.com";
 const METHODOLOGY_VERSION = "portfolio-intelligence-v2-full-coverage";
@@ -653,9 +661,7 @@ router.post(
     }
 
     const storedIntelligence = analysis && (analysis as Record<string, unknown>).investment_intelligence;
-    const existingIntelligence = storedIntelligence !== null && typeof storedIntelligence === "object"
-      ? storedIntelligence as Record<string, unknown>
-      : {};
+    const existingIntelligence = storedInvestmentIntelligence(storedIntelligence);
     const existingIsMeasured = String(existingIntelligence.methodologyVersion || "").startsWith("investment-intelligence");
     const existingRanking = Array.isArray(existingIntelligence.ranking)
       ? (existingIntelligence.ranking as Array<Record<string, unknown>>)

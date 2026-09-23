@@ -27,7 +27,7 @@ function isStringList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
-function isCompleteValuation(value: unknown): value is Valuation {
+export function isCompleteValuation(value: unknown): value is Valuation {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const row = value as Partial<Valuation>;
   const revenue = row.revenue_potential;

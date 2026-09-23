@@ -41,7 +41,7 @@ interface RepairEvidence {
   failedJobs: Array<{ runId: number; jobId: number; name: string; conclusion: string | null; log: string }>;
 }
 
-interface RepairDiagnosis {
+export interface RepairDiagnosis {
   rootCause: string;
   confidence: number;
   evidence: string[];
@@ -273,6 +273,27 @@ function changesFingerprint(changes: Array<{ path: string; status: string; conte
   return createHash("sha256").update(canonicalize(changes.map((change) => ({ path: change.path, status: change.status, content: change.content ?? "" })))).digest("hex");
 }
 
+/** Reject diagnoses that would skip repair or pass the confidence write gate with invented data. */
+export function acceptRepairDiagnosis(value: unknown): RepairDiagnosis | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as RepairDiagnosis;
+  if (
+    !row.rootCause ||
+    !Number.isFinite(row.confidence) ||
+    row.confidence < 0 ||
+    row.confidence > 100 ||
+    !Array.isArray(row.evidence) ||
+    !Array.isArray(row.rejectedCauses) ||
+    !Array.isArray(row.repairStrategy) ||
+    row.repairStrategy.length < 1 ||
+    !Array.isArray(row.regressionRisks) ||
+    !Array.isArray(row.stopIf)
+  ) {
+    return null;
+  }
+  return row;
+}
+
 async function diagnoseFailure(
   ai: AIProviderConfig,
   input: Record<string, unknown>,
@@ -308,25 +329,7 @@ async function diagnoseFailure(
     },
     thinkingLevel: "high",
     timeoutMs: 60_000,
-  }, ai, (value) => {
-    if (!value || typeof value !== "object") return null;
-    const row = value as RepairDiagnosis;
-    if (
-      !row.rootCause ||
-      !Number.isFinite(row.confidence) ||
-      row.confidence < 0 ||
-      row.confidence > 100 ||
-      !Array.isArray(row.evidence) ||
-      !Array.isArray(row.rejectedCauses) ||
-      !Array.isArray(row.repairStrategy) ||
-      row.repairStrategy.length < 1 ||
-      !Array.isArray(row.regressionRisks) ||
-      !Array.isArray(row.stopIf)
-    ) {
-      return null;
-    }
-    return row;
-  });
+  }, ai, acceptRepairDiagnosis);
 }
 
 async function prepareRepairPlan(

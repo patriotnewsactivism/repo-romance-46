@@ -136,6 +136,6 @@ These are different failure modes and should become different operational-learni
 
 Older repository notes described Google/Gemini as a single hard platform default and referenced Vercel-hosted API behavior. Those notes are obsolete.
 
-The current architecture is provider-aware, BYOK-capable, hosted with a persistent API on Railway, and stores user AI credentials in Supabase Vault. Former Render and Cloud Run hosting notes are obsolete.
+The current architecture is provider-aware, BYOK-capable, hosted with a persistent API on Railway, and stores user AI credentials in Supabase Vault.
 
 Model-specific documentation files should defer to this document and `AGENTS.md` rather than preserve old hosting assumptions.

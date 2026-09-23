@@ -664,6 +664,21 @@ function defaultStageModels(provider: string, tier: string): StageModels {
   };
 }
 
+/** Empty cluster lists are valid. Null entries and partial objects are not. */
+export function isValidDomainClusters(value: unknown): value is DomainCluster[] {
+  if (!Array.isArray(value)) return false;
+  return value.every((cluster) => {
+    if (!cluster || typeof cluster !== "object" || Array.isArray(cluster)) return false;
+    const candidate = cluster as { name?: unknown; repos?: unknown; theme?: unknown };
+    return (
+      typeof candidate.name === "string" &&
+      typeof candidate.theme === "string" &&
+      Array.isArray(candidate.repos) &&
+      candidate.repos.every((repo) => typeof repo === "string")
+    );
+  });
+}
+
 // ─── Stage 1: Portfolio profiler ────────────────────────────────────────────
 
 interface PortfolioProfile {
@@ -732,25 +747,8 @@ Respond ONLY with valid JSON. Do not wrap in markdown.`;
         if (!value || typeof value !== "object") return null;
         const parsed = value as PortfolioProfile;
         if (!parsed.developer_profile || !parsed.custom_system_prompt) return null;
-        const domainClusters = Array.isArray(parsed.domain_clusters) ? parsed.domain_clusters : [];
-        if (
-          !domainClusters.every((cluster) => {
-            if (!cluster || typeof cluster !== "object") return false;
-            const candidate = cluster as { name?: unknown; repos?: unknown; theme?: unknown };
-            return (
-              typeof candidate.name === "string" &&
-              typeof candidate.theme === "string" &&
-              Array.isArray(candidate.repos) &&
-              candidate.repos.every((repo) => typeof repo === "string")
-            );
-          })
-        ) {
-          return null;
-        }
-        return {
-          ...parsed,
-          domain_clusters: domainClusters,
-        };
+        if (!isValidDomainClusters(parsed.domain_clusters)) return null;
+        return parsed;
       },
     );
   } catch (e) {

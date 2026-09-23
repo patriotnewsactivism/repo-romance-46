@@ -8,6 +8,36 @@ import { callAIJson, validateWithZod } from "../lib/call-ai-json";
 
 const router: IRouter = Router();
 
+export interface CombinePlan {
+  repo_name: string;
+  description: string;
+  readme_md: string;
+  structure: { path: string; purpose: string }[];
+  integration_plan_md: string;
+  first_pr_title: string;
+}
+
+export function isCombinePlan(value: unknown): value is CombinePlan {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.repo_name === "string" &&
+    typeof row.description === "string" &&
+    typeof row.readme_md === "string" &&
+    typeof row.integration_plan_md === "string" &&
+    typeof row.first_pr_title === "string" &&
+    Array.isArray(row.structure) &&
+    row.structure.every(
+      (node) =>
+        node &&
+        typeof node === "object" &&
+        !Array.isArray(node) &&
+        typeof (node as Record<string, unknown>).path === "string" &&
+        typeof (node as Record<string, unknown>).purpose === "string",
+    )
+  );
+}
+
 async function loadItem(supabase: SupabaseClient, analysisId: string, itemRank: number) {
   const { data } = await supabase
     .from("analysis_items")
@@ -516,27 +546,8 @@ router.post(
       },
       ai,
       (value) => {
-        if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-        const row = value as Record<string, unknown>;
-        if (
-          typeof row.repo_name !== "string" ||
-          typeof row.description !== "string" ||
-          typeof row.readme_md !== "string" ||
-          typeof row.integration_plan_md !== "string" ||
-          typeof row.first_pr_title !== "string" ||
-          !Array.isArray(row.structure) ||
-          !row.structure.every(
-            (node) =>
-              node &&
-              typeof node === "object" &&
-              !Array.isArray(node) &&
-              typeof (node as Record<string, unknown>).path === "string" &&
-              typeof (node as Record<string, unknown>).purpose === "string",
-          )
-        ) {
-          return null;
-        }
-        return row as {
+        if (!isCombinePlan(value)) return null;
+        return value as {
           repo_name: string;
           description: string;
           readme_md: string;
