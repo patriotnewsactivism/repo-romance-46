@@ -141,6 +141,25 @@ export function isSystemicProviderError(error: unknown): boolean {
   );
 }
 
+/** Reserve in-flight sessions against the concurrency cap before launching another wave. */
+export function portfolioLaunchSlots(concurrency: number, inFlight: number, active: number) {
+  const slots = Math.max(0, concurrency - inFlight);
+  const queuedRemaining = active - inFlight;
+  return {
+    slots,
+    wait: slots === 0 && queuedRemaining > 0,
+    stop: slots === 0 && queuedRemaining <= 0,
+  };
+}
+
+/** A succeeded session's stop_reason is completion text, not an item error. */
+export function portfolioItemDisplayedError(
+  itemError: string | null | undefined,
+  session: { status?: unknown; stop_reason?: unknown } | null | undefined,
+): string | null {
+  return itemError ?? (session && session.status !== "succeeded" && session.stop_reason ? String(session.stop_reason) : null);
+}
+
 async function recordCompletionEvent(
   supabase: SupabaseClient,
   userId: string,
@@ -588,13 +607,13 @@ async function processPortfolioRun(supabase: SupabaseClient, userId: string, run
         break;
       }
 
-      const slots = Math.max(0, portfolioRun.concurrency - summary.inFlight);
-      const queuedRemaining = summary.active - summary.inFlight;
-      if (slots === 0) {
-        if (queuedRemaining <= 0) break;
+      const launch = portfolioLaunchSlots(portfolioRun.concurrency, summary.inFlight, summary.active);
+      if (launch.stop) break;
+      if (launch.wait) {
         await new Promise((resolve) => setTimeout(resolve, 2_000));
         continue;
       }
+      const slots = launch.slots;
 
       const { data: queued, error: queuedError } = await supabase
         .from("portfolio_completion_items")
@@ -743,7 +762,7 @@ async function portfolioRunResponse(supabase: SupabaseClient, userId: string, ru
         status: item.status,
         estimatedHours: item.estimated_hours,
         estimatedCostUsd: item.estimated_cost_usd,
-        error: item.error ?? (session && session.status !== "succeeded" && session.stop_reason ? String(session.stop_reason) : null),
+        error: portfolioItemDisplayedError(item.error, session),
         stopReason: session?.stop_reason ? String(session.stop_reason) : null,
         completionRunId: item.completion_run_id,
         completionSessionId: item.completion_session_id ?? null,

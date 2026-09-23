@@ -163,7 +163,7 @@ interface AIFinishPlan {
   changes: AIFileChange[];
 }
 
-function isFinishPlanChange(value: unknown): value is AIFileChange {
+export function isFinishPlanChange(value: unknown): value is AIFileChange {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const change = value as Partial<AIFileChange>;
   return (

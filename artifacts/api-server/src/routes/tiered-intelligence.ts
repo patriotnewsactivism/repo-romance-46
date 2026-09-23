@@ -27,7 +27,7 @@ const TIERED_SCORE_FIELDS = [
 const TIERED_TEXT_FIELDS = ["summary", "architect_view", "product_view", "quality_security_view"] as const;
 const TIERED_LIST_FIELDS = ["blockers", "next_actions"] as const;
 
-function isTieredIntelligenceResult(value: unknown): value is Record<string, unknown> {
+export function isTieredIntelligenceResult(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const row = value as Record<string, unknown>;
   const scoresValid = TIERED_SCORE_FIELDS.every((field) => {

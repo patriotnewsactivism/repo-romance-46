@@ -26,6 +26,7 @@ import { type AIProviderConfig } from "../lib/ai-provider";
 import { callAIJson } from "../lib/call-ai-json";
 import { loadAiCredential, loadGithubCredential, requireGithubCredential, toAiProviderConfig } from "../lib/credentials";
 import { recordRepoLearning } from "../lib/adaptive-learning";
+import { acceptanceVerifiedAt } from "../lib/post-run-evolution";
 
 const router: IRouter = Router();
 const GH_API = "https://api.github.com";
@@ -76,7 +77,7 @@ interface CompetitionResult {
 
 const SCENARIO_NAMES = new Set(["conservative", "base", "strong-execution"]);
 
-function isScenarioInput(value: unknown): value is ScenarioInput {
+export function isScenarioInput(value: unknown): value is ScenarioInput {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const row = value as Record<string, unknown>;
   return (
@@ -98,6 +99,11 @@ function isScenarioInput(value: unknown): value is ScenarioInput {
     Array.isArray(row.assumptions) &&
     row.assumptions.every((item) => typeof item === "string")
   );
+}
+
+/** Reject the whole market model when any scenario is missing or malformed. */
+export function hasValidMarketScenarios(scenarios: unknown): scenarios is ScenarioInput[] {
+  return Array.isArray(scenarios) && scenarios.length >= 3 && scenarios.every(isScenarioInput);
 }
 
 interface MarketModel {
@@ -241,14 +247,7 @@ async function fetchAcceptanceEvidence(token: string, repo: string, headSha: str
       testsPassed: passed(/test|ci|verify/i),
       securityBlockersResolved: passed(/security|codeql|sast|dependency/i) || undefined,
       deploymentSucceeded,
-      verifiedAt:
-        passed(/build|ci|verify/i) ||
-        passed(/type|tsc|ci|verify/i) ||
-        passed(/test|ci|verify/i) ||
-        passed(/security|codeql|sast|dependency/i) ||
-        deploymentSucceeded
-          ? new Date().toISOString()
-          : undefined,
+      verifiedAt: acceptanceVerifiedAt(checks, deploymentSucceeded),
     };
   } catch {
     return {};
@@ -530,7 +529,7 @@ Return strict JSON only.`;
         if (!value || typeof value !== "object") return null;
         const row = value as MarketModel;
         if (!Number.isFinite(row.market_need_score) || !Number.isFinite(row.demand_score) || !row.market_summary) return null;
-        if (!Array.isArray(row.scenarios) || row.scenarios.length < 3 || !row.scenarios.every(isScenarioInput)) return null;
+        if (!hasValidMarketScenarios(row.scenarios)) return null;
         return row;
       },
     );
