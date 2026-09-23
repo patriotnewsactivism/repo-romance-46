@@ -12,7 +12,7 @@ import {
 } from "@workspace/repo-os";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
-import { loadGithubCredential, requireGithubCredential } from "../lib/credentials";
+import { loadGithubCredential } from "../lib/credentials";
 import { recordRepoLearning } from "../lib/adaptive-learning";
 
 /** Null is typeof "object" in JS; treat it as missing intelligence rather than a snapshot. */
@@ -611,32 +611,38 @@ router.post(
       );
     }
 
-    const github = requireGithubCredential(await loadGithubCredential(req.supabase!, userId));
+    const github = await loadGithubCredential(req.supabase!, userId);
     const inspected: Awaited<ReturnType<typeof inspectRepo>>[] = [];
     const errors: string[] = [];
     let cursor = 0;
 
-    let githubRateLimited = false;
-    try {
-      await ghJson<GhRepo>(github.token, "/repos/" + repos[0]);
-    } catch (error) {
-      if (isGithubRateLimitError(error)) {
-        githubRateLimited = true;
-        errors.push(
-          "GitHub API rate limit is exhausted. Valuation continued from persisted analysis evidence with reduced confidence instead of failing.",
-        );
+    let githubUnavailableReason: string | null = null;
+    if (!github) {
+      githubUnavailableReason =
+        "GitHub credential is unavailable or unreadable. Valuation continued from persisted analysis evidence with reduced confidence.";
+      errors.push(githubUnavailableReason);
+    } else {
+      try {
+        await ghJson<GhRepo>(github.token, "/repos/" + repos[0]);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        if (isGithubRateLimitError(error)) {
+          githubUnavailableReason =
+            "GitHub API rate limit is exhausted. Valuation continued from persisted analysis evidence with reduced confidence.";
+        } else {
+          githubUnavailableReason =
+            "Fresh GitHub enrichment is unavailable. Valuation continued from persisted analysis evidence with reduced confidence.";
+        }
+        errors.push(githubUnavailableReason + " " + reason);
       }
     }
 
-    if (githubRateLimited) {
+    if (!github || githubUnavailableReason) {
+      const reason =
+        githubUnavailableReason ??
+        "GitHub enrichment was unavailable during this valuation run.";
       for (const repo of repos) {
-        inspected.push(
-          inspectRepoFromAnalysisContext(
-            repo,
-            contexts.get(repo) ?? null,
-            "GitHub API rate limit prevented fresh repository telemetry during this valuation run.",
-          ),
-        );
+        inspected.push(inspectRepoFromAnalysisContext(repo, contexts.get(repo) ?? null, reason));
       }
     } else {
       const concurrency = Math.min(4, repos.length);
