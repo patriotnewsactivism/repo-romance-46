@@ -48,7 +48,7 @@ export default function Auth() {
             Continue with GitHub
           </Button>
           <p className="text-xs text-muted-foreground text-center mt-4">
-            We'll request read access to your public repositories
+            GitHub access includes private repositories and write permission so RepoFinisher can open draft PRs. It never merges automatically.
           </p>
         </CardContent>
       </Card>

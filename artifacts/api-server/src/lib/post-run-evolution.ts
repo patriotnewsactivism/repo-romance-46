@@ -174,14 +174,29 @@ async function fetchAcceptanceEvidence(token: string, repo: string, headSha: str
         (check) =>
           pattern.test(check.name) &&
           check.status === "completed" &&
-          ["success", "neutral", "skipped"].includes(check.conclusion || ""),
+          check.conclusion === "success",
       );
+    let deploymentSucceeded: boolean | undefined;
+    try {
+      const deployments = await ghJson<Array<{ id: number }>>(
+        token,
+        `/repos/${repo}/deployments?sha=${encodeURIComponent(headSha)}&per_page=1`,
+      );
+      const latest = Array.isArray(deployments) ? deployments[0] : undefined;
+      if (latest) {
+        const statuses = await ghJson<Array<{ state: string }>>(token, `/repos/${repo}/deployments/${latest.id}/statuses?per_page=5`);
+        if (Array.isArray(statuses) && statuses.some((status) => status.state === "success")) deploymentSucceeded = true;
+      }
+    } catch {
+      deploymentSucceeded = undefined;
+    }
     return {
       buildPassed: passed(/build|ci|verify/i),
       typecheckPassed: passed(/type|tsc|ci|verify/i),
       testsPassed: passed(/test|ci|verify/i),
       securityBlockersResolved: passed(/security|codeql|sast|dependency/i) || undefined,
-      verifiedAt: checks.length > 0 ? new Date().toISOString() : undefined,
+      deploymentSucceeded,
+      verifiedAt: checks.length > 0 || deploymentSucceeded ? new Date().toISOString() : undefined,
     };
   } catch {
     return {};

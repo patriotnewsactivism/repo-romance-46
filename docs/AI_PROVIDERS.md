@@ -15,17 +15,19 @@ OpenRouter is the preferred platform/BYOK entry point because one credential can
 
 Recommended model policy:
 
-- default high-value model: `minimax/minimax-m3:free`
-- automatic same-provider fallback: `nvidia/nemotron-3-ultra-550b-a55b:free`
-- premium OpenRouter alternative: `openai/gpt-5.6-luna`
-- quality/speed alternative: `google/gemini-3.7-flash`
-- direct Google fallback: `gemini-3.7-flash`
+- default high-value model / free agent-pool sentinel: `nex-agi/nex-n2.5-mini:free`
+- free models attempted across two grouped requests, because OpenRouter accepts at most three models per request: first `nex-agi/nex-n2.5-mini:free` with `nvidia/nemotron-3-super-120b-a12b:free` and `poolside/laguna-s-2.1:free`, then `nex-agi/nex-n2.5-pro:free`, `nvidia/nemotron-3.5-lightning:free`, and `nvidia/nemotron-3-ultra-550b-a55b:free`
+- cheap paid continuity tail after both free batches fail: `openai/gpt-oss-120b`, `deepseek/deepseek-v4-flash-0731`, `deepseek/deepseek-v3.2`
+- premium OpenRouter alternative: any live catalog slug, including `openai/gpt-5.6-sol`
+- direct Google fallback: `gemini-3.8-flash`
 
-The Settings UI exposes a curated model catalog so normal users do not need to type provider IDs. MiniMax M3 Free and Nemotron 3 Ultra Free lead the OpenRouter catalog, followed by GPT-5.6 Sol, Terra, and Luna plus other high-capability choices. The exact identifier remains visible and editable as an optional custom override so newly released models are not blocked by the catalog release cycle. Saving a preset still uses the existing provider/model readiness test and trusted BYOK path; appearing in the catalog does not imply that an account has entitlement or available provider credit for that model.
+The Settings UI exposes a **Free agent pool** choice plus the live OpenRouter catalog. MiniMax M3 Free was removed from OpenRouter and must not be used as a default. GPT-5.6 Sol, Terra, and Luna remain selectable OpenAI/OpenRouter presets. The exact identifier remains visible and editable as an optional custom override so newly released models are not blocked by the catalog release cycle. Saving a preset still uses the existing provider/model readiness test and trusted BYOK path; appearing in the catalog does not imply that an account has entitlement or available provider credit for that model.
+
+Pool failover runs only when the saved/default model is exactly `nex-agi/nex-n2.5-mini:free`. Any other saved slug stays pinned.
 
 If `AI_PROVIDER` is explicitly configured and its matching platform credential exists, RepoFinisher honors it. If that provider is unusable because its server-side credential is absent, the backend automatically selects an available configured credential, preferring OpenRouter first. When no platform credential exists, Settings defaults to OpenRouter so a user can supply an OpenRouter BYOK key without being pushed toward a legacy provider.
 
-The preferred OpenRouter default can be overridden with `OPENROUTER_MODEL` or the common `AI_MODEL` variable. A user-saved exact model identifier takes precedence over those defaults.
+A user-saved exact model identifier takes precedence over in-code defaults. Historical `AI_MODEL` / `OPENROUTER_MODEL` / `GEMINI_MODEL` environment variables are ignored so a model slug cannot leak across providers.
 
 ## User BYOK flow
 
@@ -47,22 +49,14 @@ The backend can use optional environment credentials:
 
 ```text
 AI_PROVIDER
-AI_MODEL
 
 GEMINI_API_KEY or GOOGLE_API_KEY
-GEMINI_MODEL
-
 OPENAI_API_KEY
-OPENAI_MODEL
-
 ANTHROPIC_API_KEY
-ANTHROPIC_MODEL
-
-OPENROUTER_API_KEY
-OPENROUTER_MODEL
+OPENROUTER_FREE_API_KEY or OPENROUTER_API_KEY_2 or OPENROUTER_API_KEY
 ```
 
-`AI_MODEL`, when set, is the common model override. Provider-specific model variables are fallback choices when a common override is absent.
+Model IDs are not environment secrets. `AI_MODEL`, `GEMINI_MODEL`, `OPENAI_MODEL`, `ANTHROPIC_MODEL`, and `OPENROUTER_MODEL` are ignored so a slug cannot leak across providers. Choose the model in Settings.
 
 A credential variable that is present but blank (empty or whitespace) counts as unconfigured. Blank values are normalized to absent in `loadAiCredential` and again in `callAI`, so provider selection, `platformAiStatus`, and the "no usable credential" error all agree. Without that rule a whitespace key is truthy, passes every readiness check, and reaches the provider as `Authorization: Bearer `, which comes back as a misleading authentication error instead of a configuration error. Stored credentials are also trimmed, so a key saved with surrounding whitespace still authenticates.
 
@@ -70,9 +64,9 @@ A credential variable that is present but blank (empty or whitespace) counts as 
 
 RepoFinisher should persist the exact model identifier selected/configured by the user rather than silently substituting a different model.
 
-This applies to per-stage model selection as well. Portfolio analysis picks a profiler/critique/synthesis model per tier, but the identifier resolved by `loadAiCredential` — the user's saved model, else the provider's platform default — overrides those stage defaults. Stage defaults are only a fallback for a provider with no configured model, and each provider's fallback must be valid for that provider: OpenRouter identifiers are vendor-namespaced (`minimax/minimax-m3:free`), so a bare `gpt-4o-mini` is not a usable OpenRouter default.
+This applies to per-stage model selection as well. Portfolio analysis, finishing, CI repair, valuation, and prompts all receive the identifier resolved by `loadAiCredential` — the user's saved model, else the provider's platform default. Stage defaults are only a fallback for a provider with no configured model, and each provider's fallback must be valid for that provider: OpenRouter identifiers are vendor-namespaced (`nex-agi/nex-n2.5-mini:free`), so a bare `gpt-4o-mini` is not a usable OpenRouter default.
 
-When the resolved OpenRouter model is the reviewed MiniMax default, RepoFinisher sends the ordered `models` roster `[MiniMax M3 Free, Nemotron 3 Ultra Free]` so OpenRouter can fail over within the same request. Any other exact custom/user-selected model remains pinned and is not silently substituted. The response retains the concrete model ID reported by OpenRouter for safe runtime attribution.
+When the resolved OpenRouter model is the free agent-pool sentinel, RepoFinisher sends OpenRouter `models` fallback batches (free roster, then cheap paid continuity). Any other exact custom/user-selected model remains pinned and is not silently substituted. The response retains the concrete model ID reported by OpenRouter for safe runtime attribution.
 
 When a provider rejects a model:
 
@@ -99,7 +93,7 @@ Status endpoints may expose safe metadata such as:
 
 They must not expose key values.
 
-`GET /api/preferences/ai-status` is an authenticated API route on the persistent Render service. Production smoke verification deliberately calls it without a token and expects a JSON `401`; an HTML or `404` response is treated as a deployment/routing regression.
+`GET /api/preferences/ai-status` is an authenticated API route on the persistent Railway API service. Production smoke verification deliberately calls it without a token and expects a JSON `401`; an HTML or `404` response is treated as a deployment/routing regression.
 
 ## Credential storage
 
@@ -142,6 +136,6 @@ These are different failure modes and should become different operational-learni
 
 Older repository notes described Google/Gemini as a single hard platform default and referenced Vercel-hosted API behavior. Those notes are obsolete.
 
-The current architecture is provider-aware, BYOK-capable, hosted with a persistent API on Render, and stores user AI credentials in Supabase Vault.
+The current architecture is provider-aware, BYOK-capable, hosted with a persistent API on Railway, and stores user AI credentials in Supabase Vault. Former Render and Cloud Run hosting notes are obsolete.
 
 Model-specific documentation files should defer to this document and `AGENTS.md` rather than preserve old hosting assumptions.

@@ -2,8 +2,9 @@ import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
-import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "../lib/credentials";
-import { callAI } from "../lib/ai-provider";
+import { loadAiCredential, loadGithubCredential, requireGithubCredential, toAiProviderConfig } from "../lib/credentials";
+import type { AIProviderConfig } from "../lib/ai-provider";
+import { callAIJson } from "../lib/call-ai-json";
 
 const router: IRouter = Router();
 
@@ -20,6 +21,51 @@ interface Valuation {
   risks: string[];
   upsides: string[];
   summary: string;
+}
+
+function isStringList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isCompleteValuation(value: unknown): value is Valuation {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Partial<Valuation>;
+  const revenue = row.revenue_potential;
+  if (!revenue || typeof revenue !== "object") return false;
+  return (
+    Number.isFinite(row.estimated_value_low) &&
+    Number.isFinite(row.estimated_value_high) &&
+    typeof row.summary === "string" &&
+    row.summary.length > 0 &&
+    typeof row.currency === "string" &&
+    typeof row.valuation_method === "string" &&
+    (row.confidence === "low" || row.confidence === "medium" || row.confidence === "high") &&
+    typeof revenue.model === "string" &&
+    revenue.model.length > 0 &&
+    Number.isFinite(revenue.monthly_revenue_low) &&
+    Number.isFinite(revenue.monthly_revenue_high) &&
+    typeof revenue.timeline === "string" &&
+    Array.isArray(row.factors) &&
+    row.factors.every(
+      (factor) =>
+        Boolean(factor) &&
+        typeof factor.label === "string" &&
+        Number.isFinite(factor.score) &&
+        Number.isFinite(factor.weight) &&
+        typeof factor.detail === "string",
+    ) &&
+    Array.isArray(row.comparables) &&
+    row.comparables.every(
+      (comparable) =>
+        Boolean(comparable) &&
+        typeof comparable.name === "string" &&
+        typeof comparable.outcome === "string" &&
+        typeof comparable.multiple === "string" &&
+        typeof comparable.relevance === "string",
+    ) &&
+    isStringList(row.risks) &&
+    isStringList(row.upsides)
+  );
 }
 
 interface PortfolioValuation {
@@ -136,8 +182,7 @@ async function generateValuation(
     estimated_hours: number | null;
     next_steps: string[];
   } | null,
-  aiProvider: string,
-  aiKey: string | null,
+  ai: AIProviderConfig,
 ): Promise<Valuation> {
   const system = `You are a technology investment analyst and M&A advisor specializing in codebase and software project valuations.
 You value software projects the way a VC or acquirer would — based on:
@@ -189,7 +234,7 @@ Analysis Context:
 - Next steps: ${analysisItem.next_steps.join("; ")}`
     : "";
 
-  const aiResult = await callAI(
+  return callAIJson<Valuation>(
     {
       messages: [
         { role: "system", content: system },
@@ -260,9 +305,11 @@ Analysis Context:
         },
       },
     },
-    { provider: aiProvider, apiKey: aiKey },
+    ai,
+    (value) => {
+      return isCompleteValuation(value) ? value : null;
+    },
   );
-  return JSON.parse(aiResult.content || "{}") as Valuation;
 }
 
 router.post(
@@ -319,7 +366,7 @@ router.post(
             }
           : null;
 
-        const valuation = await generateValuation(repo, metrics, analysisContext, ai.provider, ai.apiKey);
+        const valuation = await generateValuation(repo, metrics, analysisContext, toAiProviderConfig(ai));
         // Assigned here rather than trusted from the AI response — we already
         // know which repo this is from the loop, and the AI JSON schema
         // doesn't ask for it.
@@ -338,7 +385,7 @@ router.post(
 
     valuations.sort((a, b) => b.estimated_value_high - a.estimated_value_high);
 
-    const topPicksResult = valuations.slice(0, 3).map((v, i) => ({ repo: `Pick #${i + 1}`, reason: v.summary }));
+    const topPicksResult = valuations.slice(0, 3).map((v) => ({ repo: v.repo, reason: v.summary }));
 
     const result: PortfolioValuation = {
       total_estimated_value_low: totalLow,

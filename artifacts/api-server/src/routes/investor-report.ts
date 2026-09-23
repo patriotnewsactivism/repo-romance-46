@@ -157,8 +157,14 @@ router.get(
     if (ranking.length === 0) {
       throw Object.assign(new Error("Run Full Portfolio Value before exporting an investor report so the PDF has evidence-backed repository valuation data."), { status: 409 });
     }
+    const savedV2 = record(intelligence.valuationV2);
     const inputs = ranking.map(valuationInput).filter((value): value is PortfolioValuationRepoInput => value !== null);
-    const valuation = buildPortfolioValuation(inputs);
+    const valuation = typeof savedV2.methodologyVersion === "string" && savedV2.methodologyVersion.includes("portfolio-valuation-v2")
+      ? savedV2 as unknown as ReturnType<typeof buildPortfolioValuation>
+      : buildPortfolioValuation(inputs);
+    const valuationSource = typeof savedV2.methodologyVersion === "string" && savedV2.methodologyVersion.includes("portfolio-valuation-v2")
+      ? "saved Portfolio Valuation V2 snapshot"
+      : "recomputed from current ranking";
     const portfolio = record(intelligence.portfolio);
     const top = ranking[0];
     const portfolioStats = record(analysisRow.portfolio_stats);
@@ -175,6 +181,7 @@ router.get(
       { kind: "paragraph", text: recommendation },
       { kind: "paragraph", text: `Repository universe in this analysis: ${repoCount}. Repositories valued successfully: ${reposScored}.` },
       { kind: "paragraph", text: evidencePolicy },
+      { kind: "paragraph", text: `Valuation source: ${valuationSource}. Recalculate and save on Finish, Value & Reports to freeze a snapshot before export.` },
       { kind: "heading", text: "Confidence-adjusted Portfolio Value" },
       { kind: "bullet", text: `Adjusted current value: ${range(valuation.confidenceAdjustedPortfolioValueUsd)}. Gross standalone: ${range(valuation.grossStandalonePresentValueUsd)}.` },
       { kind: "bullet", text: `Adjusted potential scenario: ${range(valuation.confidenceAdjustedPotentialValueUsd)}. Gross standalone potential: ${range(valuation.grossStandalonePotentialValueUsd)}.` },

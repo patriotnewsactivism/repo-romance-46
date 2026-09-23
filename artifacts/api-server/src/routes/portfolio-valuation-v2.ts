@@ -94,7 +94,7 @@ function inputFromRanking(item: Record<string, unknown>): PortfolioValuationRepo
   };
 }
 
-async function calculate(req: Request, analysisId: string) {
+async function calculate(req: Request, analysisId: string, forceRecalculate = true) {
   const { data, error } = await req.supabase!
     .from("analyses")
     .select("investment_intelligence")
@@ -105,6 +105,10 @@ async function calculate(req: Request, analysisId: string) {
   if (!data) throw Object.assign(new Error("Analysis not found"), { status: 404 });
 
   const intelligence = record((data as Record<string, unknown>).investment_intelligence);
+  const saved = record(intelligence.valuationV2);
+  if (typeof saved.methodologyVersion === "string" && saved.methodologyVersion.includes("portfolio-valuation-v2") && !forceRecalculate) {
+    return saved;
+  }
   const ranking = Array.isArray(intelligence.ranking)
     ? (intelligence.ranking as Record<string, unknown>[])
     : [];
@@ -126,7 +130,7 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
-    res.json(await calculate(req, id));
+    res.json(await calculate(req, id, false));
   }),
 );
 

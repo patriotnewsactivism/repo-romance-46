@@ -6,17 +6,13 @@ import { z } from "zod";
 import { asyncHandler } from "../lib/async-handler";
 import { requireAuth } from "../middlewares/auth";
 import {
-  executePreparedPlan,
-  prepareFinishPlan,
   verifyCommitChecks,
-  type PreparedFinishPlan,
   type VerificationResult,
 } from "../lib/repo-finisher-engine";
-import { normalizeInvestmentMetrics } from "../lib/run-outcome-score";
 import { finalizeRunEvolution } from "../lib/post-run-evolution";
+import { startCompletionSession } from "../lib/start-completion-session";
 
 const router: IRouter = Router();
-const PORTFOLIO_PROMPT_VERSION = "portfolio-finisher-v1-bounded";
 const WORKER_LEASE_MS = 9 * 60_000;
 const WORKER_BUDGET_MS = 7 * 60_000;
 const ACTIVE_PORTFOLIO_STATUSES = ["queued", "running", "verifying"] as const;
@@ -80,6 +76,7 @@ interface PortfolioItemRow {
   estimated_cost_usd: number | null;
   next_steps: unknown;
   completion_run_id: string | null;
+  completion_session_id?: string | null;
   error: string | null;
   started_at: string | null;
   completed_at: string | null;
@@ -293,167 +290,32 @@ async function processPortfolioItem(
 
   const claimedItem = claimed as PortfolioItemRow;
   try {
-    const nextSteps = stringList(claimedItem.next_steps);
-    const [{ plan, planHash }, investmentEntry] = await Promise.all([
-      prepareFinishPlan(supabase, userId, {
-        repo: claimedItem.repo,
-        nextSteps,
-        analysisId: portfolioRun.analysis_id ?? undefined,
-      }),
-      loadInvestmentEntry(supabase, userId, portfolioRun.analysis_id, claimedItem.repo),
-    ]);
-    const baselineMetrics = normalizeInvestmentMetrics(investmentEntry);
+    if (!portfolioRun.analysis_id) {
+      throw new Error("Finish Portfolio requires an analysis with Investment Intelligence scores.");
+    }
+    const started = await startCompletionSession(supabase, userId, {
+      repo: claimedItem.repo,
+      analysisId: portfolioRun.analysis_id,
+      nextSteps: stringList(claimedItem.next_steps),
+      reuseExisting: true,
+      maxEstimatedCostUsd: portfolioRun.max_estimated_cost_usd ?? undefined,
+    });
+    const sessionId = String(started.session.id);
     const now = new Date().toISOString();
-    const approvalPolicy = {
-      mode: "bounded_portfolio",
-      portfolioRunId: portfolioRun.id,
-      acknowledgedAt: portfolioRun.autonomy_acknowledged_at,
-      constraints: {
-        selectionLimit: portfolioRun.selection_limit,
-        concurrency: portfolioRun.concurrency,
-        maxEstimatedHours: portfolioRun.max_estimated_hours,
-        maxEstimatedCostUsd: portfolioRun.max_estimated_cost_usd,
-        stopOnFailure: portfolioRun.stop_on_failure,
-        draftPullRequestsOnly: true,
-        automaticMerge: false,
-      },
-    };
-
-    const { data: completionRun, error: completionError } = await supabase
-      .from("completion_runs")
-      .insert({
-        user_id: userId,
-        repo: plan.repo,
-        default_branch: plan.defaultBranch,
-        base_sha: plan.baseSha,
-        plan_hash: planHash,
-        plan,
-        status: "approved",
-        approved_hash: planHash,
-        approved_at: now,
-        analysis_id: portfolioRun.analysis_id,
-        prompt_version: PORTFOLIO_PROMPT_VERSION,
-        baseline_metrics: baselineMetrics,
-        portfolio_run_id: portfolioRun.id,
-        autonomy_mode: "bounded_portfolio",
-        approval_policy: approvalPolicy,
-        created_at: now,
-        updated_at: now,
-      })
-      .select("*")
-      .single();
-    if (completionError || !completionRun) {
-      throw new Error(`Failed to create bounded completion run: ${completionError?.message ?? "unknown database error"}`);
-    }
-
-    const completionRunId = String((completionRun as Record<string, unknown>).id);
-    const stepRows = plan.changes.map((change, index) => ({
-      run_id: completionRunId,
-      user_id: userId,
-      ordinal: index + 1,
-      title: `${change.status === "created" ? "Create" : change.status === "modified" ? "Modify" : "Delete"} ${change.path}`,
-      description: change.description,
-      status: "pending",
-      scope: [{ path: change.path, action: change.status }],
-      created_at: now,
-      updated_at: now,
-    }));
-    const [{ error: stepError }, { error: approvalError }] = await Promise.all([
-      supabase.from("completion_steps").insert(stepRows),
-      supabase.from("completion_approvals").insert({
-        run_id: completionRunId,
-        user_id: userId,
-        base_sha: plan.baseSha,
-        plan_hash: planHash,
-        approved_at: now,
-        approval_mode: "bounded_portfolio",
-      }),
-    ]);
-    if (stepError || approvalError) {
-      await supabase.from("completion_runs").delete().eq("id", completionRunId).eq("user_id", userId);
-      throw new Error(`Failed to persist bounded approval: ${stepError?.message ?? approvalError?.message ?? "unknown error"}`);
-    }
-
-    await recordCompletionEvent(
-      supabase,
-      userId,
-      completionRunId,
-      "bounded_portfolio_approved",
-      "success",
-      "This exact generated plan is authorized by the user's bounded Finish Portfolio action. Execution is limited to a draft pull request; automatic merge is disabled.",
-      { portfolioRunId: portfolioRun.id, planHash, approvalPolicy },
-    );
-
+    const nextStatus: PortfolioItemStatus = started.alreadyComplete ? "succeeded" : "executing";
     const { error: executingItemError } = await supabase
       .from("portfolio_completion_items")
-      .update({ status: "executing", completion_run_id: completionRunId, updated_at: now })
+      .update({
+        status: nextStatus,
+        completion_session_id: sessionId,
+        error: null,
+        completed_at: started.alreadyComplete ? now : null,
+        updated_at: now,
+      })
       .eq("id", claimedItem.id)
       .eq("user_id", userId)
       .eq("status", "planning");
-    if (executingItemError) throw new Error(`Failed to mark portfolio item executing: ${executingItemError.message}`);
-
-    await supabase
-      .from("completion_steps")
-      .update({ status: "running", started_at: now, updated_at: now })
-      .eq("run_id", completionRunId)
-      .eq("user_id", userId)
-      .eq("status", "pending");
-
-    const result = await executePreparedPlan(supabase, userId, plan as PreparedFinishPlan, planHash);
-    const verifyingAt = new Date().toISOString();
-    const { error: runUpdateError } = await supabase
-      .from("completion_runs")
-      .update({
-        status: "verifying",
-        branch_name: result.branch,
-        head_sha: result.head_sha,
-        pr_number: result.pr_number,
-        pr_url: result.pr_url,
-        ci_status: "pending",
-        updated_at: verifyingAt,
-      })
-      .eq("id", completionRunId)
-      .eq("user_id", userId)
-      .eq("status", "approved");
-    if (runUpdateError) throw new Error(`Failed to persist portfolio execution: ${runUpdateError.message}`);
-
-    await Promise.all([
-      supabase
-        .from("completion_steps")
-        .update({
-          status: "verifying",
-          result: { branch: result.branch, headSha: result.head_sha, prNumber: result.pr_number, prUrl: result.pr_url },
-          updated_at: verifyingAt,
-        })
-        .eq("run_id", completionRunId)
-        .eq("user_id", userId),
-      supabase
-        .from("portfolio_completion_items")
-        .update({ status: "verifying", updated_at: verifyingAt })
-        .eq("id", claimedItem.id)
-        .eq("user_id", userId)
-        .eq("status", "executing"),
-    ]);
-
-    await recordCompletionEvent(
-      supabase,
-      userId,
-      completionRunId,
-      "draft_pr_created",
-      "success",
-      `Created bounded-autonomy draft PR #${result.pr_number}; waiting for checks.`,
-      { portfolioRunId: portfolioRun.id, prUrl: result.pr_url, branch: result.branch, headSha: result.head_sha },
-    );
-
-    const verification = await verifyCommitChecks(supabase, userId, claimedItem.repo, result.head_sha);
-    const verificationItem = { ...claimedItem, status: "verifying", completion_run_id: completionRunId } as PortfolioItemRow;
-    await setIndividualVerification(
-      supabase,
-      userId,
-      verificationItem,
-      completionRun as Record<string, unknown>,
-      verification,
-    );
+    if (executingItemError) throw new Error(`Failed to attach finish-until-target session: ${executingItemError.message}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const completedAt = new Date().toISOString();
@@ -505,6 +367,71 @@ async function processPortfolioItem(
         .eq("user_id", userId)
         .eq("status", "queued");
     }
+  }
+}
+
+async function pollSessionItems(
+  supabase: SupabaseClient,
+  userId: string,
+  portfolioRun: PortfolioRunRow,
+) {
+  const { data: items, error } = await supabase
+    .from("portfolio_completion_items")
+    .select("*")
+    .eq("portfolio_run_id", portfolioRun.id)
+    .eq("user_id", userId)
+    .eq("status", "executing")
+    .not("completion_session_id", "is", null)
+    .order("rank", { ascending: true })
+    .limit(Math.max(1, portfolioRun.concurrency * 3));
+  if (error) throw new Error(`Failed to load finish-until-target portfolio items: ${error.message}`);
+
+  for (const raw of items ?? []) {
+    const item = raw as PortfolioItemRow;
+    const sessionId = item.completion_session_id;
+    if (!sessionId) continue;
+    const { data: session, error: sessionError } = await supabase
+      .from("repo_completion_sessions")
+      .select("id, status, stop_reason, pr_url, pr_number")
+      .eq("id", sessionId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (sessionError || !session) continue;
+    const status = String((session as Record<string, unknown>).status || "");
+    const { data: runs } = await supabase
+      .from("completion_runs")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("completion_session_id", sessionId)
+      .order("session_iteration", { ascending: false })
+      .limit(1);
+    const latestRunId = Array.isArray(runs) && runs[0] ? String((runs[0] as { id: string }).id) : null;
+    const now = new Date().toISOString();
+    if (status === "active") {
+      if (latestRunId && latestRunId !== item.completion_run_id) {
+        await supabase
+          .from("portfolio_completion_items")
+          .update({ completion_run_id: latestRunId, updated_at: now })
+          .eq("id", item.id)
+          .eq("user_id", userId);
+      }
+      continue;
+    }
+    const succeeded = status === "succeeded";
+    const failed = status === "blocked" || status === "budget_exhausted" || status === "cancelled" || status === "failed";
+    if (!succeeded && !failed) continue;
+    await supabase
+      .from("portfolio_completion_items")
+      .update({
+        status: succeeded ? "succeeded" : "failed",
+        completion_run_id: latestRunId ?? item.completion_run_id,
+        error: succeeded ? null : String((session as Record<string, unknown>).stop_reason || `Finish-until-target stopped (${status}).`),
+        completed_at: now,
+        updated_at: now,
+      })
+      .eq("id", item.id)
+      .eq("user_id", userId)
+      .eq("status", "executing");
   }
 }
 
@@ -565,7 +492,8 @@ async function refreshPortfolioSummary(
   const failed = count("failed");
   const verifying = count("verifying");
   const skipped = count("skipped") + count("cancelled");
-  const active = count("queued") + count("planning") + count("executing");
+  const inFlight = count("planning") + count("executing");
+  const active = count("queued") + inFlight;
   const terminal = active === 0 && verifying === 0;
 
   let status: PortfolioStatus = portfolioRun.status;
@@ -599,7 +527,7 @@ async function refreshPortfolioSummary(
     .eq("user_id", userId);
   if (updateError) throw new Error(`Failed to update portfolio completion summary: ${updateError.message}`);
 
-  return { status, succeeded, failed, verifying, skipped, active, terminal };
+  return { status, succeeded, failed, verifying, skipped, active, inFlight, terminal };
 }
 
 async function claimWorkerLease(supabase: SupabaseClient, userId: string, runId: string) {
@@ -644,6 +572,7 @@ async function processPortfolioRun(supabase: SupabaseClient, userId: string, run
       if (portfolioRun.status === "cancelled") break;
 
       await pollVerifyingItems(supabase, userId, portfolioRun);
+      await pollSessionItems(supabase, userId, portfolioRun);
       const summary = await refreshPortfolioSummary(supabase, userId, portfolioRun);
       if (summary.terminal) break;
 
@@ -659,6 +588,14 @@ async function processPortfolioRun(supabase: SupabaseClient, userId: string, run
         break;
       }
 
+      const slots = Math.max(0, portfolioRun.concurrency - summary.inFlight);
+      const queuedRemaining = summary.active - summary.inFlight;
+      if (slots === 0) {
+        if (queuedRemaining <= 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        continue;
+      }
+
       const { data: queued, error: queuedError } = await supabase
         .from("portfolio_completion_items")
         .select("*")
@@ -666,7 +603,7 @@ async function processPortfolioRun(supabase: SupabaseClient, userId: string, run
         .eq("user_id", userId)
         .eq("status", "queued")
         .order("rank", { ascending: true })
-        .limit(portfolioRun.concurrency);
+        .limit(slots);
       if (queuedError) throw new Error(`Failed to load queued portfolio work: ${queuedError.message}`);
       const wave = (queued ?? []) as PortfolioItemRow[];
       if (wave.length === 0) break;
@@ -709,6 +646,7 @@ async function processPortfolioRun(supabase: SupabaseClient, userId: string, run
 
     portfolioRun = await loadPortfolioRun(supabase, userId, runId);
     await pollVerifyingItems(supabase, userId, portfolioRun);
+    await pollSessionItems(supabase, userId, portfolioRun);
     await refreshPortfolioSummary(supabase, userId, portfolioRun);
   } finally {
     await supabase
@@ -734,10 +672,15 @@ async function portfolioRunResponse(supabase: SupabaseClient, userId: string, ru
     .order("rank", { ascending: true });
   if (itemError) throw new Error(`Failed to load portfolio completion items: ${itemError.message}`);
 
-  const completionIds = ((items ?? []) as PortfolioItemRow[])
+  const itemList = ((items ?? []) as PortfolioItemRow[]);
+  const completionIds = itemList
     .map((item) => item.completion_run_id)
     .filter((id): id is string => Boolean(id));
+  const sessionIds = itemList
+    .map((item) => item.completion_session_id)
+    .filter((id): id is string => Boolean(id));
   const completionById = new Map<string, Record<string, unknown>>();
+  const sessionById = new Map<string, Record<string, unknown>>();
   if (completionIds.length > 0) {
     const { data: completions } = await supabase
       .from("completion_runs")
@@ -749,8 +692,18 @@ async function portfolioRunResponse(supabase: SupabaseClient, userId: string, ru
       completionById.set(String(record.id), record);
     }
   }
+  if (sessionIds.length > 0) {
+    const { data: sessions } = await supabase
+      .from("repo_completion_sessions")
+      .select("id, status, pr_url, pr_number, stop_reason, last_completion_pct, last_readiness_pct")
+      .in("id", sessionIds)
+      .eq("user_id", userId);
+    for (const row of sessions ?? []) {
+      const record = row as Record<string, unknown>;
+      sessionById.set(String(record.id), record);
+    }
+  }
 
-  const itemList = ((items ?? []) as PortfolioItemRow[]);
   const liveSucceeded = itemList.filter((item) => item.status === "succeeded").length;
   const liveFailed = itemList.filter((item) => item.status === "failed").length;
   const liveVerifying = itemList.filter((item) => item.status === "verifying").length;
@@ -782,6 +735,7 @@ async function portfolioRunResponse(supabase: SupabaseClient, userId: string, ru
     },
     items: itemList.map((item) => {
       const completion = item.completion_run_id ? completionById.get(item.completion_run_id) : null;
+      const session = item.completion_session_id ? sessionById.get(item.completion_session_id) : null;
       return {
         id: item.id,
         repo: item.repo,
@@ -789,10 +743,12 @@ async function portfolioRunResponse(supabase: SupabaseClient, userId: string, ru
         status: item.status,
         estimatedHours: item.estimated_hours,
         estimatedCostUsd: item.estimated_cost_usd,
-        error: item.error,
+        error: item.error ?? (session && session.status !== "succeeded" && session.stop_reason ? String(session.stop_reason) : null),
+        stopReason: session?.stop_reason ? String(session.stop_reason) : null,
         completionRunId: item.completion_run_id,
-        prNumber: completion?.pr_number ?? null,
-        prUrl: completion?.pr_url ?? null,
+        completionSessionId: item.completion_session_id ?? null,
+        prNumber: completion?.pr_number ?? session?.pr_number ?? null,
+        prUrl: completion?.pr_url ?? session?.pr_url ?? null,
         ciStatus: completion?.ci_status ?? null,
         outcomeScore: completion?.outcome_score ?? null,
       };

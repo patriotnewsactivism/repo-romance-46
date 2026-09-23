@@ -29,6 +29,14 @@ function workerMode() {
   return String(process.env.REPOFINISHER_WORKER_MODE || "").trim().toLowerCase();
 }
 
+export function configuredCompletionWorker(): "railway-worker" | "in-process" {
+  const mode = workerMode();
+  if (mode === "railway-persistent" || mode === "railway-worker" || mode === "persistent") {
+    return "railway-worker";
+  }
+  return "in-process";
+}
+
 /**
  * Railway production uses a persistent worker service that polls durable
  * completion-session state in Supabase. The API only needs to leave the session
@@ -42,8 +50,7 @@ export async function scheduleCompletionSession(
 ): Promise<CompletionWorkerMode> {
   if (await recentlyActive(supabase, userId, sessionId)) return "already-running";
 
-  const mode = workerMode();
-  if (mode === "railway-persistent" || mode === "railway-worker" || mode === "persistent") {
+  if (configuredCompletionWorker() === "railway-worker") {
     return "railway-worker";
   }
 

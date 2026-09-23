@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
-import { Link } from 'wouter';
-import { GitBranch, LayoutDashboard, Menu, Settings } from 'lucide-react';
+import { Link, useLocation } from 'wouter';
+import { signOut } from '@/lib/auth';
+import { GitBranch, LayoutDashboard, LogOut, Menu, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -21,10 +22,15 @@ interface AppHeaderProps {
   section?: string;
   user?: HeaderUser | null;
   actions?: ReactNode;
+  onSignOut?: () => void;
 }
 
-export function AppHeader({ section, user, actions }: AppHeaderProps) {
+export function AppHeader({ section, user, actions, onSignOut }: AppHeaderProps) {
+  const [, setLocation] = useLocation();
   const userLabel = user?.displayName || user?.login || null;
+  const signOutHandler = onSignOut ?? (() => {
+    void signOut().then(() => setLocation('/auth'));
+  });
 
   return (
     <header
@@ -81,6 +87,10 @@ export function AppHeader({ section, user, actions }: AppHeaderProps) {
               Settings
             </Button>
           </Link>
+          <Button variant="ghost" size="sm" className="gap-2 text-white hover:bg-white/10 hover:text-white" onClick={signOutHandler}>
+            <LogOut className="h-4 w-4" />
+            Sign out
+          </Button>
         </nav>
 
         <DropdownMenu>
@@ -119,6 +129,10 @@ export function AppHeader({ section, user, actions }: AppHeaderProps) {
                 <Settings className="h-4 w-4" />
                 Settings
               </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => signOutHandler()} className="cursor-pointer gap-2">
+              <LogOut className="h-4 w-4" />
+              Sign out
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

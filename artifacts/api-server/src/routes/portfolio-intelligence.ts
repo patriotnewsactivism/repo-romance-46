@@ -571,7 +571,7 @@ router.post(
     const [{ data: analysis, error: analysisError }, { data: items, error: itemsError }] = await Promise.all([
       req.supabase!
         .from("analyses")
-        .select("id, analyzed_repo_names")
+        .select("id, analyzed_repo_names, investment_intelligence")
         .eq("id", id)
         .eq("user_id", userId)
         .maybeSingle(),
@@ -652,12 +652,44 @@ router.post(
       throw new Error("Portfolio intelligence could not score any repository from either GitHub or persisted analysis evidence.");
     }
 
-    const ranked = rankInvestmentOpportunities(inspected.map((entry) => entry.opportunity));
+    const storedIntelligence = analysis && (analysis as Record<string, unknown>).investment_intelligence;
+    const existingIntelligence = storedIntelligence !== null && typeof storedIntelligence === "object"
+      ? storedIntelligence as Record<string, unknown>
+      : {};
+    const existingIsMeasured = String(existingIntelligence.methodologyVersion || "").startsWith("investment-intelligence");
+    const existingRanking = Array.isArray(existingIntelligence.ranking)
+      ? (existingIntelligence.ranking as Array<Record<string, unknown>>)
+      : [];
+    const measuredByRepo = new Map(existingRanking.map((row) => [String(row.repo || ""), row]));
+    const opportunities = inspected.map((entry) => {
+      const measured = existingIsMeasured ? measuredByRepo.get(entry.opportunity.repo) : undefined;
+      if (!measured || typeof measured.completionPct !== "number") {
+        return { ...entry.opportunity, evidence: [...(entry.opportunity.evidence ?? []), { class: "derived" as const, label: "Scoring pass", detail: "Coverage heuristic. Open Finish, Value & Reports after a deep score to replace this with measured completion." }] };
+      }
+      return {
+        ...entry.opportunity,
+        completionPct: Number(measured.completionPct),
+        productionReadinessPct: Number(measured.productionReadinessPct ?? entry.opportunity.productionReadinessPct),
+        presentValueUsd: (measured.presentValueUsd as typeof entry.opportunity.presentValueUsd) ?? entry.opportunity.presentValueUsd,
+        potentialValueUsd: (measured.potentialValueUsd as typeof entry.opportunity.potentialValueUsd) ?? entry.opportunity.potentialValueUsd,
+        evidenceConfidence: Number(measured.evidenceConfidence ?? entry.opportunity.evidenceConfidence),
+        commercializationProbability: Number(measured.commercializationProbability ?? entry.opportunity.commercializationProbability),
+        remainingWork: (measured.remainingWork as typeof entry.opportunity.remainingWork) ?? entry.opportunity.remainingWork,
+        evidence: Array.isArray(measured.evidence) ? measured.evidence as typeof entry.opportunity.evidence : entry.opportunity.evidence,
+      };
+    });
+    const ranked = rankInvestmentOpportunities(opportunities);
     const detailByRepo = new Map(inspected.map((entry) => [entry.details.repo, entry.details]));
-    const ranking = ranked.map((entry) => ({ ...entry, details: detailByRepo.get(entry.repo) }));
+    const ranking = ranked.map((entry) => ({
+      ...entry,
+      details: {
+        ...detailByRepo.get(entry.repo),
+        scoringPass: existingIsMeasured && measuredByRepo.has(entry.repo) ? "measured" : "coverage",
+      },
+    }));
     const generatedAt = new Date().toISOString();
     const result = {
-      methodologyVersion: METHODOLOGY_VERSION,
+      methodologyVersion: existingIsMeasured ? `${METHODOLOGY_VERSION}+measured-overlay` : METHODOLOGY_VERSION,
       generatedAt,
       analysisId: id,
       ranking,

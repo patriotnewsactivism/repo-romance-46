@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_AI_MODELS } from "./ai-model-config";
 import {
   OPENROUTER_AGENT_CHAIN,
   OPENROUTER_FLASHX_MODEL,
@@ -81,6 +82,11 @@ describe("resolveAIRequestTimeoutMs", () => {
 });
 
 describe("OpenRouter routing", () => {
+  it("keeps the in-code OpenRouter default on the free agent-pool sentinel", () => {
+    expect(DEFAULT_AI_MODELS.openrouter).toBe(OPENROUTER_FREE_AGENT_CHAIN[0]);
+    expect(DEFAULT_AI_MODELS.google).toBe("gemini-3.8-flash");
+  });
+
   it("uses the saved provider model and OpenRouter bearer endpoint", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ choices: [{ message: { content: "ready" } }] }), {

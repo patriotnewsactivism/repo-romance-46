@@ -33,17 +33,17 @@ describe("getStageModels", () => {
   });
 
   it("ignores a blank configured model and falls back to the provider default", () => {
-    expect(getStageModels("google", "balanced", "   ").synthesisModel).toBe("gemini-3.7-flash");
-    expect(getStageModels("google", "balanced", null).synthesisModel).toBe("gemini-3.7-flash");
-    expect(getStageModels("google", "balanced", undefined).synthesisModel).toBe("gemini-3.7-flash");
+    expect(getStageModels("google", "balanced", "   ").synthesisModel).toBe("gemini-3.8-flash");
+    expect(getStageModels("google", "balanced", null).synthesisModel).toBe("gemini-3.8-flash");
+    expect(getStageModels("google", "balanced", undefined).synthesisModel).toBe("gemini-3.8-flash");
   });
 
-  it("keeps the existing per-provider stage defaults when nothing is configured", () => {
-    expect(getStageModels("google", "balanced").synthesisModel).toBe("gemini-3.7-flash");
-    expect(getStageModels("openai", "balanced").synthesisModel).toBe("o3-mini");
-    expect(getStageModels("openai", "deep").synthesisModel).toBe("o3");
+  it("uses the shared in-code provider defaults when nothing is configured", () => {
+    expect(getStageModels("google", "balanced").synthesisModel).toBe("gemini-3.8-flash");
+    expect(getStageModels("openai", "balanced").synthesisModel).toBe("gpt-4o");
+    expect(getStageModels("openai", "deep").synthesisModel).toBe("gpt-4o");
     expect(getStageModels("anthropic", "balanced").synthesisModel).toBe("claude-sonnet-4-20250514");
-    expect(getStageModels("github_models", "balanced").synthesisModel).toBe("gpt-4o-mini");
+    expect(getStageModels("github_models", "balanced").synthesisModel).toBe("gpt-4o");
   });
 
   it("preserves the deep-tier Anthropic thinking budget", () => {

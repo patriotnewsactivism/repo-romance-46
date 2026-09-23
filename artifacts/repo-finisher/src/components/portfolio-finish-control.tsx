@@ -209,10 +209,10 @@ export function PortfolioFinishControl({ analysisId, repoCount }: { analysisId: 
             <h3 className="font-semibold">Finish Portfolio</h3>
           </div>
           <p className="mt-1 text-sm text-muted-foreground leading-relaxed">
-            One action launches bounded autonomous completion across the highest-value repositories. Each repository gets its own generated plan, isolated branch, draft PR, CI verification, audit trail, outcome score, and bounded CI self-healing when needed.
+            One action starts finish-until-target sessions on the highest-value repositories. Each repo iterates from fresh evidence toward 95% completion and 90% readiness, on its own isolated branch and draft PR.
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            This is a higher-autonomy mode: clicking Finish Portfolio authorizes RepoFinisher to generate and execute plans inside the limits below. It never automatically merges a pull request, and repair agents cannot modify tests, workflows, security governance, or lockfiles.
+            This is a higher-autonomy mode. Automatic merge stays off. Repair agents cannot modify tests, workflows, security governance, or lockfiles.
           </p>
         </div>
         {isActive && (

@@ -50,6 +50,9 @@ interface AiProviderStatus {
     anthropic: { platformConfigured: boolean };
     openrouter: { platformConfigured: boolean };
   };
+  live_research_configured?: boolean;
+  completion_worker?: "railway-worker" | "cloud-run-job" | "in-process";
+  free_agent_pool?: boolean;
 }
 
 interface AiSaveResult extends AiProviderStatus {
@@ -96,7 +99,7 @@ function credentialLabel(source: CredentialSource) {
 function modelPlaceholder(provider: AiProvider) {
   switch (provider) {
     case 'openrouter': return 'openrouter/auto or provider/model-slug';
-    case 'google': return 'gemini-3.7-flash (leave blank for default)';
+    case 'google': return 'gemini-3.8-flash (leave blank for default)';
     case 'openai': return 'Leave blank for platform default';
     case 'anthropic': return 'Leave blank for platform default';
   }
@@ -132,10 +135,12 @@ interface OpenRouterCatalogResponse {
 
 const REASONING_EFFORTS: OpenRouterReasoningEffort[] = ['max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'none'];
 
+/** Must match `OPENROUTER_FREE_AGENT_CHAIN[0]` / `DEFAULT_AI_MODELS.openrouter` on the API. */
+const OPENROUTER_FREE_AGENT_POOL_MODEL = 'nex-agi/nex-n2.5-mini:free';
+
 const MODEL_CATALOG: Record<AiProvider, Array<{ id: string; label: string; detail: string }>> = {
   openrouter: [
-    { id: 'minimax/minimax-m3:free', label: 'MiniMax M3 Free', detail: 'Primary free model for long-horizon agent work, coding, tools, and multimodal input' },
-    { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', label: 'Nemotron 3 Ultra Free', detail: 'Free reasoning, planning, orchestration, and coding fallback' },
+    { id: OPENROUTER_FREE_AGENT_POOL_MODEL, label: 'Free agent pool', detail: 'Recommended: Nex Mini plus free tool-calling fallbacks, then a cheap paid tail if free models are exhausted' },
     { id: 'openai/gpt-5.6-sol', label: 'GPT-5.6 Sol', detail: 'Highest-capability coding and repository-finishing agent' },
     { id: 'openai/gpt-5.6-terra', label: 'GPT-5.6 Terra', detail: 'Strong balanced agent for broad portfolio work' },
     { id: 'openai/gpt-5.6-luna', label: 'GPT-5.6 Luna', detail: 'Fast, economical agent for routine analysis' },
@@ -143,10 +148,11 @@ const MODEL_CATALOG: Record<AiProvider, Array<{ id: string; label: string; detai
     { id: 'google/gemini-3.7-pro', label: 'Gemini 3.7 Pro', detail: 'Deep reasoning and long-context repository review' },
     { id: 'google/gemini-3.7-flash', label: 'Gemini 3.7 Flash', detail: 'Fast long-context analysis' },
     { id: 'anthropic/claude-opus-4.1', label: 'Claude Opus 4.1', detail: 'Premium architecture and code review' },
-    { id: 'x-ai/grok-4.6', label: 'Grok 4.6', detail: 'Frontier coding and STEM reasoning, 500k context; served via Amazon Bedrock BYOK so it bills AWS rather than OpenRouter credits' },
+    { id: 'x-ai/grok-4.6', label: 'Grok 4.6', detail: 'Frontier coding and STEM reasoning via OpenRouter' },
     { id: 'openrouter/auto', label: 'OpenRouter Auto', detail: 'Provider-managed model routing' },
   ],
   google: [
+    { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', detail: 'Current Google default for long-context analysis' },
     { id: 'gemini-3.7-pro', label: 'Gemini 3.7 Pro', detail: 'Deep reasoning and long-context repository review' },
     { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash', detail: 'Fast long-context analysis' },
   ],
@@ -182,7 +188,7 @@ export default function Settings() {
   const updatePreferences = useUpdatePreferences();
   const disconnectGithub = useDisconnectGithub();
 
-  const [aiProvider, setAiProvider] = useState<AiProvider>('google');
+  const [aiProvider, setAiProvider] = useState<AiProvider>('openrouter');
   const [aiModel, setAiModel] = useState('');
   const [aiKey, setAiKey] = useState('');
   const [aiStatus, setAiStatus] = useState<AiProviderStatus | null>(null);
@@ -195,9 +201,9 @@ export default function Settings() {
   const [openRouterModelsLoading, setOpenRouterModelsLoading] = useState(false);
   const [openRouterModelsError, setOpenRouterModelsError] = useState<string | null>(null);
   const [openRouterSearch, setOpenRouterSearch] = useState('');
-  const [openRouterReasoningOnly, setOpenRouterReasoningOnly] = useState(true);
-  const [openRouterFreeOnly, setOpenRouterFreeOnly] = useState(false);
-  const [openRouterToolsOnly, setOpenRouterToolsOnly] = useState(false);
+  const [openRouterReasoningOnly, setOpenRouterReasoningOnly] = useState(false);
+  const [openRouterFreeOnly, setOpenRouterFreeOnly] = useState(true);
+  const [openRouterToolsOnly, setOpenRouterToolsOnly] = useState(true);
   const [openRouterMaxInput, setOpenRouterMaxInput] = useState('');
   const [openRouterMaxOutput, setOpenRouterMaxOutput] = useState('');
   const [openRouterSort, setOpenRouterSort] = useState<OpenRouterSort>('intelligence-high-to-low');
@@ -378,6 +384,11 @@ export default function Settings() {
     }
   };
 
+  const handleSignOut = async () => {
+    await signOut();
+    setLocation('/auth');
+  };
+
   const handleDisconnect = async () => {
     if (!confirm('Disconnect GitHub? This will sign you out.')) return;
 
@@ -479,6 +490,7 @@ export default function Settings() {
           displayName: githubStatus.displayName,
           avatarUrl: githubStatus.avatarUrl,
         } : null}
+        onSignOut={() => void handleSignOut()}
       />
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
@@ -568,7 +580,7 @@ export default function Settings() {
                   setAiReasoningEffort('');
                 }}>
                   <SelectTrigger id="ai-provider" data-testid="select-ai-provider">
-                    <SelectValue placeholder="Google Gemini" />
+                    <SelectValue placeholder="OpenRouter" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="google">Google Gemini</SelectItem>
@@ -603,6 +615,27 @@ export default function Settings() {
                         {openRouterModelsLoading ? 'Loading…' : 'Refresh'}
                       </Button>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => setAiModel(OPENROUTER_FREE_AGENT_POOL_MODEL)}
+                      className={`w-full rounded-md border p-3 text-left hover:bg-muted/40 ${aiModel === OPENROUTER_FREE_AGENT_POOL_MODEL ? 'bg-primary/10 ring-1 ring-inset ring-primary/50' : ''}`}
+                      data-testid="button-free-agent-pool"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-medium">Free agent pool (recommended)</div>
+                          <div className="text-xs text-muted-foreground break-all">{OPENROUTER_FREE_AGENT_POOL_MODEL}</div>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          <Badge variant="outline" className="text-emerald-500">Free</Badge>
+                          <Badge variant="outline">Tools</Badge>
+                          <Badge variant="outline">Pool</Badge>
+                        </div>
+                      </div>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Uses Nex Mini first, then other free tool-calling models, then a cheap paid tail only if the free roster is exhausted. Any other saved slug stays pinned.
+                      </p>
+                    </button>
                     <Input
                       id="openrouter-model-search"
                       value={openRouterSearch}
@@ -731,7 +764,7 @@ export default function Settings() {
               <p className="text-xs text-muted-foreground">
                 {aiStatus?.stored_key_set || preferences?.custom_ai_key_set
                   ? 'The key is write-only and encrypted at rest. Leaving this blank keeps it unless you switch providers.'
-                  : 'If the Render API has a platform credential for this provider, BYOK is optional. A key entered here is encrypted before storage.'}
+                  : 'If the Cloud Run API has a platform credential for this provider, BYOK is optional. A key entered here is encrypted before storage.'}
               </p>
             </div>
 
@@ -811,6 +844,14 @@ export default function Settings() {
                   Refresh status
                 </Button>
               </div>
+              {aiStatus && (
+                <div className="rounded-md border p-3 text-xs text-muted-foreground space-y-1">
+                  <div className="font-medium text-foreground text-sm">System status</div>
+                  <p>Live competitor research: {aiStatus.live_research_configured === undefined ? 'unknown' : aiStatus.live_research_configured ? 'configured (Tavily on the API)' : 'unavailable — named competitors stay empty until a backend research key is set'}</p>
+                  <p>Completion worker: {aiStatus.completion_worker === undefined ? 'unknown' : aiStatus.completion_worker === 'railway-worker' ? 'Railway worker' : aiStatus.completion_worker === 'cloud-run-job' ? 'Cloud Run Job' : 'in-process fallback (local/dev)'}</p>
+                  <p>Free agent pool: {aiStatus.free_agent_pool === undefined ? 'unknown' : aiStatus.free_agent_pool ? 'active for this saved model' : 'off — the saved model is pinned'}</p>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -870,7 +911,7 @@ export default function Settings() {
                     <SelectItem value="1000">All accessible repositories (up to 1,000)</SelectItem>
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground">Choose All to include your complete 230-repository portfolio; Luna does not impose a 90-repository product limit.</p>
+                <p className="text-xs text-muted-foreground">All accessible repositories uses paginated GitHub discovery up to 1,000 repos. The selected AI model does not silently shrink that scope.</p>
               </div>
             </div>
           </CardContent>

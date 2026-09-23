@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
-import { callAI } from "./ai-provider";
-import { loadAiCredential, loadGithubCredential, requireGithubCredential } from "./credentials";
+import { type AIProviderConfig } from "./ai-provider";
+import { callAIJson } from "./call-ai-json";
+import { loadAiCredential, loadGithubCredential, requireGithubCredential, toAiProviderConfig } from "./credentials";
 import { reasonAboutRepositoryPlan, type ReasonedPlanningResult } from "./reasoning-orchestrator";
 import { verifyDeploymentSandbox, type SandboxVerificationResult } from "./sandbox-verification";
-import { parseModelJsonWithRepair } from "./parse-model-json";
 
 const MAX_CHANGES = 25;
 const MAX_FILE_BYTES = 750_000;
@@ -527,8 +527,7 @@ export async function generateFinishPlan(
   repoData: RepoContext["repoData"],
   files: { path: string; content: string }[],
   nextSteps: string[],
-  aiProvider: string,
-  aiKey: string | null,
+  ai: AIProviderConfig,
   reasoning?: ReasonedPlanningResult | null,
 ): Promise<AIFinishPlan> {
   const fileSummaries = files
@@ -543,7 +542,7 @@ export async function generateFinishPlan(
 
   const user = `Repo: ${repo}\nDescription: ${repoData.description || "none"}\nLanguage: ${repoData.language || "unknown"}\nTopics: ${repoData.topics.join(", ") || "none"}\nStars: ${repoData.stars} | Open Issues: ${repoData.open_issues}\nHealth: CI=${repoData.has_ci}, Tests=${repoData.has_tests}, License=${repoData.has_license}, README=${repoData.has_readme}, Homepage=${repoData.has_homepage}\n${reasoningText}\nOrdered completion plan:\n${nextSteps.map((step) => `- ${step}`).join("\n")}\n\nInspected source files:\n${fileSummaries}`;
 
-  const result = await callAI(
+  return callAIJson<AIFinishPlan>(
     {
       messages: [
         { role: "system", content: system },
@@ -556,56 +555,9 @@ export async function generateFinishPlan(
       thinkingLevel: reasoning ? "high" : "medium",
       timeoutMs: 75_000,
     },
-    { provider: aiProvider, apiKey: aiKey },
+    ai,
+    validateFinishPlan,
   );
-
-  const parsed = await parseModelJsonWithRepair<AIFinishPlan>(result.content || "", {
-    validate: validateFinishPlan,
-    // Exactly one bounded repair attempt: re-prompt the same provider/model,
-    // showing it its own malformed reply, asking for pure raw JSON only. No
-    // eval/Function anywhere in this path — repair output goes through the
-    // same tryParseModelJson()+validateFinishPlan() as the first attempt.
-    repair: async () => {
-      const repairResult = await callAI(
-        {
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
-            { role: "assistant", content: (result.content || "").slice(0, 4000) },
-            {
-              role: "user",
-              content:
-                'Your previous response could not be parsed as JSON matching the required schema. Reply with ONLY the raw JSON object — no markdown code fences, no backticks, no prose before or after it. It must match this exact shape: {"analysis": string, "changes": [{"path": string, "status": "created"|"modified"|"deleted", "content": string, "description": string}]}.',
-            },
-          ],
-          responseFormat: {
-            type: "json_schema",
-            json_schema: { name: "finish_plan_repair", strict: true, schema: FINISH_PLAN_JSON_SCHEMA },
-          },
-          thinkingLevel: "low",
-          timeoutMs: 60_000,
-          // Pin the repair call to the exact model that produced the
-          // malformed reply, when the provider reported one. Otherwise this
-          // call falls through to the provider's default model / fallback
-          // roster and can repair with a *different* model than the one
-          // that actually needs correcting.
-          ...(result.model ? { model: result.model } : {}),
-        },
-        { provider: aiProvider, apiKey: aiKey },
-      );
-      return repairResult.content || "";
-    },
-  });
-
-  if (!parsed.ok) {
-    // Sanitized, bounded error — never the full prompt or a raw giant LLM
-    // dump — safe to persist as a completion-session's stop_reason/last_error.
-    throw new Error(
-      `Planning response could not be parsed into a valid finish plan${parsed.repaired ? " after one repair attempt" : ""}: ${parsed.error} (sample: ${JSON.stringify(parsed.rawSample)})`,
-    );
-  }
-
-  return parsed.value;
 }
 
 function canonicalize(value: unknown): string {
@@ -672,8 +624,7 @@ export async function prepareFinishPlan(
     context.repoData,
     files,
     nextSteps,
-    aiCredential.provider,
-    aiCredential.apiKey,
+    toAiProviderConfig(aiCredential),
     reasoning,
   );
   const changes = validatePlanChanges(generated.changes, context.tree);

@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useParams, useLocation, Link } from 'wouter';
 import { useGetAnalysis, getGetAnalysisQueryKey, useShareAnalysis, useRerunAnalysis } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { getSession, signInWithGitHub } from '@/lib/auth';
+import { getSession, signInWithGitHub, signOut } from '@/lib/auth';
 import { AppHeader } from '@/components/app-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -35,6 +35,11 @@ export default function AnalysisDetail() {
       if (!session) setLocation('/auth');
     });
   }, [setLocation]);
+
+  const handleSignOut = async () => {
+    await signOut();
+    setLocation('/auth');
+  };
 
   useEffect(() => {
     if (detail?.analysis.status === 'running') {
@@ -137,6 +142,7 @@ export default function AnalysisDetail() {
     <div className="min-h-screen bg-background dark">
       <AppHeader
         section="Analysis"
+        onSignOut={() => void handleSignOut()}
         actions={
           <Button
             variant="outline"
@@ -188,7 +194,7 @@ export default function AnalysisDetail() {
         )}
 
         {analysis.status === 'complete' && (
-          <Tabs defaultValue="recommendations" className="space-y-6">
+          <Tabs defaultValue="investment" className="space-y-6">
             <div className="w-full overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               <TabsList className="inline-flex h-auto min-w-max items-center justify-start gap-1 p-1">
                 <TabsTrigger value="recommendations" data-testid="tab-recommendations" className="shrink-0">
@@ -200,7 +206,7 @@ export default function AnalysisDetail() {
                 <TabsTrigger value="strategy" data-testid="tab-strategy" className="shrink-0">Strategy</TabsTrigger>
                 <TabsTrigger value="action-plan" data-testid="tab-action-plan" className="shrink-0">Action Plan</TabsTrigger>
                 <TabsTrigger value="investment" data-testid="tab-investment" className="shrink-0">Finish, Value & Reports</TabsTrigger>
-                <TabsTrigger value="valuation" data-testid="tab-valuation" className="shrink-0">Legacy Valuation</TabsTrigger>
+                <TabsTrigger value="valuation" data-testid="tab-valuation" className="shrink-0">Valuation method</TabsTrigger>
                 <TabsTrigger value="share" data-testid="tab-share" className="shrink-0">
                   <Share2 className="w-4 h-4 mr-1" />
                   Share
