@@ -4,6 +4,7 @@
   "installCommand": "corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --frozen-lockfile",
   "buildCommand": "pnpm --filter @workspace/repo-finisher build",
   "outputDirectory": "artifacts/repo-finisher/dist/public",
+  "alias": ["portfolio.donmatthews.live"],
   "routes": [
     { "handle": "filesystem" },
     { "src": "/.*", "dest": "/index.html" }

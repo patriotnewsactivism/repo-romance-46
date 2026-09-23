@@ -231,6 +231,182 @@ function missingSteps(signals: ReturnType<typeof structuralScores>["signals"]) {
   return steps;
 }
 
+function isGithubRateLimitError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /API rate limit exceeded|rate limit/i.test(message);
+}
+
+function inspectRepoFromAnalysisContext(repoName: string, context: AnalysisItemContext | null, reason: string) {
+  const effort = Math.max(1, Math.min(5, context?.effort || 3));
+  const nextStepCount = context?.nextSteps?.length ?? 0;
+  const completion = Math.round(clamp(84 - (effort - 1) * 9 - Math.min(10, nextStepCount) * 1.2, 24, 84));
+  const readiness = Math.round(clamp(completion - 14, 12, 76));
+  const estimatedTotalHours = Math.max(
+    context?.estimatedHours || 0,
+    40,
+    effort * 42 + nextStepCount * 6,
+  );
+
+  const marketNeed = Math.round(clamp(context?.marketPotential ? context.marketPotential * 20 : 48));
+  const demand = Math.round(clamp(28 + marketNeed * 0.42));
+  const competitivePressure = 52;
+  const scenarios: ScenarioInput[] = [
+    {
+      name: "conservative",
+      customers: Math.max(8, Math.round(marketNeed * 0.35)),
+      arpuMonthlyUsd: 12,
+      grossMarginPct: 70,
+      probability: 0.55,
+      assumptions: ["Analysis-derived planning scenario; fresh GitHub telemetry unavailable"],
+    },
+    {
+      name: "base",
+      customers: Math.max(18, Math.round(marketNeed * 0.9)),
+      arpuMonthlyUsd: 22,
+      grossMarginPct: 78,
+      probability: 0.3,
+      assumptions: ["Analysis-derived planning scenario; requires launch and distribution"],
+    },
+    {
+      name: "strong-execution",
+      customers: Math.max(35, Math.round(marketNeed * 2.5)),
+      arpuMonthlyUsd: 32,
+      grossMarginPct: 82,
+      probability: 0.15,
+      assumptions: ["Upside planning scenario only; not observed traction"],
+    },
+  ];
+
+  const present = valueRepository({
+    replacement: {
+      estimatedHours: estimatedTotalHours,
+      completionPct: completion,
+      marketPotential: Math.max(1, Math.min(5, marketNeed / 20)),
+      stars: 0,
+      hasRevenueSignals: false,
+    },
+  });
+  const potential = projectPotential(scenarios, "low");
+  const potentialLow = Math.max(
+    present.range.low,
+    Math.min(...potential.scenarios.map((scenario) => scenario.valuationRange.low)),
+  );
+  const potentialHigh = Math.max(
+    present.range.high,
+    Math.max(...potential.scenarios.map((scenario) => scenario.valuationRange.high)),
+  );
+
+  const remainingWork = estimateRemainingWork({
+    completionPct: completion,
+    sourceFiles: 0,
+    sourceBytes: 0,
+    missingCriticalDimensions: 3,
+  });
+  const commercializationProbability = estimateCommercializationProbability({
+    completionPct: completion,
+    productionReadinessPct: readiness,
+    marketNeed,
+    demand,
+    competitivePressure,
+    tractionScore: 5,
+    activityScore: 10,
+  });
+  const evidenceConfidence = context ? 34 : 22;
+
+  const evidence: IntelligenceEvidence[] = [
+    {
+      class: context ? "derived" : "insufficient",
+      label: "Completed analysis evidence",
+      detail: context
+        ? "Valuation fallback uses the repository's persisted RepoFinisher analysis recommendation, effort, market-potential, estimated-hours, and next-step evidence."
+        : "The repository was recorded in the analysis, but no repository-specific recommendation row was available.",
+    },
+    {
+      class: "insufficient",
+      label: "Fresh GitHub telemetry unavailable",
+      detail: reason,
+      source: "https://github.com/" + repoName,
+    },
+    {
+      class: "derived",
+      label: "Present value",
+      detail:
+        "Conservative replacement-cost model using persisted analysis evidence only. Range $" +
+        present.range.low.toLocaleString() +
+        "-$" +
+        present.range.high.toLocaleString() +
+        ".",
+    },
+    {
+      class: "model_estimate",
+      label: "Market and upside model",
+      detail: "Market need, demand, and upside are conservative planning estimates derived from the completed analysis; no fresh GitHub traction is assumed.",
+    },
+  ];
+
+  const recommendedNextSteps = (context?.nextSteps ?? []).slice(0, 10);
+  const opportunity: InvestmentOpportunityInput = {
+    repo: repoName,
+    completionPct: completion,
+    productionReadinessPct: readiness,
+    presentValueUsd: present.range,
+    potentialValueUsd: { low: potentialLow, high: potentialHigh },
+    marketNeed,
+    demand,
+    competitivePressure,
+    commercializationProbability,
+    remainingWork,
+    evidenceConfidence,
+    evidence,
+  };
+
+  return {
+    opportunity,
+    details: {
+      repo: repoName,
+      kind: context?.kind || "finish",
+      title: context?.title || repoName.split("/").pop() || repoName,
+      pitch: context?.pitch || "Repository valuation derived from completed portfolio analysis evidence.",
+      github: {
+        stars: 0,
+        forks: 0,
+        subscribers: 0,
+        openIssues: 0,
+        lastPush: "",
+        sourceFiles: 0,
+        sourceBytes: 0,
+      },
+      completion: {
+        overall: completion,
+        signals: {
+          hasSource: false,
+          hasManifest: false,
+          hasReadme: false,
+          hasTests: false,
+          hasCi: false,
+          hasDeploy: false,
+          hasEnvExample: false,
+          hasLicense: false,
+          hasDocs: false,
+        },
+      },
+      readiness: { overall: readiness },
+      currentValuation: present,
+      potentialValue: potential,
+      market: {
+        market_need_score: marketNeed,
+        demand_score: demand,
+        competitive_pressure_score: competitivePressure,
+        confidence: evidenceConfidence,
+        market_summary: "Analysis-backed fallback valuation used because fresh GitHub telemetry was unavailable.",
+      },
+      recommendedNextSteps,
+      degradedEvidence: true,
+      degradedReason: reason,
+    },
+  };
+}
+
 async function inspectRepo(token: string, repoName: string, context: AnalysisItemContext | null) {
   const repo = await ghJson<GhRepo>(token, `/repos/${repoName}`);
   const defaultBranch = repo.default_branch || "main";
@@ -431,23 +607,49 @@ router.post(
     const inspected: Awaited<ReturnType<typeof inspectRepo>>[] = [];
     const errors: string[] = [];
     let cursor = 0;
-    const concurrency = Math.min(12, repos.length);
 
-    await Promise.all(
-      Array.from({ length: concurrency }, async () => {
-        while (cursor < repos.length) {
-          const repo = repos[cursor++];
-          try {
-            inspected.push(await inspectRepo(github.token, repo, contexts.get(repo) ?? null));
-          } catch (error) {
-            errors.push(`${repo}: ${error instanceof Error ? error.message : String(error)}`);
+    let githubRateLimited = false;
+    try {
+      await ghJson<GhRepo>(github.token, "/repos/" + repos[0]);
+    } catch (error) {
+      if (isGithubRateLimitError(error)) {
+        githubRateLimited = true;
+        errors.push(
+          "GitHub API rate limit is exhausted. Valuation continued from persisted analysis evidence with reduced confidence instead of failing.",
+        );
+      }
+    }
+
+    if (githubRateLimited) {
+      for (const repo of repos) {
+        inspected.push(
+          inspectRepoFromAnalysisContext(
+            repo,
+            contexts.get(repo) ?? null,
+            "GitHub API rate limit prevented fresh repository telemetry during this valuation run.",
+          ),
+        );
+      }
+    } else {
+      const concurrency = Math.min(4, repos.length);
+      await Promise.all(
+        Array.from({ length: concurrency }, async () => {
+          while (cursor < repos.length) {
+            const repo = repos[cursor++];
+            try {
+              inspected.push(await inspectRepo(github.token, repo, contexts.get(repo) ?? null));
+            } catch (error) {
+              const reason = error instanceof Error ? error.message : String(error);
+              inspected.push(inspectRepoFromAnalysisContext(repo, contexts.get(repo) ?? null, reason));
+              errors.push(repo + ": GitHub enrichment unavailable; used persisted analysis evidence instead.");
+            }
           }
-        }
-      }),
-    );
+        }),
+      );
+    }
 
     if (inspected.length === 0) {
-      throw new Error(`Portfolio intelligence failed for every repository: ${errors.join("; ")}`);
+      throw new Error("Portfolio intelligence could not score any repository from either GitHub or persisted analysis evidence.");
     }
 
     const existingIntelligence = analysis && typeof (analysis as Record<string, unknown>).investment_intelligence === "object"
@@ -503,13 +705,17 @@ router.post(
         weightedCommercializationProbability: Math.round(
           ranking.reduce((sum, item) => sum + item.commercializationProbability, 0) / ranking.length,
         ),
-        scope: "full analyzed portfolio",
+        scope: errors.some((message) => /rate limit|enrichment unavailable/i.test(message))
+          ? "full analyzed portfolio (analysis-backed fallback for unavailable GitHub evidence)"
+          : "full analyzed portfolio",
       },
       recommendation: ranking[0]
         ? `Finish ${ranking[0].repo} first. Its ${ranking[0].finishFirstScore}/100 finish-first score is the strongest risk-adjusted value-unlock opportunity across the analyzed portfolio.`
         : "No ranked recommendation is available.",
       evidencePolicy:
-        "The full-portfolio pass values every recorded repository with verified GitHub telemetry and conservative structural heuristics. Market and upside figures are labeled planning estimates; unverified revenue or customer claims are never assumed.",
+        errors.some((message) => /rate limit|enrichment unavailable/i.test(message))
+          ? "The full-portfolio pass prefers verified GitHub telemetry, but when GitHub is unavailable or rate-limited it uses persisted RepoFinisher analysis evidence with reduced confidence instead of failing. Market and upside figures remain planning estimates; unverified revenue or customer claims are never assumed."
+          : "The full-portfolio pass values every recorded repository with verified GitHub telemetry and conservative structural heuristics. Market and upside figures are labeled planning estimates; unverified revenue or customer claims are never assumed.",
     };
 
     const { error: saveError } = await req.supabase!
