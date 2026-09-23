@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { customFetch } from '@workspace/api-client-react';
 import { supabase } from '@/integrations/supabase/client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
