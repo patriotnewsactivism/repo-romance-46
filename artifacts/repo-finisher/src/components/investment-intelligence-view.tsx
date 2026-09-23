@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { customFetch } from '@workspace/api-client-react';
+import { supabase } from '@/integrations/supabase/client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -120,10 +121,68 @@ function evidenceClass(item: EvidenceItem) {
   }
 }
 
+const productionApiBaseUrl = 'https://repofinisher-api-production.up.railway.app';
+
+async function directAuthenticatedFetch<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
+  let { data, error: sessionError } = await supabase.auth.getSession();
+
+  if (sessionError || !data.session?.access_token) {
+    const refreshed = await supabase.auth.refreshSession();
+    data = refreshed.data;
+    sessionError = refreshed.error;
+  }
+
+  const token = data.session?.access_token;
+  if (sessionError || !token) {
+    throw new Error('Your session expired. Sign in again, then retry the valuation.');
+  }
+
+  const headers = new Headers(init.headers);
+  headers.set('authorization', `Bearer ${token}`);
+  headers.set('accept', 'application/json');
+  if (init.body != null && !headers.has('content-type')) {
+    headers.set('content-type', 'application/json');
+  }
+
+  const response = await fetch(`${productionApiBaseUrl}${path}`, {
+    ...init,
+    headers,
+    cache: 'no-store',
+  });
+
+  const raw = await response.text();
+  let payload: unknown = null;
+  if (raw.trim()) {
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      payload = raw;
+    }
+  }
+
+  if (!response.ok) {
+    const detail =
+      payload && typeof payload === 'object' && 'error' in payload
+        ? String((payload as { error?: unknown }).error ?? '')
+        : typeof payload === 'string'
+          ? payload
+          : '';
+    throw new Error(
+      detail
+        ? `HTTP ${response.status}: ${detail}`
+        : `HTTP ${response.status}: ${response.statusText || 'Request failed'}`,
+    );
+  }
+
+  return payload as T;
+}
+
 async function postJson<T>(path: string, body?: unknown): Promise<T> {
-  return customFetch<T>(path, {
+  return directAuthenticatedFetch<T>(path, {
     method: 'POST',
-    responseType: 'json',
     body: JSON.stringify(body ?? {}),
   });
 }
@@ -138,7 +197,9 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
     setLoading(true);
     setError(null);
     try {
-      const existing = await customFetch<IntelligenceResult | null>(`/api/portfolio-intelligence/${analysisId}`, { responseType: 'json' });
+      const existing = await directAuthenticatedFetch<IntelligenceResult | null>(
+        `/api/portfolio-intelligence/${analysisId}`,
+      );
       setData(existing);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load portfolio intelligence.');
