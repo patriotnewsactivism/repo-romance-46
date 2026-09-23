@@ -163,6 +163,18 @@ interface AIFinishPlan {
   changes: AIFileChange[];
 }
 
+function isFinishPlanChange(value: unknown): value is AIFileChange {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const change = value as Partial<AIFileChange>;
+  return (
+    typeof change.path === "string" &&
+    change.path.trim().length > 0 &&
+    (change.status === "created" || change.status === "modified" || change.status === "deleted") &&
+    typeof change.content === "string" &&
+    typeof change.description === "string"
+  );
+}
+
 interface ValidatedFileChange extends AIFileChange {
   status: "created" | "modified" | "deleted";
   mode: "100644" | "100755";
@@ -394,7 +406,7 @@ ${fileSummaries}`;
     (value) => {
       if (!value || typeof value !== "object") return null;
       const row = value as AIFinishPlan;
-      if (!row.analysis || !Array.isArray(row.changes)) return null;
+      if (!row.analysis || !Array.isArray(row.changes) || row.changes.some((change) => !isFinishPlanChange(change))) return null;
       return row;
     },
   );

@@ -25,6 +25,49 @@ export interface StartCompletionSessionResult {
   alreadyComplete: boolean;
 }
 
+/**
+ * A failed dispatch must not leave an active session that nothing will claim.
+ * Portfolio startup uses reuseExisting and does not reschedule on its own, and
+ * the one-repo UI only retries sessions that are still active.
+ */
+async function scheduleOrBlock(
+  supabase: SupabaseClient,
+  userId: string,
+  sessionId: string,
+): Promise<CompletionWorkerMode> {
+  try {
+    return await scheduleCompletionSession(supabase, userId, sessionId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const now = new Date().toISOString();
+    await supabase
+      .from("repo_completion_sessions")
+      .update({
+        status: "blocked",
+        phase: "blocked",
+        stop_reason: `Completion worker dispatch failed: ${message}`.slice(0, 500),
+        worker_token: null,
+        lease_expires_at: null,
+        heartbeat_at: null,
+        completed_at: now,
+        updated_at: now,
+      })
+      .eq("id", sessionId)
+      .eq("user_id", userId)
+      .eq("status", "active");
+    await supabase.from("repo_completion_session_events").insert({
+      session_id: sessionId,
+      user_id: userId,
+      iteration: null,
+      kind: "worker_dispatch_failed",
+      status: "error",
+      message: `Completion worker dispatch failed; the session was marked blocked so it cannot stay active without a worker. ${message}`.slice(0, 1000),
+      metadata: { scheduled: false },
+    });
+    throw error;
+  }
+}
+
 export async function startCompletionSession(
   supabase: SupabaseClient,
   userId: string,
@@ -47,7 +90,7 @@ export async function startCompletionSession(
         { status: 409 },
       );
     }
-    const workerMode = await scheduleCompletionSession(supabase, userId, String((existing.data as { id: string }).id));
+    const workerMode = await scheduleOrBlock(supabase, userId, String((existing.data as { id: string }).id));
     return {
       session: existing.data as Record<string, unknown>,
       baseline: {
@@ -129,7 +172,7 @@ export async function startCompletionSession(
     },
   });
 
-  const workerMode = alreadyComplete ? null : await scheduleCompletionSession(supabase, userId, String((session as { id: string }).id));
+  const workerMode = alreadyComplete ? null : await scheduleOrBlock(supabase, userId, String((session as { id: string }).id));
   return {
     session: session as Record<string, unknown>,
     baseline: {

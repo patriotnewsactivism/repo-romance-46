@@ -311,15 +311,21 @@ async function diagnoseFailure(
   }, ai, (value) => {
     if (!value || typeof value !== "object") return null;
     const row = value as RepairDiagnosis;
-    if (!row.rootCause || !Number.isFinite(row.confidence)) return null;
-    return {
-      ...row,
-      evidence: Array.isArray(row.evidence) ? row.evidence : [],
-      rejectedCauses: Array.isArray(row.rejectedCauses) ? row.rejectedCauses : [],
-      repairStrategy: Array.isArray(row.repairStrategy) ? row.repairStrategy : [],
-      regressionRisks: Array.isArray(row.regressionRisks) ? row.regressionRisks : [],
-      stopIf: Array.isArray(row.stopIf) ? row.stopIf : [],
-    };
+    if (
+      !row.rootCause ||
+      !Number.isFinite(row.confidence) ||
+      row.confidence < 0 ||
+      row.confidence > 100 ||
+      !Array.isArray(row.evidence) ||
+      !Array.isArray(row.rejectedCauses) ||
+      !Array.isArray(row.repairStrategy) ||
+      row.repairStrategy.length < 1 ||
+      !Array.isArray(row.regressionRisks) ||
+      !Array.isArray(row.stopIf)
+    ) {
+      return null;
+    }
+    return row;
   });
 }
 

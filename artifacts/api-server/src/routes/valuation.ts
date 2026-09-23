@@ -23,6 +23,51 @@ interface Valuation {
   summary: string;
 }
 
+function isStringList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isCompleteValuation(value: unknown): value is Valuation {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Partial<Valuation>;
+  const revenue = row.revenue_potential;
+  if (!revenue || typeof revenue !== "object") return false;
+  return (
+    Number.isFinite(row.estimated_value_low) &&
+    Number.isFinite(row.estimated_value_high) &&
+    typeof row.summary === "string" &&
+    row.summary.length > 0 &&
+    typeof row.currency === "string" &&
+    typeof row.valuation_method === "string" &&
+    (row.confidence === "low" || row.confidence === "medium" || row.confidence === "high") &&
+    typeof revenue.model === "string" &&
+    revenue.model.length > 0 &&
+    Number.isFinite(revenue.monthly_revenue_low) &&
+    Number.isFinite(revenue.monthly_revenue_high) &&
+    typeof revenue.timeline === "string" &&
+    Array.isArray(row.factors) &&
+    row.factors.every(
+      (factor) =>
+        Boolean(factor) &&
+        typeof factor.label === "string" &&
+        Number.isFinite(factor.score) &&
+        Number.isFinite(factor.weight) &&
+        typeof factor.detail === "string",
+    ) &&
+    Array.isArray(row.comparables) &&
+    row.comparables.every(
+      (comparable) =>
+        Boolean(comparable) &&
+        typeof comparable.name === "string" &&
+        typeof comparable.outcome === "string" &&
+        typeof comparable.multiple === "string" &&
+        typeof comparable.relevance === "string",
+    ) &&
+    isStringList(row.risks) &&
+    isStringList(row.upsides)
+  );
+}
+
 interface PortfolioValuation {
   total_estimated_value_low: number;
   total_estimated_value_high: number;
@@ -262,10 +307,7 @@ Analysis Context:
     },
     ai,
     (value) => {
-      if (!value || typeof value !== "object") return null;
-      const row = value as Valuation;
-      if (!Number.isFinite(row.estimated_value_low) || !Number.isFinite(row.estimated_value_high) || !row.summary) return null;
-      return row;
+      return isCompleteValuation(value) ? value : null;
     },
   );
 }

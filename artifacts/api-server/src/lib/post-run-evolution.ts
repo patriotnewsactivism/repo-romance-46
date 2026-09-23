@@ -178,7 +178,10 @@ async function fetchAcceptanceEvidence(token: string, repo: string, headSha: str
       );
     let deploymentSucceeded: boolean | undefined;
     try {
-      const deployments = await ghJson<Array<{ id: number }>>(token, `/repos/${repo}/deployments?per_page=1`);
+      const deployments = await ghJson<Array<{ id: number }>>(
+        token,
+        `/repos/${repo}/deployments?sha=${encodeURIComponent(headSha)}&per_page=1`,
+      );
       const latest = Array.isArray(deployments) ? deployments[0] : undefined;
       if (latest) {
         const statuses = await ghJson<Array<{ state: string }>>(token, `/repos/${repo}/deployments/${latest.id}/statuses?per_page=5`);

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { Link } from 'wouter';
+import { Link, useLocation } from 'wouter';
+import { signOut } from '@/lib/auth';
 import { GitBranch, LayoutDashboard, LogOut, Menu, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -25,7 +26,11 @@ interface AppHeaderProps {
 }
 
 export function AppHeader({ section, user, actions, onSignOut }: AppHeaderProps) {
+  const [, setLocation] = useLocation();
   const userLabel = user?.displayName || user?.login || null;
+  const signOutHandler = onSignOut ?? (() => {
+    void signOut().then(() => setLocation('/auth'));
+  });
 
   return (
     <header
@@ -82,12 +87,10 @@ export function AppHeader({ section, user, actions, onSignOut }: AppHeaderProps)
               Settings
             </Button>
           </Link>
-          {onSignOut ? (
-            <Button variant="ghost" size="sm" className="gap-2 text-white hover:bg-white/10 hover:text-white" onClick={onSignOut}>
-              <LogOut className="h-4 w-4" />
-              Sign out
-            </Button>
-          ) : null}
+          <Button variant="ghost" size="sm" className="gap-2 text-white hover:bg-white/10 hover:text-white" onClick={signOutHandler}>
+            <LogOut className="h-4 w-4" />
+            Sign out
+          </Button>
         </nav>
 
         <DropdownMenu>
@@ -127,12 +130,10 @@ export function AppHeader({ section, user, actions, onSignOut }: AppHeaderProps)
                 Settings
               </Link>
             </DropdownMenuItem>
-            {onSignOut ? (
-              <DropdownMenuItem onSelect={() => onSignOut()} className="cursor-pointer gap-2">
-                <LogOut className="h-4 w-4" />
-                Sign out
-              </DropdownMenuItem>
-            ) : null}
+            <DropdownMenuItem onSelect={() => signOutHandler()} className="cursor-pointer gap-2">
+              <LogOut className="h-4 w-4" />
+              Sign out
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

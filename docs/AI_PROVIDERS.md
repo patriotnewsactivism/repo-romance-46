@@ -16,7 +16,7 @@ OpenRouter is the preferred platform/BYOK entry point because one credential can
 Recommended model policy:
 
 - default high-value model / free agent-pool sentinel: `nex-agi/nex-n2.5-mini:free`
-- automatic same-request free fallbacks: `nvidia/nemotron-3-super-120b-a12b:free`, `poolside/laguna-s-2.1:free`, then `nex-agi/nex-n2.5-pro:free`, `nvidia/nemotron-3.5-lightning:free`, `nvidia/nemotron-3-ultra-550b-a55b:free`
+- free models attempted across two grouped requests, because OpenRouter accepts at most three models per request: first `nex-agi/nex-n2.5-mini:free` with `nvidia/nemotron-3-super-120b-a12b:free` and `poolside/laguna-s-2.1:free`, then `nex-agi/nex-n2.5-pro:free`, `nvidia/nemotron-3.5-lightning:free`, and `nvidia/nemotron-3-ultra-550b-a55b:free`
 - cheap paid continuity tail after both free batches fail: `openai/gpt-oss-120b`, `deepseek/deepseek-v4-flash-0731`, `deepseek/deepseek-v3.2`
 - premium OpenRouter alternative: any live catalog slug, including `openai/gpt-5.6-sol`
 - direct Google fallback: `gemini-3.8-flash`
@@ -93,7 +93,7 @@ Status endpoints may expose safe metadata such as:
 
 They must not expose key values.
 
-`GET /api/preferences/ai-status` is an authenticated API route on the persistent Render service. Production smoke verification deliberately calls it without a token and expects a JSON `401`; an HTML or `404` response is treated as a deployment/routing regression.
+`GET /api/preferences/ai-status` is an authenticated API route on the persistent Railway API service. Production smoke verification deliberately calls it without a token and expects a JSON `401`; an HTML or `404` response is treated as a deployment/routing regression.
 
 ## Credential storage
 
@@ -136,6 +136,6 @@ These are different failure modes and should become different operational-learni
 
 Older repository notes described Google/Gemini as a single hard platform default and referenced Vercel-hosted API behavior. Those notes are obsolete.
 
-The current architecture is provider-aware, BYOK-capable, hosted with a persistent API on Cloud Run, and stores user AI credentials in Supabase Vault. Former Render hosting notes are obsolete.
+The current architecture is provider-aware, BYOK-capable, hosted with a persistent API on Railway, and stores user AI credentials in Supabase Vault. Former Render and Cloud Run hosting notes are obsolete.
 
 Model-specific documentation files should defer to this document and `AGENTS.md` rather than preserve old hosting assumptions.

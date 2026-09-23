@@ -10,7 +10,7 @@ The authenticated PDF endpoint is:
 
 `GET /api/investor-report/:analysisId.pdf`
 
-The report is generated from current persisted analysis evidence plus a fresh confidence-adjusted Portfolio V2 calculation. It includes:
+The report is generated from current persisted analysis evidence. Exports use the saved Portfolio V2 snapshot when one is available, and otherwise recompute the confidence-adjusted valuation from the current ranking. It includes:
 
 - the finish-first recommendation;
 - repository coverage;

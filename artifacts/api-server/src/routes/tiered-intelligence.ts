@@ -15,6 +15,31 @@ const MAX_FILE_CHARS = 70_000;
 const MAX_DEEP_CONTEXT_CHARS = 120_000;
 const MAX_COUNCIL_CONTEXT_CHARS = 200_000;
 const METHOD_VERSION = "tiered-intelligence-v1";
+const TIERED_SCORE_FIELDS = [
+  "architecture_quality",
+  "product_readiness",
+  "monetization_readiness",
+  "maintainability",
+  "differentiation_signal",
+  "technical_risk",
+  "confidence",
+] as const;
+const TIERED_TEXT_FIELDS = ["summary", "architect_view", "product_view", "quality_security_view"] as const;
+const TIERED_LIST_FIELDS = ["blockers", "next_actions"] as const;
+
+function isTieredIntelligenceResult(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  const scoresValid = TIERED_SCORE_FIELDS.every((field) => {
+    const score = row[field];
+    return typeof score === "number" && Number.isInteger(score) && score >= 0 && score <= 100;
+  });
+  const textValid = TIERED_TEXT_FIELDS.every((field) => typeof row[field] === "string");
+  const listsValid = TIERED_LIST_FIELDS.every(
+    (field) => Array.isArray(row[field]) && (row[field] as unknown[]).every((item) => typeof item === "string"),
+  );
+  return scoresValid && textValid && listsValid;
+}
 
 interface RankingEntry {
   repo: string;
@@ -259,7 +284,7 @@ async function analyzeCandidate(
       timeoutMs: council ? 60_000 : 45_000,
     },
     toAiProviderConfig(ai),
-    (value) => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null),
+    (value) => (isTieredIntelligenceResult(value) ? value : null),
   );
   const opportunityQuality = clamp(
     (Number(result.architecture_quality) + Number(result.product_readiness) + Number(result.monetization_readiness) + Number(result.maintainability) + Number(result.differentiation_signal)) / 5 - Number(result.technical_risk) * 0.22,

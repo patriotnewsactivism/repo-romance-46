@@ -652,8 +652,9 @@ router.post(
       throw new Error("Portfolio intelligence could not score any repository from either GitHub or persisted analysis evidence.");
     }
 
-    const existingIntelligence = analysis && typeof (analysis as Record<string, unknown>).investment_intelligence === "object"
-      ? (analysis as Record<string, unknown>).investment_intelligence as Record<string, unknown>
+    const storedIntelligence = analysis && (analysis as Record<string, unknown>).investment_intelligence;
+    const existingIntelligence = storedIntelligence !== null && typeof storedIntelligence === "object"
+      ? storedIntelligence as Record<string, unknown>
       : {};
     const existingIsMeasured = String(existingIntelligence.methodologyVersion || "").startsWith("investment-intelligence");
     const existingRanking = Array.isArray(existingIntelligence.ranking)

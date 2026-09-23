@@ -516,9 +516,26 @@ router.post(
       },
       ai,
       (value) => {
-        if (!value || typeof value !== "object") return null;
+        if (!value || typeof value !== "object" || Array.isArray(value)) return null;
         const row = value as Record<string, unknown>;
-        if (typeof row.repo_name !== "string" || typeof row.readme_md !== "string") return null;
+        if (
+          typeof row.repo_name !== "string" ||
+          typeof row.description !== "string" ||
+          typeof row.readme_md !== "string" ||
+          typeof row.integration_plan_md !== "string" ||
+          typeof row.first_pr_title !== "string" ||
+          !Array.isArray(row.structure) ||
+          !row.structure.every(
+            (node) =>
+              node &&
+              typeof node === "object" &&
+              !Array.isArray(node) &&
+              typeof (node as Record<string, unknown>).path === "string" &&
+              typeof (node as Record<string, unknown>).purpose === "string",
+          )
+        ) {
+          return null;
+        }
         return row as {
           repo_name: string;
           description: string;
