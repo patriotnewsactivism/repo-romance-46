@@ -73,7 +73,7 @@ export interface AiCredential {
   reasoningEffort: OpenRouterReasoningEffort | null;
 }
 
-export const SUPPORTED_AI_PROVIDERS = ["google", "openai", "anthropic", "openrouter"] as const;
+export const SUPPORTED_AI_PROVIDERS = ["google", "openai", "anthropic", "openrouter", "qwen"] as const;
 export type SupportedAiProvider = (typeof SUPPORTED_AI_PROVIDERS)[number];
 const SUPPORTED_PLATFORM_PROVIDERS = new Set<string>(SUPPORTED_AI_PROVIDERS);
 
@@ -101,6 +101,7 @@ export function platformAiProvider(): string {
   if (platformAiKey("google")) return "google";
   if (platformAiKey("openai")) return "openai";
   if (platformAiKey("anthropic")) return "anthropic";
+  if (platformAiKey("qwen")) return "qwen";
 
   return configured || "openrouter";
 }
@@ -133,6 +134,13 @@ export function platformAiKey(provider: string): string | null {
         normalizeCredentialValue(process.env.OPENROUTER_FREE_API_KEY) ??
         normalizeCredentialValue(process.env.OPENROUTER_API_KEY_2) ??
         normalizeCredentialValue(process.env.OPENROUTER_API_KEY)
+      );
+    case "qwen":
+      // DASHSCOPE_API_KEY is Alibaba's own conventional name for the same
+      // credential, so accept either rather than making operators duplicate it.
+      return (
+        normalizeCredentialValue(process.env.QWEN_API_KEY) ??
+        normalizeCredentialValue(process.env.DASHSCOPE_API_KEY)
       );
     default:
       return null;
@@ -177,6 +185,7 @@ export function platformAiStatus() {
       openai: { platformConfigured: Boolean(platformAiKey("openai")) },
       anthropic: { platformConfigured: Boolean(platformAiKey("anthropic")) },
       openrouter: { platformConfigured: Boolean(platformAiKey("openrouter")) },
+      qwen: { platformConfigured: Boolean(platformAiKey("qwen")) },
     },
   };
 }

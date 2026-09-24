@@ -127,6 +127,7 @@ export function sanitizeGeminiResponseSchema(value: unknown): unknown {
 function providerDisplayName(provider: string) {
   if (provider === "google") return "Google Gemini";
   if (provider === "openrouter") return "OpenRouter";
+  if (provider === "qwen") return "Qwen";
   if (provider === "openai") return "OpenAI";
   if (provider === "anthropic") return "Anthropic";
   return provider;
@@ -279,8 +280,27 @@ const PROVIDER_ENDPOINTS: Record<string, string> = {
   anthropic: "https://api.anthropic.com/v1/messages",
   google: "https://generativelanguage.googleapis.com/v1beta/models",
   openrouter: "https://openrouter.ai/api/v1/chat/completions",
+  qwen: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
   custom: "https://api.openai.com/v1/chat/completions",
 };
+
+/**
+ * Qwen is served by Alibaba Cloud Model Studio (DashScope), which runs two
+ * regional hosts that do not share accounts: `dashscope-intl.aliyuncs.com` for
+ * the international estate and `dashscope.aliyuncs.com` for mainland China. A
+ * key issued in one region is rejected by the other, so the host has to be
+ * configurable rather than compiled in. International is the default because it
+ * matches the rest of this deployment.
+ *
+ * This is a region selector, not a model or credential, so it stays an ENV knob
+ * without conflicting with the rule that model IDs come from app config.
+ */
+function resolveQwenEndpoint(): string {
+  const configured = process.env.QWEN_BASE_URL?.trim();
+  if (!configured) return PROVIDER_ENDPOINTS.qwen;
+  const base = configured.replace(/\/+$/, "");
+  return base.endsWith("/chat/completions") ? base : `${base}/chat/completions`;
+}
 
 export async function callAI(request: AIRequest, config: AIProviderConfig): Promise<AIResponse> {
   const provider = config.provider || "openrouter";
@@ -517,7 +537,11 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
   }
 
   if (
-    (provider === "github_models" || provider === "openai" || provider === "openrouter" || provider === "custom") &&
+    (provider === "github_models" ||
+      provider === "openai" ||
+      provider === "openrouter" ||
+      provider === "qwen" ||
+      provider === "custom") &&
     apiKey
   ) {
     const body: Record<string, unknown> = { model, messages: request.messages };
@@ -535,7 +559,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     }
 
     const res = await fetchWithRetry(
-      PROVIDER_ENDPOINTS[provider],
+      provider === "qwen" ? resolveQwenEndpoint() : PROVIDER_ENDPOINTS[provider],
       { method: "POST", headers, body: JSON.stringify(body) },
       provider,
       requestTimeoutMs,

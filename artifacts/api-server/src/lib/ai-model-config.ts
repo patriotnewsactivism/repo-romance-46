@@ -10,6 +10,7 @@ export const DEFAULT_AI_MODELS = {
   openai: "gpt-4o",
   anthropic: "claude-sonnet-4-20250514",
   openrouter: "nex-agi/nex-n2.5-mini:free",
+  qwen: "qwen-plus",
 } as const;
 
 export const OPENROUTER_FREE_AGENT_POOL_MODEL = DEFAULT_AI_MODELS.openrouter;

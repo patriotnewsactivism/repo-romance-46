@@ -503,3 +503,89 @@ describe("Google structured-output compatibility", () => {
     expect(err.publicMessage).toContain("rejected the configured credential");
   });
 });
+
+describe("Qwen routing", () => {
+  const originalBaseUrl = process.env.QWEN_BASE_URL;
+
+  afterEach(() => {
+    if (originalBaseUrl === undefined) delete process.env.QWEN_BASE_URL;
+    else process.env.QWEN_BASE_URL = originalBaseUrl;
+  });
+
+  function okResponse() {
+    return new Response(JSON.stringify({ choices: [{ message: { content: "ready" } }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  it("uses the international DashScope host and a bearer token by default", async () => {
+    delete process.env.QWEN_BASE_URL;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse());
+
+    const result = await callAI(request("qwen test", { timeoutMs: 1000 }), {
+      provider: "qwen",
+      model: "qwen-plus",
+      apiKey: "test-api-key",
+    });
+
+    expect(result.content).toBe("ready");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions");
+    expect(new Headers(init?.headers).get("authorization")).toBe("Bearer test-api-key");
+    expect(JSON.parse(String(init?.body)).model).toBe("qwen-plus");
+  });
+
+  // A key issued for one DashScope region is rejected by the other, so the host
+  // must follow the configured region rather than being compiled in.
+  it("honors a configured regional base URL", async () => {
+    process.env.QWEN_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse());
+
+    await callAI(request("qwen region", { timeoutMs: 1000 }), {
+      provider: "qwen",
+      model: "qwen-plus",
+      apiKey: "test-api-key",
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions");
+  });
+
+  it("accepts a base URL given with a trailing slash or the full path", async () => {
+    for (const configured of [
+      "https://dashscope.aliyuncs.com/compatible-mode/v1/",
+      "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    ]) {
+      process.env.QWEN_BASE_URL = configured;
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse());
+      await callAI(request("qwen base", { timeoutMs: 1000 }), {
+        provider: "qwen",
+        model: "qwen-plus",
+        apiKey: "test-api-key",
+      });
+      expect(fetchMock.mock.calls[0][0]).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions");
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("falls back to the shared in-code default model when none is configured", async () => {
+    delete process.env.QWEN_BASE_URL;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse());
+
+    await callAI(request("qwen default model", { timeoutMs: 1000 }), {
+      provider: "qwen",
+      model: null,
+      apiKey: "test-api-key",
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).model).toBe(DEFAULT_AI_MODELS.qwen);
+  });
+
+  it("treats a blank Qwen credential as unconfigured like every other provider", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    await expect(
+      callAI(request("qwen blank", { timeoutMs: 1000 }), { provider: "qwen", model: "qwen-plus", apiKey: "  " }),
+    ).rejects.toThrow(/qwen/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
