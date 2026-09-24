@@ -127,6 +127,7 @@ export function sanitizeGeminiResponseSchema(value: unknown): unknown {
 function providerDisplayName(provider: string) {
   if (provider === "google") return "Google Gemini";
   if (provider === "openrouter") return "OpenRouter";
+  if (provider === "qwen") return "Qwen";
   if (provider === "openai") return "OpenAI";
   if (provider === "anthropic") return "Anthropic";
   return provider;
@@ -279,8 +280,44 @@ const PROVIDER_ENDPOINTS: Record<string, string> = {
   anthropic: "https://api.anthropic.com/v1/messages",
   google: "https://generativelanguage.googleapis.com/v1beta/models",
   openrouter: "https://openrouter.ai/api/v1/chat/completions",
+  qwen: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
   custom: "https://api.openai.com/v1/chat/completions",
 };
+
+/**
+ * Qwen is served by Alibaba Cloud Model Studio (DashScope), which runs several
+ * regional hosts that do not share accounts — Singapore, Beijing, US (Virginia)
+ * and Hong Kong on the legacy domain, plus workspace-dedicated and trial
+ * domains. A key issued in one region is rejected by the others, so the host has
+ * to be configurable rather than compiled in. Singapore
+ * (`dashscope-intl.aliyuncs.com`) is the default because it matches the rest of
+ * this deployment. See docs/AI_PROVIDERS.md for the current list.
+ *
+ * This is a region selector, not a model or credential, so it stays an ENV knob
+ * without conflicting with the rule that model IDs come from app config.
+ *
+ * HTTPS is required. The value is operator-controlled rather than user input,
+ * but a plain-http host would put the bearer token and every prompt on the wire
+ * in cleartext, so a misconfiguration fails loudly here instead of silently
+ * downgrading the transport for every Qwen call.
+ */
+function resolveQwenEndpoint(): string {
+  const configured = process.env.QWEN_BASE_URL?.trim();
+  if (!configured) return PROVIDER_ENDPOINTS.qwen;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(configured);
+  } catch {
+    throw new Error(`QWEN_BASE_URL is not a valid URL: ${JSON.stringify(configured)}`);
+  }
+  if (parsed.protocol !== "https:") {
+    throw new Error(`QWEN_BASE_URL must use https:, got ${JSON.stringify(parsed.protocol)}`);
+  }
+
+  const base = configured.replace(/\/+$/, "");
+  return base.endsWith("/chat/completions") ? base : `${base}/chat/completions`;
+}
 
 export async function callAI(request: AIRequest, config: AIProviderConfig): Promise<AIResponse> {
   const provider = config.provider || "openrouter";
@@ -517,7 +554,11 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
   }
 
   if (
-    (provider === "github_models" || provider === "openai" || provider === "openrouter" || provider === "custom") &&
+    (provider === "github_models" ||
+      provider === "openai" ||
+      provider === "openrouter" ||
+      provider === "qwen" ||
+      provider === "custom") &&
     apiKey
   ) {
     const body: Record<string, unknown> = { model, messages: request.messages };
@@ -535,7 +576,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     }
 
     const res = await fetchWithRetry(
-      PROVIDER_ENDPOINTS[provider],
+      provider === "qwen" ? resolveQwenEndpoint() : PROVIDER_ENDPOINTS[provider],
       { method: "POST", headers, body: JSON.stringify(body) },
       provider,
       requestTimeoutMs,

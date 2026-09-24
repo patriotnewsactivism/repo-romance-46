@@ -8,6 +8,7 @@ Current supported provider identifiers:
 - `openai`
 - `anthropic`
 - `openrouter`
+- `qwen`
 
 ## Recommended production defaults
 
@@ -54,9 +55,14 @@ GEMINI_API_KEY or GOOGLE_API_KEY
 OPENAI_API_KEY
 ANTHROPIC_API_KEY
 OPENROUTER_FREE_API_KEY or OPENROUTER_API_KEY_2 or OPENROUTER_API_KEY
+QWEN_API_KEY or DASHSCOPE_API_KEY
+QWEN_BASE_URL
 ```
 
 Model IDs are not environment secrets. `AI_MODEL`, `GEMINI_MODEL`, `OPENAI_MODEL`, `ANTHROPIC_MODEL`, and `OPENROUTER_MODEL` are ignored so a slug cannot leak across providers. Choose the model in Settings.
+
+`QWEN_BASE_URL` is the one exception to that rule and is not a model variable: it selects
+which DashScope region to call, not what to run there. See the Qwen section below.
 
 A credential variable that is present but blank (empty or whitespace) counts as unconfigured. Blank values are normalized to absent in `loadAiCredential` and again in `callAI`, so provider selection, `platformAiStatus`, and the "no usable credential" error all agree. Without that rule a whitespace key is truthy, passes every readiness check, and reaches the provider as `Authorization: Bearer `, which comes back as a misleading authentication error instead of a configuration error. Stored credentials are also trimmed, so a key saved with surrounding whitespace still authenticates.
 
@@ -74,6 +80,49 @@ When a provider rejects a model:
 - do not erase the stored key unless the user requested removal,
 - do not silently switch to another provider,
 - allow the user or planning policy to choose an alternative intentionally.
+
+## Qwen
+
+Qwen is served by Alibaba Cloud Model Studio (DashScope), which exposes an OpenAI-compatible
+chat-completions API. It therefore uses the same bearer-token request path as OpenAI and
+OpenRouter rather than a bespoke client.
+
+DashScope runs several regional hosts that do not share accounts, and a key issued in one
+region is rejected by the others. On the legacy `dashscope` domain:
+
+| Region | Base URL |
+| --- | --- |
+| Singapore (default) | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` |
+| Beijing | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| US (Virginia) | `https://dashscope-us.aliyuncs.com/compatible-mode/v1` |
+| Hong Kong | `https://cn-hongkong.dashscope.aliyuncs.com/compatible-mode/v1` |
+
+Alibaba also documents workspace-dedicated domains
+(`https://{WorkspaceId}.{region}.maas.aliyuncs.com/compatible-mode/v1`, which it recommends
+over the legacy domain and which additionally cover Tokyo and Frankfurt) and trial domains.
+`QWEN_BASE_URL` accepts any of them, so this list does not need to be exhaustive to stay
+correct — check Alibaba's base-URL reference for the current set.
+
+`QWEN_BASE_URL` selects the host. It accepts the base URL with or without a trailing slash,
+and also accepts the full `/chat/completions` path. It **must be `https`** — an operator
+typo using plain http would otherwise put the bearer token and every prompt on the wire in
+cleartext, so a non-https value raises instead. Leave it unset for Singapore.
+
+`QWEN_API_KEY` holds the credential; `DASHSCOPE_API_KEY` is accepted as an alias because that
+is Alibaba's own conventional name. The in-code default model is the `qwen-plus` alias, which
+Alibaba keeps pointed at the current stable Plus model, so the default does not pin a version
+that ages out. As with every provider, a model chosen in Settings wins.
+
+Qwen models are also reachable through OpenRouter as `qwen/<model>` without a second
+credential. The direct provider exists for operators who hold a Model Studio key and want
+first-party billing, quota, and latency.
+
+Adding a provider is not only an application change. The database validates the provider
+identifier in five places — the `user_preferences.custom_ai_provider` and
+`ai_provider_credentials.provider` check constraints, and the three provider-scoped Vault
+RPCs — so a new provider needs a forward migration widening all of them, or every save is
+rejected by Postgres and BYOK is unusable while the UI still offers the choice. See
+`supabase/migrations/20260924080000_add_qwen_ai_provider.sql`.
 
 ## OpenRouter
 

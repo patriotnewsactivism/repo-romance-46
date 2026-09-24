@@ -29,7 +29,7 @@ import { configuredCompletionWorker } from "../lib/completion-session-scheduler"
 import { OPENROUTER_FREE_AGENT_POOL_MODEL } from "../lib/ai-model-config";
 
 const router: IRouter = Router();
-const AI_PROVIDERS = ["google", "openai", "anthropic", "openrouter"] as const;
+const AI_PROVIDERS = ["google", "openai", "anthropic", "openrouter", "qwen"] as const;
 type AiProvider = (typeof AI_PROVIDERS)[number];
 
 const READABLE_COLUMNS = [
@@ -95,7 +95,7 @@ type ProviderCredentialRow = {
 type StoredKeyMap = Record<AiProvider, boolean>;
 
 function emptyStoredKeyMap(): StoredKeyMap {
-  return { google: false, openai: false, anthropic: false, openrouter: false };
+  return { google: false, openai: false, anthropic: false, openrouter: false, qwen: false };
 }
 
 async function readPreferences(req: Parameters<typeof requireAuth>[0]): Promise<PreferenceRow | null> {
