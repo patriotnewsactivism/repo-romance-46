@@ -285,19 +285,36 @@ const PROVIDER_ENDPOINTS: Record<string, string> = {
 };
 
 /**
- * Qwen is served by Alibaba Cloud Model Studio (DashScope), which runs two
- * regional hosts that do not share accounts: `dashscope-intl.aliyuncs.com` for
- * the international estate and `dashscope.aliyuncs.com` for mainland China. A
- * key issued in one region is rejected by the other, so the host has to be
- * configurable rather than compiled in. International is the default because it
- * matches the rest of this deployment.
+ * Qwen is served by Alibaba Cloud Model Studio (DashScope), which runs several
+ * regional hosts that do not share accounts — Singapore, Beijing, US (Virginia)
+ * and Hong Kong on the legacy domain, plus workspace-dedicated and trial
+ * domains. A key issued in one region is rejected by the others, so the host has
+ * to be configurable rather than compiled in. Singapore
+ * (`dashscope-intl.aliyuncs.com`) is the default because it matches the rest of
+ * this deployment. See docs/AI_PROVIDERS.md for the current list.
  *
  * This is a region selector, not a model or credential, so it stays an ENV knob
  * without conflicting with the rule that model IDs come from app config.
+ *
+ * HTTPS is required. The value is operator-controlled rather than user input,
+ * but a plain-http host would put the bearer token and every prompt on the wire
+ * in cleartext, so a misconfiguration fails loudly here instead of silently
+ * downgrading the transport for every Qwen call.
  */
 function resolveQwenEndpoint(): string {
   const configured = process.env.QWEN_BASE_URL?.trim();
   if (!configured) return PROVIDER_ENDPOINTS.qwen;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(configured);
+  } catch {
+    throw new Error(`QWEN_BASE_URL is not a valid URL: ${JSON.stringify(configured)}`);
+  }
+  if (parsed.protocol !== "https:") {
+    throw new Error(`QWEN_BASE_URL must use https:, got ${JSON.stringify(parsed.protocol)}`);
+  }
+
   const base = configured.replace(/\/+$/, "");
   return base.endsWith("/chat/completions") ? base : `${base}/chat/completions`;
 }

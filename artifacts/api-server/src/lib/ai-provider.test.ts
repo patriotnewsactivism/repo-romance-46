@@ -581,6 +581,59 @@ describe("Qwen routing", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).model).toBe(DEFAULT_AI_MODELS.qwen);
   });
 
+  // A plain-http host would put the bearer token and every prompt on the wire in
+  // cleartext, so a misconfiguration has to fail rather than silently downgrade.
+  it.each([
+    "http://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    "http://localhost:8080/compatible-mode/v1",
+  ])("refuses a non-https base URL (%s)", async (configured) => {
+    process.env.QWEN_BASE_URL = configured;
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    await expect(
+      callAI(request("qwen insecure", { timeoutMs: 1000 }), {
+        provider: "qwen",
+        model: "qwen-plus",
+        apiKey: "test-api-key",
+      }),
+    ).rejects.toThrow(/QWEN_BASE_URL must use https:/);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a malformed base URL rather than building a bad endpoint", async () => {
+    process.env.QWEN_BASE_URL = "not-a-url";
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    await expect(
+      callAI(request("qwen malformed", { timeoutMs: 1000 }), {
+        provider: "qwen",
+        model: "qwen-plus",
+        apiKey: "test-api-key",
+      }),
+    ).rejects.toThrow(/QWEN_BASE_URL is not a valid URL/);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["Beijing", "https://dashscope.aliyuncs.com/compatible-mode/v1"],
+    ["US (Virginia)", "https://dashscope-us.aliyuncs.com/compatible-mode/v1"],
+    ["Hong Kong", "https://cn-hongkong.dashscope.aliyuncs.com/compatible-mode/v1"],
+    ["workspace-dedicated", "https://ws-123.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"],
+  ])("routes to the %s host when configured", async (_label, configured) => {
+    process.env.QWEN_BASE_URL = configured;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse());
+
+    await callAI(request("qwen regional", { timeoutMs: 1000 }), {
+      provider: "qwen",
+      model: "qwen-plus",
+      apiKey: "test-api-key",
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(`${configured}/chat/completions`);
+  });
+
   it("treats a blank Qwen credential as unconfigured like every other provider", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     await expect(

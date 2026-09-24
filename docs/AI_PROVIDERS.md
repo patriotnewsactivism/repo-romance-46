@@ -87,14 +87,26 @@ Qwen is served by Alibaba Cloud Model Studio (DashScope), which exposes an OpenA
 chat-completions API. It therefore uses the same bearer-token request path as OpenAI and
 OpenRouter rather than a bespoke client.
 
-DashScope runs two regional hosts that do not share accounts, and a key issued in one region
-is rejected by the other:
+DashScope runs several regional hosts that do not share accounts, and a key issued in one
+region is rejected by the others. On the legacy `dashscope` domain:
 
-- international (default): `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`
-- mainland China: `https://dashscope.aliyuncs.com/compatible-mode/v1`
+| Region | Base URL |
+| --- | --- |
+| Singapore (default) | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` |
+| Beijing | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| US (Virginia) | `https://dashscope-us.aliyuncs.com/compatible-mode/v1` |
+| Hong Kong | `https://cn-hongkong.dashscope.aliyuncs.com/compatible-mode/v1` |
+
+Alibaba also documents workspace-dedicated domains
+(`https://{WorkspaceId}.{region}.maas.aliyuncs.com/compatible-mode/v1`, which it recommends
+over the legacy domain and which additionally cover Tokyo and Frankfurt) and trial domains.
+`QWEN_BASE_URL` accepts any of them, so this list does not need to be exhaustive to stay
+correct — check Alibaba's base-URL reference for the current set.
 
 `QWEN_BASE_URL` selects the host. It accepts the base URL with or without a trailing slash,
-and also accepts the full `/chat/completions` path. Leave it unset for international.
+and also accepts the full `/chat/completions` path. It **must be `https`** — an operator
+typo using plain http would otherwise put the bearer token and every prompt on the wire in
+cleartext, so a non-https value raises instead. Leave it unset for Singapore.
 
 `QWEN_API_KEY` holds the credential; `DASHSCOPE_API_KEY` is accepted as an alias because that
 is Alibaba's own conventional name. The in-code default model is the `qwen-plus` alias, which
