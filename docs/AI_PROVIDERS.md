@@ -105,6 +105,13 @@ Qwen models are also reachable through OpenRouter as `qwen/<model>` without a se
 credential. The direct provider exists for operators who hold a Model Studio key and want
 first-party billing, quota, and latency.
 
+Adding a provider is not only an application change. The database validates the provider
+identifier in five places — the `user_preferences.custom_ai_provider` and
+`ai_provider_credentials.provider` check constraints, and the three provider-scoped Vault
+RPCs — so a new provider needs a forward migration widening all of them, or every save is
+rejected by Postgres and BYOK is unusable while the UI still offers the choice. See
+`supabase/migrations/20260924080000_add_qwen_ai_provider.sql`.
+
 ## OpenRouter
 
 OpenRouter is a first-class supported provider. It is useful as a multi-model routing surface but should not be treated as a reason to weaken provider/model observability.

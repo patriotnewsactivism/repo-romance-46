@@ -9,6 +9,7 @@ import {
   normalizeAiProvider,
   platformAiKey,
   platformAiStatus,
+  SUPPORTED_AI_PROVIDERS,
 } from "../lib/credentials";
 import { deleteAiVaultSecret, readAiVaultSecret, storeAiVaultSecret } from "../lib/ai-secret-store";
 import { encryptSecret } from "../lib/secrets";
@@ -19,7 +20,7 @@ import {
 } from "../lib/openrouter-models";
 
 const router: IRouter = Router();
-const AI_PROVIDERS = ["google", "openai", "anthropic", "openrouter"] as const;
+const AI_PROVIDERS = SUPPORTED_AI_PROVIDERS;
 type AiProvider = (typeof AI_PROVIDERS)[number];
 
 type ExistingAiRow = {
@@ -68,12 +69,11 @@ async function statusShape(supabase: any, userId: string) {
   ]);
   const platform = platformAiStatus();
   const requestedProvider = normalizeAiProvider(row?.custom_ai_provider, platform.defaultProvider) as AiProvider;
-  const storedKeys: Record<AiProvider, boolean> = {
-    google: false,
-    openai: false,
-    anthropic: false,
-    openrouter: false,
-  };
+  // Built from the canonical provider list so a newly supported provider cannot
+  // be omitted here and silently report "no stored key".
+  const storedKeys = Object.fromEntries(
+    AI_PROVIDERS.map((provider) => [provider, false]),
+  ) as Record<AiProvider, boolean>;
   for (const ref of rows) {
     if (AI_PROVIDERS.includes(ref.provider as AiProvider) && ref.vault_secret_id) {
       storedKeys[ref.provider as AiProvider] = true;
