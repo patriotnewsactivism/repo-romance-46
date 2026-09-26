@@ -52,3 +52,40 @@ describe("provider-scoped AI Vault operations", () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 });
+
+describe("Qwen Vault operations", () => {
+  // Regression: a hardcoded provider allowlist in this module rejected Qwen
+  // before the Vault write could reach the database, so BYOK was unusable even
+  // though Settings and the preferences API both accepted the provider.
+  it("stores a Qwen key under the qwen provider", async () => {
+    const { client, rpc } = clientWithRpc({ data: SECRET_ID });
+
+    await expect(storeAiVaultSecret(client, USER_ID, "qwen", "  qwen-key  ")).resolves.toBe(SECRET_ID);
+    expect(rpc).toHaveBeenCalledWith("repo_finisher_store_ai_provider_secret", {
+      p_user_id: USER_ID,
+      p_provider: "qwen",
+      p_secret: "qwen-key",
+      p_existing_secret_id: null,
+    });
+  });
+
+  it("reads and deletes a Qwen key", async () => {
+    const read = clientWithRpc({ data: "qwen-key" });
+    await expect(readAiVaultSecret(read.client, USER_ID, "qwen", SECRET_ID)).resolves.toBe("qwen-key");
+
+    const del = clientWithRpc({ data: null });
+    await expect(deleteAiVaultSecret(del.client, USER_ID, "qwen", SECRET_ID)).resolves.toBeUndefined();
+    expect(del.rpc).toHaveBeenCalledWith("repo_finisher_delete_ai_provider_secret", {
+      p_user_id: USER_ID,
+      p_provider: "qwen",
+      p_secret_id: SECRET_ID,
+    });
+  });
+
+  it("still rejects a provider that is genuinely unsupported", async () => {
+    const { client } = clientWithRpc({ data: SECRET_ID });
+    await expect(storeAiVaultSecret(client, USER_ID, "not-a-provider", "key")).rejects.toThrow(
+      /Unsupported AI provider/i,
+    );
+  });
+});

@@ -16,16 +16,14 @@ import Settings from '@/pages/settings';
 import SharedAnalysis from '@/pages/shared-analysis';
 import NotFound from '@/pages/not-found';
 
-// Configure the API client synchronously, before any route component can mount.
-// AuthCallback persists Supabase's GitHub provider token immediately after the
-// OAuth code exchange. If this setup lives in App's useEffect, a child route's
-// effect can run first and POST /github/connect without a bearer token.
-//
-// Production is deliberately given a stable Cloud Run fallback API URL as well.
-// During a preview build VITE_API_BASE_URL may be absent; falling back to the
-// retired Render API would silently split production traffic across backends.
-const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
-const productionApiBaseUrl = 'https://repofinisher-api-z6kubh2jtq-uc.a.run.app';
+// Vercel serves the SPA; Railway serves the persistent API/worker plane.
+// Ignore the retired Cloud Run URL even if a stale Vercel build variable still
+// contains it, so production cannot silently route back to decommissioned compute.
+const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim().replace(/\/$/, '');
+const productionApiBaseUrl = 'https://repofinisher-api-production.up.railway.app';
+const retiredApiBaseUrls = new Set([
+  'https://repofinisher-api-z6kubh2jtq-uc.a.run.app',
+]);
 const canonicalProductionOrigin = 'https://portfolio.donmatthews.live';
 const localHostnames = new Set(['localhost', '127.0.0.1', '::1']);
 const legacyProductionHostnames = new Set(['repofinisher.donmatthews.live']);
@@ -37,10 +35,15 @@ if (typeof window !== 'undefined' && legacyProductionHostnames.has(window.locati
   );
 }
 
-const apiBaseUrl = configuredApiBaseUrl || (isLocalBrowser ? undefined : productionApiBaseUrl);
+const apiBaseUrl =
+  configuredApiBaseUrl && !retiredApiBaseUrls.has(configuredApiBaseUrl)
+    ? configuredApiBaseUrl
+    : isLocalBrowser
+      ? undefined
+      : productionApiBaseUrl;
 
 if (apiBaseUrl) {
-  setBaseUrl(apiBaseUrl.replace(/\/$/, ''));
+  setBaseUrl(apiBaseUrl);
 }
 
 setAuthTokenGetter(async () => {

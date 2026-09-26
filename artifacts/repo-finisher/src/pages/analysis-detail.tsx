@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useParams, useLocation, Link } from 'wouter';
 import { useGetAnalysis, getGetAnalysisQueryKey, useShareAnalysis, useRerunAnalysis } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { getSession, signInWithGitHub } from '@/lib/auth';
+import { getSession, signInWithGitHub, signOut } from '@/lib/auth';
 import { AppHeader } from '@/components/app-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -35,6 +35,11 @@ export default function AnalysisDetail() {
       if (!session) setLocation('/auth');
     });
   }, [setLocation]);
+
+  const handleSignOut = async () => {
+    await signOut();
+    setLocation('/auth');
+  };
 
   useEffect(() => {
     if (detail?.analysis.status === 'running') {
@@ -137,6 +142,7 @@ export default function AnalysisDetail() {
     <div className="min-h-screen bg-background dark">
       <AppHeader
         section="Analysis"
+        onSignOut={() => void handleSignOut()}
         actions={
           <Button
             variant="outline"

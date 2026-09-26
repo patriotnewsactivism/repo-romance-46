@@ -19,11 +19,11 @@ Check only what was actually verified:
 - [ ] documentation consistency guard passes
 - [ ] GitHub CI green
 - [ ] Supabase migration applied/verified (if applicable)
-- [ ] Cloud Run API direct health verified (if backend changed)
-- [ ] Cloud Run frontend direct health verified (if frontend changed)
-- [ ] Cloud Run completion-session Job deployed/exercised (if worker changed)
-- [ ] runtime environment/Secret Manager contract verified (if applicable)
-- [ ] canonical custom domain/Cloudflare DNS verified (if affected)
+- [ ] Vercel frontend deployment verified (if frontend changed)
+- [ ] Railway API health verified (if backend changed)
+- [ ] Railway worker deployed/exercised (if worker changed)
+- [ ] runtime environment contract verified (if applicable)
+- [ ] canonical frontend/API DNS verified (if affected)
 - [ ] production smoke passed (if material production change)
 - [ ] authenticated user flow verified (if applicable)
 - [ ] completion/readiness/outcome telemetry verified (if autonomous behavior changed)
@@ -31,17 +31,17 @@ Check only what was actually verified:
 Commands/evidence:
 
 ```text
-# workflow/run/revision/job IDs and concise evidence
+# workflow/deployment/service IDs and concise evidence
 ```
 
 ## Security / autonomy impact
 
-- Does this touch auth, RLS, Vault, secrets, CORS, IAM, Cloud Run Jobs, repository writes, self-healing, approval gates, or merge authority?
+- Does this touch auth, RLS, Vault, secrets, CORS, Railway worker execution, repository writes, self-healing, approval gates, or merge authority?
 - If yes, explain why boundaries remain safe.
 
 ## Database / deployment impact
 
-List migrations, environment-variable changes, Secret Manager changes, Cloud Run service/job changes, domain/DNS changes, deployment ordering, or `none`.
+List migrations, environment-variable changes, Vercel/Railway service changes, domain/DNS changes, deployment ordering, or `none`.
 
 ## Documentation
 
@@ -56,10 +56,11 @@ State unresolved blockers, follow-ups, limitations, or `none`.
 
 ## RepoFinisher policy checks
 
-- [ ] no Vercel deployment/configuration reintroduced
-- [ ] no long-lived Google service-account JSON key introduced
+- [ ] Vercel remains the frontend target
+- [ ] Railway remains the API/worker target
+- [ ] no automatic Cloud Run deployment workflow reintroduced
 - [ ] no tests/CI/security controls weakened merely to pass
 - [ ] no secrets committed or exposed to `VITE_*`
 - [ ] no worker retry can replay completed repository writes
 - [ ] passing CI is not represented as proof of full product completion without relevant runtime/product evidence
-- [ ] `merged`, `deployed`, `direct runtime verified`, `canonical domain verified`, and `user-flow verified` are reported distinctly
+- [ ] `merged`, `deployed`, `runtime verified`, `domain verified`, and `user-flow verified` are reported distinctly

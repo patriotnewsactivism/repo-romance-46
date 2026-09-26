@@ -61,6 +61,9 @@ export const OPENROUTER_AGENT_CHAIN = [
   ...OPENROUTER_PAID_AGENT_CHAIN,
 ] as const;
 
+export const OPENROUTER_FLASHX_MODEL = "z-ai/glm-5.3-flashx";
+export const OPENROUTER_FLASH_FALLBACK_MODEL = "z-ai/glm-5.3-flash";
+
 type PublicHttpError = Error & {
   status?: number;
   code?: string;
@@ -88,7 +91,7 @@ export const FINAL_SYNTHESIS_TIMEOUT_MS = 8000;
 export function resolveAIRequestTimeoutMs(request: AIRequest): number {
   if (request.timeoutMs !== undefined) {
     const requested = Number(request.timeoutMs);
-    if (Number.isFinite(requested)) return Math.max(1000, Math.min(120000, Math.round(requested)));
+    if (Number.isFinite(requested)) return Math.max(1000, Math.min(600000, Math.round(requested)));
   }
 
   const systemText = request.messages
@@ -124,6 +127,7 @@ export function sanitizeGeminiResponseSchema(value: unknown): unknown {
 function providerDisplayName(provider: string) {
   if (provider === "google") return "Google Gemini";
   if (provider === "openrouter") return "OpenRouter";
+  if (provider === "qwen") return "Qwen";
   if (provider === "openai") return "OpenAI";
   if (provider === "anthropic") return "Anthropic";
   return provider;
@@ -237,7 +241,12 @@ async function fetchWithRetry(
     }
 
     if (res.status !== 429 && res.status < 500) return res;
-    if (res.status >= 500 && attempt === maxRetries) return res;
+    // Return the final transient response to the caller so model-specific
+    // routing can inspect the real status and choose an alternate model.
+    // This is especially important when retryBudget=0: the caller asked for
+    // one attempt, not for the transport helper to replace HTTP 429 with a
+    // generic retry-exhausted exception.
+    if ((res.status === 429 || res.status >= 500) && attempt === maxRetries) return res;
 
     const retryAfter = res.headers.get("Retry-After");
     let waitMs: number;
@@ -271,8 +280,44 @@ const PROVIDER_ENDPOINTS: Record<string, string> = {
   anthropic: "https://api.anthropic.com/v1/messages",
   google: "https://generativelanguage.googleapis.com/v1beta/models",
   openrouter: "https://openrouter.ai/api/v1/chat/completions",
+  qwen: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
   custom: "https://api.openai.com/v1/chat/completions",
 };
+
+/**
+ * Qwen is served by Alibaba Cloud Model Studio (DashScope), which runs several
+ * regional hosts that do not share accounts — Singapore, Beijing, US (Virginia)
+ * and Hong Kong on the legacy domain, plus workspace-dedicated and trial
+ * domains. A key issued in one region is rejected by the others, so the host has
+ * to be configurable rather than compiled in. Singapore
+ * (`dashscope-intl.aliyuncs.com`) is the default because it matches the rest of
+ * this deployment. See docs/AI_PROVIDERS.md for the current list.
+ *
+ * This is a region selector, not a model or credential, so it stays an ENV knob
+ * without conflicting with the rule that model IDs come from app config.
+ *
+ * HTTPS is required. The value is operator-controlled rather than user input,
+ * but a plain-http host would put the bearer token and every prompt on the wire
+ * in cleartext, so a misconfiguration fails loudly here instead of silently
+ * downgrading the transport for every Qwen call.
+ */
+function resolveQwenEndpoint(): string {
+  const configured = process.env.QWEN_BASE_URL?.trim();
+  if (!configured) return PROVIDER_ENDPOINTS.qwen;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(configured);
+  } catch {
+    throw new Error(`QWEN_BASE_URL is not a valid URL: ${JSON.stringify(configured)}`);
+  }
+  if (parsed.protocol !== "https:") {
+    throw new Error(`QWEN_BASE_URL must use https:, got ${JSON.stringify(parsed.protocol)}`);
+  }
+
+  const base = configured.replace(/\/+$/, "");
+  return base.endsWith("/chat/completions") ? base : `${base}/chat/completions`;
+}
 
 export async function callAI(request: AIRequest, config: AIProviderConfig): Promise<AIResponse> {
   const provider = config.provider || "openrouter";
@@ -368,6 +413,89 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     return { content };
   }
 
+  if (provider === "openrouter" && apiKey && model === OPENROUTER_FLASHX_MODEL) {
+    // GLM 5.3 FlashX currently has a single OpenRouter upstream (Z.AI).
+    // A 429/5xx therefore has no provider-level redundancy. Keep FlashX as the
+    // requested primary, but fail over immediately to the same-family GLM 5.3
+    // Flash model, which OpenRouter can serve through many upstreams.
+    const candidates = [OPENROUTER_FLASHX_MODEL, OPENROUTER_FLASH_FALLBACK_MODEL] as const;
+    let lastError: unknown;
+
+    for (const candidate of candidates) {
+      const body: Record<string, unknown> = { model: candidate, messages: request.messages };
+
+      if (request.responseFormat) {
+        // FlashX supports JSON response_format but not strict JSON-schema
+        // enforcement. GLM 5.3 Flash supports the full schema contract.
+        body.response_format =
+          candidate === OPENROUTER_FLASHX_MODEL
+            ? { type: "json_object" }
+            : request.responseFormat;
+      }
+
+      if (config.reasoningEffort) {
+        body.reasoning = { effort: config.reasoningEffort };
+      }
+
+      const res = await fetchWithRetry(
+        PROVIDER_ENDPOINTS.openrouter,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+            "X-Title": "RepoFinisher",
+          },
+          body: JSON.stringify(body),
+        },
+        "openrouter",
+        requestTimeoutMs,
+        0,
+      );
+
+      if (!res.ok) {
+        const text = await res.text();
+        const error = providerRequestError("openrouter", candidate, res.status, text);
+        lastError = error;
+
+        if (
+          candidate === OPENROUTER_FLASHX_MODEL &&
+          (res.status === 429 || res.status >= 500)
+        ) {
+          console.warn(
+            `[ai-provider] ${OPENROUTER_FLASHX_MODEL} unavailable (${res.status}); failing over to ${OPENROUTER_FLASH_FALLBACK_MODEL}`,
+          );
+          continue;
+        }
+
+        throw error;
+      }
+
+      const json = (await res.json()) as {
+        model?: string;
+        choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
+      };
+      const raw = json.choices?.[0]?.message?.content;
+
+      if (candidate !== OPENROUTER_FLASHX_MODEL) {
+        console.warn(
+          `[ai-provider] served ${json.model || candidate} after ${OPENROUTER_FLASHX_MODEL} fallback`,
+        );
+      }
+
+      if (typeof raw === "string") return { content: raw, model: json.model || candidate };
+      if (Array.isArray(raw)) {
+        return {
+          content: raw.map((part) => part.text || "").join(""),
+          model: json.model || candidate,
+        };
+      }
+      return { content: "", model: json.model || candidate };
+    }
+
+    throw lastError ?? new Error("GLM 5.3 FlashX fallback chain exhausted with no error recorded");
+  }
+
   if (provider === "openrouter" && apiKey && model === OPENROUTER_FREE_AGENT_CHAIN[0]) {
     // The reviewed default uses automatic free-first continuity. Exact custom
     // user-selected models remain pinned and are never substituted.
@@ -426,7 +554,11 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
   }
 
   if (
-    (provider === "github_models" || provider === "openai" || provider === "openrouter" || provider === "custom") &&
+    (provider === "github_models" ||
+      provider === "openai" ||
+      provider === "openrouter" ||
+      provider === "qwen" ||
+      provider === "custom") &&
     apiKey
   ) {
     const body: Record<string, unknown> = { model, messages: request.messages };
@@ -444,7 +576,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     }
 
     const res = await fetchWithRetry(
-      PROVIDER_ENDPOINTS[provider],
+      provider === "qwen" ? resolveQwenEndpoint() : PROVIDER_ENDPOINTS[provider],
       { method: "POST", headers, body: JSON.stringify(body) },
       provider,
       requestTimeoutMs,

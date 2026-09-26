@@ -3,6 +3,7 @@ import {
   isProviderSchemaMissing,
   loadStoredAiProviderSecretId,
   normalizeAiProvider,
+  normalizeSavedAiModel,
   platformAiKey,
   platformAiModel,
   platformAiProvider,
@@ -23,6 +24,8 @@ const AI_ENV_KEYS = [
   "OPENAI_MODEL",
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_MODEL",
+  "QWEN_API_KEY",
+  "DASHSCOPE_API_KEY",
 ] as const;
 
 const originalAiEnv = new Map<string, string | undefined>();
@@ -88,6 +91,20 @@ describe("platformAiProvider", () => {
 
   it("uses OpenRouter as the BYOK-oriented default when no platform key exists", () => {
     expect(platformAiProvider()).toBe("openrouter");
+  });
+});
+
+describe("saved model migration", () => {
+  it("switches the prior DeepSeek selection to GLM 5.3 FlashX", () => {
+    expect(normalizeSavedAiModel("openrouter", "~deepseek/deepseek-pro-latest"))
+      .toBe("z-ai/glm-5.3-flashx");
+  });
+
+  it("leaves unrelated model selections untouched", () => {
+    expect(normalizeSavedAiModel("openrouter", "openai/gpt-5.6-luna"))
+      .toBe("openai/gpt-5.6-luna");
+    expect(normalizeSavedAiModel("google", "gemini-3.8-flash"))
+      .toBe("gemini-3.8-flash");
   });
 });
 
@@ -219,3 +236,48 @@ describe("loadStoredAiProviderSecretId rolling deploy tolerance", () => {
   });
 });
 
+
+describe("Qwen provider", () => {
+  it("is a supported provider rather than being coerced to the fallback", () => {
+    expect(normalizeAiProvider("qwen")).toBe("qwen");
+    expect(normalizeAiProvider("QWEN")).toBe("qwen");
+  });
+
+  it("resolves its in-code default model", () => {
+    expect(platformAiModel("qwen")).toBe("qwen-plus");
+  });
+
+  it("reads its platform key from either accepted variable name", () => {
+    process.env.QWEN_API_KEY = "test-qwen-key";
+    expect(platformAiKey("qwen")).toBe("test-qwen-key");
+
+    delete process.env.QWEN_API_KEY;
+    process.env.DASHSCOPE_API_KEY = "test-dashscope-key";
+    expect(platformAiKey("qwen")).toBe("test-dashscope-key");
+  });
+
+  it("prefers QWEN_API_KEY when both names are set", () => {
+    process.env.QWEN_API_KEY = "primary";
+    process.env.DASHSCOPE_API_KEY = "secondary";
+    expect(platformAiKey("qwen")).toBe("primary");
+  });
+
+  it("applies the same blank-credential rule as every other provider", () => {
+    process.env.QWEN_API_KEY = "   ";
+    process.env.DASHSCOPE_API_KEY = "\t";
+    expect(platformAiKey("qwen")).toBeNull();
+    expect(platformAiStatus().providers.qwen.platformConfigured).toBe(false);
+  });
+
+  it("can be selected explicitly and reported as configured", () => {
+    process.env.AI_PROVIDER = "qwen";
+    process.env.QWEN_API_KEY = "test-qwen-key";
+    expect(platformAiProvider()).toBe("qwen");
+    expect(platformAiStatus().providers.qwen.platformConfigured).toBe(true);
+  });
+
+  it("is a failover target when it holds the only configured credential", () => {
+    process.env.QWEN_API_KEY = "test-qwen-key";
+    expect(platformAiProvider()).toBe("qwen");
+  });
+});

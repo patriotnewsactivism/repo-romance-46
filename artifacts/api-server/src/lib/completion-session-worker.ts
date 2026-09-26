@@ -18,7 +18,7 @@ const SESSION_WORK_BUDGET_MS = 5.5 * 60_000;
 const MAX_REPAIR_ATTEMPTS = 3;
 const SESSION_PROMPT_FALLBACK = "completion-session-v1-iterative";
 
-type CompletionWorkerModeLike = "cloud-run-job" | "in-process" | "already-running";
+type CompletionWorkerModeLike = "railway-worker" | "in-process" | "already-running";
 type SessionStatus = "active" | "succeeded" | "blocked" | "budget_exhausted" | "cancelled";
 type SessionPhase = "queued" | "planning" | "executing" | "verifying" | "repairing" | "rescoring" | "replanning" | "complete" | "blocked";
 

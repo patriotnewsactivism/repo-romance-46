@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_AI_MODELS } from "./ai-model-config";
 import {
   OPENROUTER_AGENT_CHAIN,
+  OPENROUTER_FLASHX_MODEL,
+  OPENROUTER_FLASH_FALLBACK_MODEL,
   OPENROUTER_FREE_AGENT_CHAIN,
   OPENROUTER_PAID_AGENT_CHAIN,
   callAI,
@@ -75,7 +77,7 @@ describe("resolveAIRequestTimeoutMs", () => {
   it("honors an explicit bounded timeout", () => {
     expect(resolveAIRequestTimeoutMs(request("custom", { timeoutMs: 12000 }))).toBe(12000);
     expect(resolveAIRequestTimeoutMs(request("custom", { timeoutMs: 10 }))).toBe(1000);
-    expect(resolveAIRequestTimeoutMs(request("custom", { timeoutMs: 999999 }))).toBe(120000);
+    expect(resolveAIRequestTimeoutMs(request("custom", { timeoutMs: 999999 }))).toBe(600000);
   });
 });
 
@@ -108,6 +110,67 @@ describe("OpenRouter routing", () => {
     const body = JSON.parse(String(init?.body));
     expect(body.model).toBe("example/vendor-model");
     expect(body.models).toBeUndefined();
+  });
+
+
+
+  it("fails over immediately from FlashX on 429 and reports the served GLM Flash model", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: "rate limited" } }), { status: 429 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            model: OPENROUTER_FLASH_FALLBACK_MODEL,
+            choices: [{ message: { content: '{"ready":true}' } }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+
+    const result = await callAI(
+      request("structured FlashX test", {
+        timeoutMs: 1000,
+        responseFormat: {
+          type: "json_schema",
+          json_schema: {
+            name: "ready_test",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: { ready: { type: "boolean" } },
+              required: ["ready"],
+            },
+          },
+        },
+      }),
+      {
+        provider: "openrouter",
+        model: OPENROUTER_FLASHX_MODEL,
+        apiKey: "test-api-key",
+        reasoningEffort: "high",
+      },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const [, firstInit] = fetchMock.mock.calls[0];
+    const firstBody = JSON.parse(String(firstInit?.body));
+    expect(firstBody.model).toBe(OPENROUTER_FLASHX_MODEL);
+    expect(firstBody.response_format).toEqual({ type: "json_object" });
+    expect(firstBody.reasoning).toEqual({ effort: "high" });
+
+    const [, secondInit] = fetchMock.mock.calls[1];
+    const secondBody = JSON.parse(String(secondInit?.body));
+    expect(secondBody.model).toBe(OPENROUTER_FLASH_FALLBACK_MODEL);
+    expect(secondBody.response_format.type).toBe("json_schema");
+
+    expect(result).toEqual({
+      content: '{"ready":true}',
+      model: OPENROUTER_FLASH_FALLBACK_MODEL,
+    });
   });
 
   it("routes the reviewed Nex Mini default through the fast free fallback batch and records the served model", async () => {
@@ -438,5 +501,144 @@ describe("Google structured-output compatibility", () => {
       'OpenRouter API error 401 for model "nex-agi/nex-n2.5-mini:free": Invalid API key provided',
     );
     expect(err.publicMessage).toContain("rejected the configured credential");
+  });
+});
+
+describe("Qwen routing", () => {
+  const originalBaseUrl = process.env.QWEN_BASE_URL;
+
+  afterEach(() => {
+    if (originalBaseUrl === undefined) delete process.env.QWEN_BASE_URL;
+    else process.env.QWEN_BASE_URL = originalBaseUrl;
+  });
+
+  function okResponse() {
+    return new Response(JSON.stringify({ choices: [{ message: { content: "ready" } }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  it("uses the international DashScope host and a bearer token by default", async () => {
+    delete process.env.QWEN_BASE_URL;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse());
+
+    const result = await callAI(request("qwen test", { timeoutMs: 1000 }), {
+      provider: "qwen",
+      model: "qwen-plus",
+      apiKey: "test-api-key",
+    });
+
+    expect(result.content).toBe("ready");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions");
+    expect(new Headers(init?.headers).get("authorization")).toBe("Bearer test-api-key");
+    expect(JSON.parse(String(init?.body)).model).toBe("qwen-plus");
+  });
+
+  // A key issued for one DashScope region is rejected by the other, so the host
+  // must follow the configured region rather than being compiled in.
+  it("honors a configured regional base URL", async () => {
+    process.env.QWEN_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse());
+
+    await callAI(request("qwen region", { timeoutMs: 1000 }), {
+      provider: "qwen",
+      model: "qwen-plus",
+      apiKey: "test-api-key",
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions");
+  });
+
+  it("accepts a base URL given with a trailing slash or the full path", async () => {
+    for (const configured of [
+      "https://dashscope.aliyuncs.com/compatible-mode/v1/",
+      "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    ]) {
+      process.env.QWEN_BASE_URL = configured;
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse());
+      await callAI(request("qwen base", { timeoutMs: 1000 }), {
+        provider: "qwen",
+        model: "qwen-plus",
+        apiKey: "test-api-key",
+      });
+      expect(fetchMock.mock.calls[0][0]).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions");
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("falls back to the shared in-code default model when none is configured", async () => {
+    delete process.env.QWEN_BASE_URL;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse());
+
+    await callAI(request("qwen default model", { timeoutMs: 1000 }), {
+      provider: "qwen",
+      model: null,
+      apiKey: "test-api-key",
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).model).toBe(DEFAULT_AI_MODELS.qwen);
+  });
+
+  // A plain-http host would put the bearer token and every prompt on the wire in
+  // cleartext, so a misconfiguration has to fail rather than silently downgrade.
+  it.each([
+    "http://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    "http://localhost:8080/compatible-mode/v1",
+  ])("refuses a non-https base URL (%s)", async (configured) => {
+    process.env.QWEN_BASE_URL = configured;
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    await expect(
+      callAI(request("qwen insecure", { timeoutMs: 1000 }), {
+        provider: "qwen",
+        model: "qwen-plus",
+        apiKey: "test-api-key",
+      }),
+    ).rejects.toThrow(/QWEN_BASE_URL must use https:/);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a malformed base URL rather than building a bad endpoint", async () => {
+    process.env.QWEN_BASE_URL = "not-a-url";
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    await expect(
+      callAI(request("qwen malformed", { timeoutMs: 1000 }), {
+        provider: "qwen",
+        model: "qwen-plus",
+        apiKey: "test-api-key",
+      }),
+    ).rejects.toThrow(/QWEN_BASE_URL is not a valid URL/);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["Beijing", "https://dashscope.aliyuncs.com/compatible-mode/v1"],
+    ["US (Virginia)", "https://dashscope-us.aliyuncs.com/compatible-mode/v1"],
+    ["Hong Kong", "https://cn-hongkong.dashscope.aliyuncs.com/compatible-mode/v1"],
+    ["workspace-dedicated", "https://ws-123.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"],
+  ])("routes to the %s host when configured", async (_label, configured) => {
+    process.env.QWEN_BASE_URL = configured;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse());
+
+    await callAI(request("qwen regional", { timeoutMs: 1000 }), {
+      provider: "qwen",
+      model: "qwen-plus",
+      apiKey: "test-api-key",
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(`${configured}/chat/completions`);
+  });
+
+  it("treats a blank Qwen credential as unconfigured like every other provider", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    await expect(
+      callAI(request("qwen blank", { timeoutMs: 1000 }), { provider: "qwen", model: "qwen-plus", apiKey: "  " }),
+    ).rejects.toThrow(/qwen/i);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

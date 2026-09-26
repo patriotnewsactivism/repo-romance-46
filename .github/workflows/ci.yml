@@ -21,19 +21,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Enforce non-Vercel hosting policy
+      - name: Enforce production hosting policy
         shell: bash
         run: |
           set -euo pipefail
-          forbidden=(
+          required=(
             "vercel.json"
-            "api/[...path].mjs"
-            "artifacts/api-server/build-vercel.mjs"
-            "artifacts/api-server/src/vercel.ts"
+            "Dockerfile.apiserver"
+            "artifacts/api-server/src/railway-worker.ts"
           )
-          for path in "${forbidden[@]}"; do
+          for path in "${required[@]}"; do
+            if [[ ! -e "$path" ]]; then
+              echo "Required Vercel/Railway production artifact is missing: $path" >&2
+              exit 1
+            fi
+          done
+
+          retired=(
+            ".github/workflows/deploy-cloud-run.yml"
+            ".github/workflows/repair-canonical-domain.yml"
+          )
+          for path in "${retired[@]}"; do
             if [[ -e "$path" ]]; then
-              echo "Forbidden Vercel hosting artifact reintroduced: $path" >&2
+              echo "Retired automatic Cloud Run workflow reintroduced: $path" >&2
               exit 1
             fi
           done

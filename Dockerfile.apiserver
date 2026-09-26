@@ -1,18 +1,14 @@
-# Dockerfile for the RepoFinisher API server and Cloud Run Job worker
+# RepoFinisher API + persistent Railway worker image
 FROM node:22-slim AS builder
 
 WORKDIR /app
 
-# Enable pnpm
 RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 COPY . .
 
-# Install dependencies and build all workspaces
 RUN pnpm install --frozen-lockfile
-
-# Build the api-server workspace
-RUN pnpm --filter @workspace/api-server build || true
+RUN pnpm --filter @workspace/api-server build
 
 FROM node:22-slim AS runner
 
@@ -20,13 +16,13 @@ WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
-COPY package.json pnpm-lock.yaml ./ 
-COPY pnpm-workspace.yaml ./
-RUN pnpm install --prod --frozen-lockfile || true
-
+COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/artifacts/api-server/node_modules ./artifacts/api-server/node_modules
 COPY --from=builder /app/artifacts/api-server/dist ./artifacts/api-server/dist
 COPY --from=builder /app/lib ./lib
 
+ENV NODE_ENV=production
 ENV PORT=8080
 EXPOSE 8080
 

@@ -64,16 +64,20 @@ export function FinishUntilTargetControl({
   const [busy, setBusy] = useState<"create" | "refresh" | "cancel" | null>(null);
   const [expanded, setExpanded] = useState(false);
 
+  const fetchSession = useCallback(async (sessionId: string) => {
+    return customFetch<DetailResponse>(`/api/repo-finisher/completion-sessions/${sessionId}`, { responseType: "json" });
+  }, []);
+
   const load = useCallback(async (sessionId: string, quiet = false) => {
     if (!quiet) setBusy("refresh");
     try {
-      const result = await customFetch<DetailResponse>(`/api/repo-finisher/completion-sessions/${sessionId}`, { responseType: "json" });
+      const result = await fetchSession(sessionId);
       setDetail(result);
       return result;
     } finally {
       if (!quiet) setBusy(null);
     }
-  }, []);
+  }, [fetchSession]);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,17 +85,16 @@ export function FinishUntilTargetControl({
       .then(async (sessions) => {
         if (cancelled || !Array.isArray(sessions) || sessions.length === 0) return;
         const recent = sessions.find((candidate) => candidate.status === "active") ?? sessions[0];
-        const loaded = await load(recent.id, true);
-        if (!cancelled) {
-          setDetail(loaded);
-          if (loaded.session.status === "active") setExpanded(true);
-        }
+        const loaded = await fetchSession(recent.id);
+        if (cancelled) return;
+        setDetail(loaded);
+        if (loaded.session.status === "active") setExpanded(true);
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [load, repo]);
+  }, [analysisId, fetchSession, repo]);
 
   useEffect(() => {
     const session = detail?.session;
@@ -217,6 +220,12 @@ export function FinishUntilTargetControl({
               {busy === "refresh" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Refresh
             </Button>
             {!terminal && <Button size="sm" variant="outline" className="gap-2" onClick={cancel} disabled={busy !== null}><Square className="h-3.5 w-3.5" /> Stop safely</Button>}
+            {terminal && (
+              <Button size="sm" variant="outline" className="gap-2" onClick={start} disabled={busy !== null}>
+                {busy === "create" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                Start another session
+              </Button>
+            )}
             {session.pr_url && <a href={session.pr_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm text-blue-500 hover:underline">Open draft PR <ExternalLink className="h-3 w-3" /></a>}
           </div>
         </div>

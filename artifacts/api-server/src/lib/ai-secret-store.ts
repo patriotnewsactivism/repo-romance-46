@@ -1,6 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { DEFAULT_AI_MODELS } from "./ai-model-config";
 
-const SUPPORTED_PROVIDERS = new Set(["google", "openai", "anthropic", "openrouter"]);
+/**
+ * Derived from the canonical provider map rather than duplicated. A hardcoded
+ * copy here silently rejected a newly added provider before its Vault write
+ * could reach the database, so adding a provider had to be remembered in four
+ * separate places. Now it is one.
+ */
+const SUPPORTED_PROVIDERS = new Set<string>(Object.keys(DEFAULT_AI_MODELS));
 
 function normalizeSecretId(value: unknown): string | null {
   return typeof value === "string" && /^[0-9a-f-]{36}$/i.test(value) ? value : null;

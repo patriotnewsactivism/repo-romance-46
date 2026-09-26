@@ -195,8 +195,10 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
     customFetch<Array<{ id: string }>>(`/api/repo-finisher/runs?${params.toString()}`, { responseType: "json" })
       .then(async (runs) => {
         if (cancelled || !Array.isArray(runs) || runs.length === 0) return;
-        const loaded = await loadRun(runs[0].id);
-        if (!cancelled) setShowPlan(Boolean(loaded.run.summary));
+        const loaded = await fetchRun(runs[0].id);
+        if (cancelled) return;
+        setDetail(loaded);
+        setShowPlan(Boolean(loaded.run.summary));
       })
       .catch(() => undefined);
 
@@ -229,7 +231,7 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
     return () => {
       cancelled = true;
     };
-  }, [analysisId, loadRun, repo]);
+  }, [analysisId, fetchRun, repo]);
 
   useEffect(() => {
     if (!runId || (status !== "executing" && status !== "verifying" && status !== "repairing")) return;
@@ -308,12 +310,15 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
     }
   };
 
+  const approvalRunId = preview?.runId ?? (status === "awaiting_approval" ? detail?.run.id ?? null : null);
+  const approvalPlanHash = preview?.planHash ?? (status === "awaiting_approval" ? detail?.run.planHash ?? null : null);
+
   const handleApprove = async () => {
-    if (!preview) return;
+    if (!approvalRunId || !approvalPlanHash) return;
     setBusy("approve");
     try {
-      await postJson(`/api/repo-finisher/runs/${preview.runId}/approve`, { planHash: preview.planHash });
-      await loadRun(preview.runId);
+      await postJson(`/api/repo-finisher/runs/${approvalRunId}/approve`, { planHash: approvalPlanHash });
+      await loadRun(approvalRunId);
       toast.success("Exact plan approved. You can resume execution.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message.slice(0, 240) : "Unable to approve plan.");
@@ -523,7 +528,7 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
             </div>
           )}
 
-          {status === "awaiting_approval" && preview && busy === null && (
+          {status === "awaiting_approval" && approvalRunId && approvalPlanHash && busy === null && (
             <div className="flex flex-wrap gap-2">
               <Button onClick={handleApprove} size="sm" className="gap-2">
                 <ShieldCheck className="h-4 w-4" /> Resume approval

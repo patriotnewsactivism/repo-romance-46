@@ -141,6 +141,25 @@ export function isSystemicProviderError(error: unknown): boolean {
   );
 }
 
+/** Reserve in-flight sessions against the concurrency cap before launching another wave. */
+export function portfolioLaunchSlots(concurrency: number, inFlight: number, active: number) {
+  const slots = Math.max(0, concurrency - inFlight);
+  const queuedRemaining = active - inFlight;
+  return {
+    slots,
+    wait: slots === 0 && queuedRemaining > 0,
+    stop: slots === 0 && queuedRemaining <= 0,
+  };
+}
+
+/** A succeeded session's stop_reason is completion text, not an item error. */
+export function portfolioItemDisplayedError(
+  itemError: string | null | undefined,
+  session: { status?: unknown; stop_reason?: unknown } | null | undefined,
+): string | null {
+  return itemError ?? (session && session.status !== "succeeded" && session.stop_reason ? String(session.stop_reason) : null);
+}
+
 async function recordCompletionEvent(
   supabase: SupabaseClient,
   userId: string,
@@ -308,7 +327,7 @@ async function processPortfolioItem(
       .update({
         status: nextStatus,
         completion_session_id: sessionId,
-        error: started.alreadyComplete ? String(started.session.stop_reason ?? null) : null,
+        error: null,
         completed_at: started.alreadyComplete ? now : null,
         updated_at: now,
       })
@@ -492,7 +511,8 @@ async function refreshPortfolioSummary(
   const failed = count("failed");
   const verifying = count("verifying");
   const skipped = count("skipped") + count("cancelled");
-  const active = count("queued") + count("planning") + count("executing");
+  const inFlight = count("planning") + count("executing");
+  const active = count("queued") + inFlight;
   const terminal = active === 0 && verifying === 0;
 
   let status: PortfolioStatus = portfolioRun.status;
@@ -526,7 +546,7 @@ async function refreshPortfolioSummary(
     .eq("user_id", userId);
   if (updateError) throw new Error(`Failed to update portfolio completion summary: ${updateError.message}`);
 
-  return { status, succeeded, failed, verifying, skipped, active, terminal };
+  return { status, succeeded, failed, verifying, skipped, active, inFlight, terminal };
 }
 
 async function claimWorkerLease(supabase: SupabaseClient, userId: string, runId: string) {
@@ -571,6 +591,7 @@ async function processPortfolioRun(supabase: SupabaseClient, userId: string, run
       if (portfolioRun.status === "cancelled") break;
 
       await pollVerifyingItems(supabase, userId, portfolioRun);
+      await pollSessionItems(supabase, userId, portfolioRun);
       const summary = await refreshPortfolioSummary(supabase, userId, portfolioRun);
       if (summary.terminal) break;
 
@@ -586,6 +607,14 @@ async function processPortfolioRun(supabase: SupabaseClient, userId: string, run
         break;
       }
 
+      const launch = portfolioLaunchSlots(portfolioRun.concurrency, summary.inFlight, summary.active);
+      if (launch.stop) break;
+      if (launch.wait) {
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        continue;
+      }
+      const slots = launch.slots;
+
       const { data: queued, error: queuedError } = await supabase
         .from("portfolio_completion_items")
         .select("*")
@@ -593,7 +622,7 @@ async function processPortfolioRun(supabase: SupabaseClient, userId: string, run
         .eq("user_id", userId)
         .eq("status", "queued")
         .order("rank", { ascending: true })
-        .limit(portfolioRun.concurrency);
+        .limit(slots);
       if (queuedError) throw new Error(`Failed to load queued portfolio work: ${queuedError.message}`);
       const wave = (queued ?? []) as PortfolioItemRow[];
       if (wave.length === 0) break;
@@ -733,7 +762,8 @@ async function portfolioRunResponse(supabase: SupabaseClient, userId: string, ru
         status: item.status,
         estimatedHours: item.estimated_hours,
         estimatedCostUsd: item.estimated_cost_usd,
-        error: item.error ?? (session?.stop_reason ? String(session.stop_reason) : null),
+        error: portfolioItemDisplayedError(item.error, session),
+        stopReason: session?.stop_reason ? String(session.stop_reason) : null,
         completionRunId: item.completion_run_id,
         completionSessionId: item.completion_session_id ?? null,
         prNumber: completion?.pr_number ?? session?.pr_number ?? null,

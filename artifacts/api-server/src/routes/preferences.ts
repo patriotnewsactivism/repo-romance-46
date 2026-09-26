@@ -7,6 +7,7 @@ import {
   loadAiCredential,
   loadStoredAiProviderSecretId,
   normalizeAiProvider,
+  normalizeSavedAiModel,
   platformAiKey,
   platformAiProvider,
   platformAiStatus,
@@ -24,11 +25,11 @@ import {
   OPENROUTER_REASONING_EFFORTS,
 } from "../lib/openrouter-models";
 import { marketResearchConfigured } from "../lib/tavily-market-research";
-import { cloudRunJobsEnabled } from "../lib/cloud-run-jobs";
+import { configuredCompletionWorker } from "../lib/completion-session-scheduler";
 import { OPENROUTER_FREE_AGENT_POOL_MODEL } from "../lib/ai-model-config";
 
 const router: IRouter = Router();
-const AI_PROVIDERS = ["google", "openai", "anthropic", "openrouter"] as const;
+const AI_PROVIDERS = ["google", "openai", "anthropic", "openrouter", "qwen"] as const;
 type AiProvider = (typeof AI_PROVIDERS)[number];
 
 const READABLE_COLUMNS = [
@@ -94,7 +95,7 @@ type ProviderCredentialRow = {
 type StoredKeyMap = Record<AiProvider, boolean>;
 
 function emptyStoredKeyMap(): StoredKeyMap {
-  return { google: false, openai: false, anthropic: false, openrouter: false };
+  return { google: false, openai: false, anthropic: false, openrouter: false, qwen: false };
 }
 
 async function readPreferences(req: Parameters<typeof requireAuth>[0]): Promise<PreferenceRow | null> {
@@ -197,8 +198,17 @@ async function storedProviderKey(
 function toClientShape(row: PreferenceRow | null, storedKeySet = false): PreferenceRow {
   if (!row) return { custom_ai_key_set: storedKeySet };
   const { custom_ai_key, custom_ai_vault_secret_id, ...rest } = row;
+  const provider = normalizeAiProvider(
+    row.custom_ai_provider as string | null | undefined,
+    platformAiProvider(),
+  );
+  const normalizedModel = normalizeSavedAiModel(
+    provider,
+    row.custom_ai_model as string | null | undefined,
+  );
   return {
     ...rest,
+    custom_ai_model: normalizedModel,
     custom_ai_key_set: storedKeySet || Boolean(custom_ai_vault_secret_id || custom_ai_key),
   };
 }
@@ -260,12 +270,12 @@ async function aiStatus(supabase: NonNullable<Parameters<typeof loadAiCredential
     stored_key_set: keys[requestedProvider],
     stored_keys: keys,
     requested_provider: raw?.custom_ai_provider ?? platform.defaultProvider,
-    requested_model: raw?.custom_ai_model ?? null,
+    requested_model: normalizeSavedAiModel(requestedProvider, raw?.custom_ai_model) ?? null,
     requested_reasoning_effort: raw?.custom_ai_reasoning_effort ?? null,
     platform_default: platform.defaultProvider,
     providers: platform.providers,
     live_research_configured: marketResearchConfigured(),
-    completion_worker: cloudRunJobsEnabled() ? "cloud-run-job" : "in-process",
+    completion_worker: configuredCompletionWorker(),
     free_agent_pool: credential.provider === "openrouter" && credential.model === OPENROUTER_FREE_AGENT_POOL_MODEL,
   };
 }
@@ -415,10 +425,13 @@ router.post(
 
       if (!response.content.trim()) throw new Error("AI provider returned an empty readiness response");
 
+      const servedModel = response.model || credential.model;
       res.json({
         ok: true,
         provider: credential.provider,
-        model: credential.model,
+        model: servedModel,
+        requested_model: credential.model,
+        fallback_used: Boolean(servedModel && credential.model && servedModel !== credential.model),
         credential_source: credential.source,
         latency_ms: Date.now() - started,
       });

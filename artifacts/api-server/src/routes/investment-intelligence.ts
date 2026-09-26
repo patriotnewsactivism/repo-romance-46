@@ -26,6 +26,7 @@ import { type AIProviderConfig } from "../lib/ai-provider";
 import { callAIJson } from "../lib/call-ai-json";
 import { loadAiCredential, loadGithubCredential, requireGithubCredential, toAiProviderConfig } from "../lib/credentials";
 import { recordRepoLearning } from "../lib/adaptive-learning";
+import { acceptanceVerifiedAt } from "../lib/post-run-evolution";
 
 const router: IRouter = Router();
 const GH_API = "https://api.github.com";
@@ -72,6 +73,37 @@ interface CompetitionResult {
   query: string;
   totalCount: number;
   competitors: CompetitionRepo[];
+}
+
+const SCENARIO_NAMES = new Set(["conservative", "base", "strong-execution"]);
+
+export function isScenarioInput(value: unknown): value is ScenarioInput {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.name === "string" &&
+    SCENARIO_NAMES.has(row.name) &&
+    Number.isInteger(row.customers) &&
+    (row.customers as number) >= 0 &&
+    typeof row.arpuMonthlyUsd === "number" &&
+    Number.isFinite(row.arpuMonthlyUsd) &&
+    row.arpuMonthlyUsd >= 0 &&
+    typeof row.grossMarginPct === "number" &&
+    Number.isFinite(row.grossMarginPct) &&
+    row.grossMarginPct >= 0 &&
+    row.grossMarginPct <= 100 &&
+    typeof row.probability === "number" &&
+    Number.isFinite(row.probability) &&
+    row.probability >= 0 &&
+    row.probability <= 1 &&
+    Array.isArray(row.assumptions) &&
+    row.assumptions.every((item) => typeof item === "string")
+  );
+}
+
+/** Reject the whole market model when any scenario is missing or malformed. */
+export function hasValidMarketScenarios(scenarios: unknown): scenarios is ScenarioInput[] {
+  return Array.isArray(scenarios) && scenarios.length >= 3 && scenarios.every(isScenarioInput);
 }
 
 interface MarketModel {
@@ -197,7 +229,10 @@ async function fetchAcceptanceEvidence(token: string, repo: string, headSha: str
       );
     let deploymentSucceeded: boolean | undefined;
     try {
-      const { data: deployments } = await ghJson<Array<{ id: number }>>(token, `/repos/${repo}/deployments?per_page=1`);
+      const { data: deployments } = await ghJson<Array<{ id: number }>>(
+        token,
+        `/repos/${repo}/deployments?sha=${encodeURIComponent(headSha)}&per_page=1`,
+      );
       const latest = deployments[0];
       if (latest) {
         const { data: statuses } = await ghJson<Array<{ state: string }>>(token, `/repos/${repo}/deployments/${latest.id}/statuses?per_page=5`);
@@ -212,7 +247,7 @@ async function fetchAcceptanceEvidence(token: string, repo: string, headSha: str
       testsPassed: passed(/test|ci|verify/i),
       securityBlockersResolved: passed(/security|codeql|sast|dependency/i) || undefined,
       deploymentSucceeded,
-      verifiedAt: checks.length > 0 || deploymentSucceeded ? new Date().toISOString() : undefined,
+      verifiedAt: acceptanceVerifiedAt(checks, deploymentSucceeded),
     };
   } catch {
     return {};
@@ -494,7 +529,7 @@ Return strict JSON only.`;
         if (!value || typeof value !== "object") return null;
         const row = value as MarketModel;
         if (!Number.isFinite(row.market_need_score) || !Number.isFinite(row.demand_score) || !row.market_summary) return null;
-        if (!Array.isArray(row.scenarios) || row.scenarios.length < 3) return null;
+        if (!hasValidMarketScenarios(row.scenarios)) return null;
         return row;
       },
     );

@@ -32,7 +32,7 @@ import {
 import { toast } from 'sonner';
 
 type CredentialSource = 'byok' | 'platform' | 'none';
-type AiProvider = 'google' | 'openai' | 'anthropic' | 'openrouter';
+type AiProvider = 'google' | 'openai' | 'anthropic' | 'openrouter' | 'qwen';
 
 interface AiProviderStatus {
   active_provider: string;
@@ -49,9 +49,10 @@ interface AiProviderStatus {
     openai: { platformConfigured: boolean };
     anthropic: { platformConfigured: boolean };
     openrouter: { platformConfigured: boolean };
+    qwen: { platformConfigured: boolean };
   };
   live_research_configured?: boolean;
-  completion_worker?: "cloud-run-job" | "in-process";
+  completion_worker?: "railway-worker" | "cloud-run-job" | "in-process";
   free_agent_pool?: boolean;
 }
 
@@ -72,6 +73,7 @@ function normalizeProvider(provider: string | null | undefined): AiProvider {
     case 'openai': return 'openai';
     case 'anthropic': return 'anthropic';
     case 'openrouter': return 'openrouter';
+    case 'qwen': return 'qwen';
     case 'google':
     default:
       return 'google';
@@ -84,6 +86,7 @@ function providerLabel(provider: string) {
     case 'openai': return 'OpenAI';
     case 'anthropic': return 'Anthropic';
     case 'openrouter': return 'OpenRouter';
+    case 'qwen': return 'Qwen (Alibaba Model Studio)';
     default: return provider || 'AI provider';
   }
 }
@@ -99,6 +102,7 @@ function credentialLabel(source: CredentialSource) {
 function modelPlaceholder(provider: AiProvider) {
   switch (provider) {
     case 'openrouter': return 'openrouter/auto or provider/model-slug';
+    case 'qwen': return 'qwen-plus (leave blank for default)';
     case 'google': return 'gemini-3.8-flash (leave blank for default)';
     case 'openai': return 'Leave blank for platform default';
     case 'anthropic': return 'Leave blank for platform default';
@@ -164,6 +168,11 @@ const MODEL_CATALOG: Record<AiProvider, Array<{ id: string; label: string; detai
   anthropic: [
     { id: 'claude-opus-4.1', label: 'Claude Opus 4.1', detail: 'Premium architecture and code review' },
     { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', detail: 'Balanced implementation and review' },
+  ],
+  qwen: [
+    { id: 'qwen-plus', label: 'Qwen Plus', detail: 'Recommended: alias tracking the current stable Plus model, so it never pins an aging version' },
+    { id: 'qwen-max', label: 'Qwen Max', detail: 'Highest-capability Qwen tier for architecture and review' },
+    { id: 'qwen-turbo', label: 'Qwen Turbo', detail: 'Fast, economical tier for routine analysis' },
   ],
 };
 
@@ -384,6 +393,11 @@ export default function Settings() {
     }
   };
 
+  const handleSignOut = async () => {
+    await signOut();
+    setLocation('/auth');
+  };
+
   const handleDisconnect = async () => {
     if (!confirm('Disconnect GitHub? This will sign you out.')) return;
 
@@ -485,6 +499,7 @@ export default function Settings() {
           displayName: githubStatus.displayName,
           avatarUrl: githubStatus.avatarUrl,
         } : null}
+        onSignOut={() => void handleSignOut()}
       />
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
@@ -581,6 +596,7 @@ export default function Settings() {
                     <SelectItem value="openrouter">OpenRouter</SelectItem>
                     <SelectItem value="openai">OpenAI</SelectItem>
                     <SelectItem value="anthropic">Anthropic</SelectItem>
+                    <SelectItem value="qwen">Qwen (Alibaba Model Studio)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -841,9 +857,9 @@ export default function Settings() {
               {aiStatus && (
                 <div className="rounded-md border p-3 text-xs text-muted-foreground space-y-1">
                   <div className="font-medium text-foreground text-sm">System status</div>
-                  <p>Live competitor research: {aiStatus.live_research_configured ? 'configured (Tavily on the API)' : 'unavailable — named competitors stay empty until a backend research key is set'}</p>
-                  <p>Completion worker: {aiStatus.completion_worker === 'cloud-run-job' ? 'Cloud Run Job' : 'in-process fallback (local/dev)'}</p>
-                  <p>Free agent pool: {aiStatus.free_agent_pool ? 'active for this saved model' : 'off — the saved model is pinned'}</p>
+                  <p>Live competitor research: {aiStatus.live_research_configured === undefined ? 'unknown' : aiStatus.live_research_configured ? 'configured (Tavily on the API)' : 'unavailable — named competitors stay empty until a backend research key is set'}</p>
+                  <p>Completion worker: {aiStatus.completion_worker === undefined ? 'unknown' : aiStatus.completion_worker === 'railway-worker' ? 'Railway worker' : aiStatus.completion_worker === 'cloud-run-job' ? 'Cloud Run Job' : 'in-process fallback (local/dev)'}</p>
+                  <p>Free agent pool: {aiStatus.free_agent_pool === undefined ? 'unknown' : aiStatus.free_agent_pool ? 'active for this saved model' : 'off — the saved model is pinned'}</p>
                 </div>
               )}
             </div>

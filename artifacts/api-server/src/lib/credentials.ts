@@ -73,7 +73,7 @@ export interface AiCredential {
   reasoningEffort: OpenRouterReasoningEffort | null;
 }
 
-export const SUPPORTED_AI_PROVIDERS = ["google", "openai", "anthropic", "openrouter"] as const;
+export const SUPPORTED_AI_PROVIDERS = ["google", "openai", "anthropic", "openrouter", "qwen"] as const;
 export type SupportedAiProvider = (typeof SUPPORTED_AI_PROVIDERS)[number];
 const SUPPORTED_PLATFORM_PROVIDERS = new Set<string>(SUPPORTED_AI_PROVIDERS);
 
@@ -101,6 +101,7 @@ export function platformAiProvider(): string {
   if (platformAiKey("google")) return "google";
   if (platformAiKey("openai")) return "openai";
   if (platformAiKey("anthropic")) return "anthropic";
+  if (platformAiKey("qwen")) return "qwen";
 
   return configured || "openrouter";
 }
@@ -134,6 +135,13 @@ export function platformAiKey(provider: string): string | null {
         normalizeCredentialValue(process.env.OPENROUTER_API_KEY_2) ??
         normalizeCredentialValue(process.env.OPENROUTER_API_KEY)
       );
+    case "qwen":
+      // DASHSCOPE_API_KEY is Alibaba's own conventional name for the same
+      // credential, so accept either rather than making operators duplicate it.
+      return (
+        normalizeCredentialValue(process.env.QWEN_API_KEY) ??
+        normalizeCredentialValue(process.env.DASHSCOPE_API_KEY)
+      );
     default:
       return null;
   }
@@ -152,6 +160,22 @@ export function platformAiModel(provider: string): string | null {
   return defaultAiModel(provider);
 }
 
+const SAVED_MODEL_MIGRATIONS: Record<string, Record<string, string>> = {
+  openrouter: {
+    "~deepseek/deepseek-pro-latest": "z-ai/glm-5.3-flashx",
+  },
+};
+
+/**
+ * Apply explicit operator-approved model migrations to persisted user choices.
+ * This never changes credentials and never substitutes arbitrary models.
+ */
+export function normalizeSavedAiModel(provider: string, model: string | null | undefined): string | null {
+  const trimmed = typeof model === "string" ? model.trim() : "";
+  if (!trimmed) return null;
+  return SAVED_MODEL_MIGRATIONS[provider]?.[trimmed] ?? trimmed;
+}
+
 /** Safe platform readiness metadata. Never includes credential values. */
 export function platformAiStatus() {
   return {
@@ -161,6 +185,7 @@ export function platformAiStatus() {
       openai: { platformConfigured: Boolean(platformAiKey("openai")) },
       anthropic: { platformConfigured: Boolean(platformAiKey("anthropic")) },
       openrouter: { platformConfigured: Boolean(platformAiKey("openrouter")) },
+      qwen: { platformConfigured: Boolean(platformAiKey("qwen")) },
     },
   };
 }
@@ -235,7 +260,27 @@ export async function loadAiCredential(
 
   const fallbackProvider = platformAiProvider();
   const provider = normalizeAiProvider(row?.custom_ai_provider, fallbackProvider);
-  const model = row?.custom_ai_model?.trim() || platformAiModel(provider);
+  const savedModel = row?.custom_ai_model?.trim() || null;
+  const normalizedSavedModel = normalizeSavedAiModel(provider, savedModel);
+  const model = normalizedSavedModel || platformAiModel(provider);
+
+  if (savedModel && normalizedSavedModel && normalizedSavedModel !== savedModel) {
+    // Persist the operator-approved migration with the same authenticated
+    // Supabase client. A transient RLS/network failure must not block the
+    // current request: the migrated model is already used in-memory.
+    try {
+      const { error: migrationError } = await supabase
+        .from("user_preferences")
+        .update({ custom_ai_model: normalizedSavedModel, updated_at: new Date().toISOString() })
+        .eq("user_id", userId);
+      if (migrationError) {
+        console.warn("[ai-settings] Could not persist model migration:", migrationError.message);
+      }
+    } catch {
+      // The in-memory selection is already migrated for this request.
+    }
+  }
+
   const reasoningEffort = provider === "openrouter"
     ? normalizeOpenRouterReasoningEffort(row?.custom_ai_reasoning_effort)
     : null;
