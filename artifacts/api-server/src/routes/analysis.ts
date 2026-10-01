@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
 import { loadAiCredential, loadGithubCredential, normalizeAiProvider, requireGithubCredential } from "../lib/credentials";
+import { assertAiReady } from "../lib/ai-preflight";
 import { defaultAiModel } from "../lib/ai-model-config";
 import { callAIJson, validateWithZod } from "../lib/call-ai-json";
 import { runInBackground } from "../lib/background-tasks";
@@ -1631,6 +1632,7 @@ async function getAnalysisContext(supabase: SupabaseClient, userId: string, trig
 
   const noopProgress: ProgressFn = async () => {};
   const aiCredential = await loadAiCredential(supabase, userId, credential.token);
+  await assertAiReady(aiCredential);
   const normalizedPrefs: AnalysisContext["prefs"] = {
     custom_ai_provider: aiCredential.provider,
     // loadAiCredential already resolved the user's saved model, falling back to
@@ -1874,6 +1876,7 @@ export async function runActionPlanJob(supabase: SupabaseClient, analysisId: str
 
     const githubCredential = await loadGithubCredential(supabase, userId);
     const aiConfig = await loadAiCredential(supabase, userId, githubCredential?.token ?? null);
+    await assertAiReady(aiConfig);
 
     const recsText = items
       .map(
@@ -2175,6 +2178,7 @@ router.post(
 
     const githubCredential = await loadGithubCredential(req.supabase!, userId);
     const aiConfig = await loadAiCredential(req.supabase!, userId, githubCredential?.token ?? null);
+    await assertAiReady(aiConfig);
 
     const repos = (item.repos as string[]) || [];
     const techStack = (item.tech_stack as string[]) || [];
