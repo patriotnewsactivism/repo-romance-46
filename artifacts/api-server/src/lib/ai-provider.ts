@@ -38,13 +38,18 @@ export interface AIResponse {
 // GLM 5.2 Free were removed from OpenRouter and must never be silently replaced
 // with their paid slugs. OpenRouter accepts at most three fallback models per
 // request, so this six-model free roster becomes two native fallback batches.
+// 2026-10-01: nex-agi/nex-n2.5-mini:free and nex-n2.5-pro:free were removed from
+// OpenRouter's catalog. The first slug is kept ONLY as the pool sentinel (the
+// saved/default model that opts into pooling); OpenRouter skips a retired first
+// model and serves from the next one in `models`. The pro slot is replaced with
+// a live free model verified by a real completion on 2026-10-01.
 export const OPENROUTER_FREE_AGENT_CHAIN = [
   "nex-agi/nex-n2.5-mini:free",
   "nvidia/nemotron-3-super-120b-a12b:free",
-  "poolside/laguna-s-2.1:free",
-  "nex-agi/nex-n2.5-pro:free",
-  "nvidia/nemotron-3.5-lightning:free",
+  "qwen/qwen3.8-27b:free",
   "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "nvidia/nemotron-3.5-lightning:free",
+  "poolside/laguna-s-2.1:free",
 ] as const;
 
 // Explicitly authorized paid continuity tail. GPT-OSS is deliberately first as
