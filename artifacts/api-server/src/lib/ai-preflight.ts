@@ -1,4 +1,4 @@
-import { callAI, type AIProviderConfig } from "./ai-provider";
+import { callAI, type AIProviderConfig, type AIResponse } from "./ai-provider";
 
 const PREFLIGHT_TIMEOUT_MS = 20_000;
 // Free OpenRouter models stall in bursts (a healthy model can take 1s, then 40s
@@ -58,7 +58,7 @@ export function describePreflightFailure(
  * surfacing as a 60s/1830s timeout or "all batches failed" deep in the run.
  * Throws a 422 with a public message; resolves silently when the model answers.
  */
-export async function assertAiReady(config: AIProviderConfig): Promise<void> {
+export async function assertAiReady(config: AIProviderConfig): Promise<AIResponse> {
   const provider = config.provider || "openrouter";
   if (!config.apiKey || !String(config.apiKey).trim()) {
     const message = `No usable ${provider} key is configured. Save one in Settings or switch provider.`;
@@ -92,14 +92,15 @@ export async function assertAiReady(config: AIProviderConfig): Promise<void> {
       ),
     ]);
     if (!response.content.trim()) throw new Error("empty readiness response");
+    return response;
   };
 
   try {
     try {
-      await attempt(PREFLIGHT_TIMEOUT_MS);
+      return await attempt(PREFLIGHT_TIMEOUT_MS);
     } catch (first) {
       if (!isTransientFreeFailure(config.model, first)) throw first;
-      await attempt(PREFLIGHT_FREE_RETRY_TIMEOUT_MS);
+      return await attempt(PREFLIGHT_FREE_RETRY_TIMEOUT_MS);
     }
   } catch (error) {
     const message = describePreflightFailure(

@@ -17,7 +17,7 @@ import {
   readAiVaultSecret,
   storeAiVaultSecret,
 } from "../lib/ai-secret-store";
-import { callAI } from "../lib/ai-provider";
+import { assertAiReady } from "../lib/ai-preflight";
 import { captureException } from "../instrument";
 import {
   fetchOpenRouterModels,
@@ -408,22 +408,10 @@ router.post(
 
     const started = Date.now();
     try {
-      const response = await Promise.race([
-        callAI(
-          {
-            messages: [
-              { role: "system", content: "Return exactly the word ready." },
-              { role: "user", content: "Provider readiness check." },
-            ],
-          },
-          credential,
-        ),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("AI provider test timed out after 20 seconds")), 20_000),
-        ),
-      ]);
-
-      if (!response.content.trim()) throw new Error("AI provider returned an empty readiness response");
+      // Same probe the Start Analysis button uses: fail-fast, and one patient
+      // retry for :free models that stall in bursts. Keeping a single
+      // implementation means the Test button can never disagree with the run.
+      const response = await assertAiReady(credential);
 
       const servedModel = response.model || credential.model;
       res.json({
@@ -439,7 +427,9 @@ router.post(
       captureException(error, {
         tags: { subsystem: "ai-provider-test", provider: credential.provider },
       });
-      throw Object.assign(new Error(providerTestMessage(error)), { status: 422 });
+      const publicMessage =
+        (error as { publicMessage?: string }).publicMessage ?? providerTestMessage(error);
+      throw Object.assign(new Error(publicMessage), { status: 422 });
     }
   }),
 );

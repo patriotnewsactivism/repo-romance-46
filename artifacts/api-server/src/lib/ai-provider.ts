@@ -144,6 +144,29 @@ function providerDisplayName(provider: string) {
   return provider;
 }
 
+/**
+ * OpenRouter reports upstream failures (e.g. "Service temporarily overloaded")
+ * as HTTP 200 with an `error` object and no choices. Treating that as a normal
+ * empty completion hides the real cause and defeats retry/fallback logic, so
+ * surface it as a 429-class error carrying the provider's own message.
+ */
+export function throwIfErrorBody(
+  provider: string,
+  model: string,
+  json: { error?: { message?: string; code?: number | string } | null; choices?: unknown[] },
+): void {
+  const err = json?.error;
+  if (!err || (Array.isArray(json.choices) && json.choices.length > 0)) return;
+  const message = typeof err.message === "string" ? err.message : "Provider returned an error body";
+  const transient = /overload|temporar|rate|capacity|unavailable|busy|try again/i.test(message);
+  throw providerRequestError(
+    provider,
+    model,
+    transient ? 429 : Number(err.code) || 502,
+    JSON.stringify({ error: { message } }),
+  );
+}
+
 export function providerRequestError(provider: string, model: string, status: number, detail: string): PublicHttpError {
   const display = providerDisplayName(provider);
 
@@ -553,8 +576,10 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
 
         const json = (await res.json()) as {
           model?: string;
+          error?: { message?: string; code?: number | string } | null;
           choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
         };
+        throwIfErrorBody(provider, group[0], json);
         const raw = json.choices?.[0]?.message?.content;
         if (typeof raw === "string") return { content: raw, model: json.model };
         if (Array.isArray(raw)) return { content: raw.map((part) => part.text || "").join(""), model: json.model };
@@ -603,8 +628,10 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
 
     const json = (await res.json()) as {
       model?: string;
+      error?: { message?: string; code?: number | string } | null;
       choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
     };
+    throwIfErrorBody(provider, model, json);
     const raw = json.choices?.[0]?.message?.content;
     if (typeof raw === "string") return { content: raw, model: json.model };
     if (Array.isArray(raw)) return { content: raw.map((part) => part.text || "").join(""), model: json.model };
