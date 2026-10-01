@@ -166,3 +166,36 @@ describe("loadAiCredential slash-model routing", () => {
     expect(cred.apiKey).toBe("q-key");
   });
 });
+
+describe("assertAiReady free-model retry", () => {
+  afterEach(() => vi.restoreAllMocks());
+  const free = { provider: "openrouter", apiKey: "k", model: "nvidia/x:free" } as never;
+  const paid = { provider: "openrouter", apiKey: "k", model: "z-ai/paid" } as never;
+
+  it("recovers when a free model stalls once then answers", async () => {
+    const spy = vi
+      .spyOn(provider, "callAI")
+      .mockRejectedValueOnce(new Error("OpenRouter request exceeded 45s"))
+      .mockResolvedValueOnce({ content: "ready" } as never);
+    await expect(assertAiReady(free)).resolves.toBeUndefined();
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a paid model on a transient failure", async () => {
+    const spy = vi.spyOn(provider, "callAI").mockRejectedValue(new Error("429 rate limit"));
+    await expect(assertAiReady(paid)).rejects.toMatchObject({ status: 422 });
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("never retries a rejected key, even on a free model", async () => {
+    const spy = vi.spyOn(provider, "callAI").mockRejectedValue(new Error("401 Missing Authentication header"));
+    await expect(assertAiReady(free)).rejects.toMatchObject({ status: 422, publicMessage: expect.stringMatching(/key was rejected/) });
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails with a clear message after both free attempts stall", async () => {
+    const spy = vi.spyOn(provider, "callAI").mockRejectedValue(new Error("OpenRouter request exceeded 45s"));
+    await expect(assertAiReady(free)).rejects.toMatchObject({ status: 422 });
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+});
