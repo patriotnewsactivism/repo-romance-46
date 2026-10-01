@@ -25,6 +25,12 @@ export interface AIRequest {
   thinkingLevel?: "low" | "medium" | "high";
   /** Optional hard network timeout for a single provider attempt. */
   timeoutMs?: number;
+  /**
+   * Optional cap on transient-failure (429/5xx) retries. Interactive callers
+   * such as the readiness check set 0 so a rate-limited provider fails in
+   * seconds instead of blocking the request through MAX_RETRIES backoffs.
+   */
+  retryBudget?: number;
 }
 
 export interface AIResponse {
@@ -358,6 +364,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       { method: "POST", headers, body: JSON.stringify(body) },
       "anthropic",
       requestTimeoutMs,
+      request.retryBudget,
     );
 
     if (!res.ok) {
@@ -406,6 +413,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       },
       "google",
       requestTimeoutMs,
+      request.retryBudget,
     );
 
     if (!res.ok) {
@@ -585,6 +593,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       { method: "POST", headers, body: JSON.stringify(body) },
       provider,
       requestTimeoutMs,
+      request.retryBudget,
     );
 
     if (!res.ok) {

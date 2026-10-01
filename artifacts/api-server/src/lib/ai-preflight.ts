@@ -77,6 +77,10 @@ export async function assertAiReady(config: AIProviderConfig): Promise<void> {
             { role: "system", content: "Return exactly the word ready." },
             { role: "user", content: "Readiness check." },
           ],
+          // Fail fast: a rate-limited provider must not hold the HTTP request
+          // through the generic 4x backoff loop. The free-model retry below
+          // is the only deliberate second attempt.
+          retryBudget: 0,
         },
         config,
       ),

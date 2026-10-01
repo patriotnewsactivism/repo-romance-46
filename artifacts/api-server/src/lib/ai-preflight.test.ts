@@ -199,3 +199,28 @@ describe("assertAiReady free-model retry", () => {
     expect(spy).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("callAI retryBudget on a pinned model", () => {
+  afterEach(() => vi.restoreAllMocks());
+  const cfg = { provider: "openrouter", apiKey: "k", model: "nvidia/x:free" } as never;
+  const msgs = [{ role: "user", content: "hi" }];
+
+  it("makes exactly one HTTP attempt when retryBudget is 0 and the provider returns 429", async () => {
+    const f = vi.fn().mockResolvedValue(new Response("rate limited", { status: 429 }));
+    vi.stubGlobal("fetch", f);
+    await expect(provider.callAI({ messages: msgs, retryBudget: 0 }, cfg)).rejects.toBeTruthy();
+    expect(f).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it("the readiness check never spends the 4x backoff loop on a rate-limited pinned free model", async () => {
+    const f = vi.fn().mockResolvedValue(new Response("rate limited", { status: 429 }));
+    vi.stubGlobal("fetch", f);
+    const t = Date.now();
+    await expect(assertAiReady(cfg)).rejects.toMatchObject({ status: 422 });
+    // 2 attempts (initial + one deliberate free retry), 0 inner retries each.
+    expect(f).toHaveBeenCalledTimes(2);
+    expect(Date.now() - t).toBeLessThan(5000);
+    vi.unstubAllGlobals();
+  });
+});
