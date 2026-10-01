@@ -328,5 +328,46 @@ export async function loadAiCredential(
   const platformKey = platformAiKey(provider);
   if (platformKey) return { provider, model, apiKey: platformKey, source: "platform", reasoningEffort };
 
+  // "Just type the model name": a vendor-prefixed slug such as
+  // `qwen/qwen3.8-max-prime` is an OpenRouter identifier. When the selected
+  // provider has no usable key, reroute to OpenRouter if it does, instead of
+  // starting a long job that is guaranteed to fail on the first call.
+  const rerouted = await rerouteSlashModelToOpenRouter(supabase, userId, provider, model);
+  if (rerouted) return rerouted;
+
   return { provider, model, apiKey: null, source: "none", reasoningEffort };
+}
+
+/** True for OpenRouter-style `vendor/model` slugs. */
+export function isVendorSlashModel(model: string | null | undefined): boolean {
+  const trimmed = typeof model === "string" ? model.trim() : "";
+  return /^[^/\s]+\/[^/\s]+/.test(trimmed);
+}
+
+async function rerouteSlashModelToOpenRouter(
+  supabase: SupabaseClient,
+  userId: string,
+  provider: string,
+  model: string | null,
+): Promise<AiCredential | null> {
+  if (provider === "openrouter" || !isVendorSlashModel(model)) return null;
+
+  let key: string | null = null;
+  try {
+    const secretId = await loadStoredAiProviderSecretId(supabase, userId, "openrouter");
+    if (secretId) key = normalizeCredentialValue(await readAiVaultSecret(supabase, userId, "openrouter", secretId));
+  } catch {
+    key = null;
+  }
+  const source: AiCredentialSource = key ? "byok" : "platform";
+  key = key ?? platformAiKey("openrouter");
+  if (!key) return null;
+
+  return {
+    provider: "openrouter",
+    model,
+    apiKey: key,
+    source,
+    reasoningEffort: null,
+  };
 }
