@@ -72,7 +72,7 @@ describe("assertAiReady", () => {
     } as never);
     await expect(
       assertAiReady({ provider: "openrouter", model: "a/b", apiKey: "k" }),
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject({ content: "ready" });
   });
 
   it("turns a provider 401 into a 422 with an actionable message", async () => {
@@ -177,7 +177,7 @@ describe("assertAiReady free-model retry", () => {
       .spyOn(provider, "callAI")
       .mockRejectedValueOnce(new Error("OpenRouter request exceeded 45s"))
       .mockResolvedValueOnce({ content: "ready" } as never);
-    await expect(assertAiReady(free)).resolves.toBeUndefined();
+    await expect(assertAiReady(free)).resolves.toMatchObject({ content: "ready" });
     expect(spy).toHaveBeenCalledTimes(2);
   });
 
@@ -222,5 +222,62 @@ describe("callAI retryBudget on a pinned model", () => {
     expect(f).toHaveBeenCalledTimes(2);
     expect(Date.now() - t).toBeLessThan(5000);
     vi.unstubAllGlobals();
+  });
+});
+
+describe("assertAiReady returns the served response", () => {
+  afterEach(() => vi.restoreAllMocks());
+  it("hands back the response so the Settings test can report the served model", async () => {
+    vi.spyOn(provider, "callAI").mockResolvedValue({ content: "ready", model: "nvidia/served:free" } as never);
+    const res = await assertAiReady({ provider: "openrouter", apiKey: "k", model: "nvidia/x:free" } as never);
+    expect(res.model).toBe("nvidia/served:free");
+  });
+
+  it("a pinned free model that stalls once then answers passes the Settings test", async () => {
+    vi.spyOn(provider, "callAI")
+      .mockRejectedValueOnce(new Error("OpenRouter request exceeded 45s"))
+      .mockResolvedValueOnce({ content: "ready", model: "nvidia/x:free" } as never);
+    await expect(
+      assertAiReady({ provider: "openrouter", apiKey: "k", model: "nvidia/x:free" } as never),
+    ).resolves.toMatchObject({ content: "ready" });
+  });
+});
+
+describe("OpenRouter error body on HTTP 200", () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  const overloaded = () =>
+    new Response(
+      JSON.stringify({ error: { message: "Upstream error from Nvidia: Service temporarily overloaded", code: 429, metadata: { error_type: "provider_overloaded" } } }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  const ok = () =>
+    new Response(JSON.stringify({ model: "nvidia/x:free", choices: [{ message: { content: "ready" } }] }), { status: 200 });
+  const cfg = { provider: "openrouter", apiKey: "k", model: "nvidia/x:free" } as never;
+
+  it("throwIfErrorBody raises a 429-class error carrying the provider's message", () => {
+    let caught: any;
+    try { provider.throwIfErrorBody("openrouter", "m", { error: { message: "Service temporarily overloaded" } }); } catch (e) { caught = e; }
+    expect(caught).toBeTruthy();
+    expect(caught.status).toBe(429);
+    expect(String(caught.message)).toMatch(/overloaded|rate/i);
+  });
+
+  it("does not throw when the body has real choices", () => {
+    expect(() => provider.throwIfErrorBody("openrouter", "m", { choices: [{}] })).not.toThrow();
+  });
+
+  it("the exact failure you saw: overloaded once, then answers -> Settings test passes", async () => {
+    const f = vi.fn().mockResolvedValueOnce(overloaded()).mockResolvedValueOnce(ok());
+    vi.stubGlobal("fetch", f);
+    await expect(assertAiReady(cfg)).resolves.toMatchObject({ content: "ready" });
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
+  it("overloaded on both attempts -> names the real cause, not a timeout", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => overloaded()));
+    await expect(assertAiReady(cfg)).rejects.toMatchObject({
+      status: 422,
+      publicMessage: expect.stringMatching(/rate-limited/i),
+    });
   });
 });
