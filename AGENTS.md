@@ -132,3 +132,18 @@ Canonical documents:
 `docs/CLOUD_RUN_MIGRATION.md` is historical only.
 
 When code/workflows and documentation conflict, inspect current deployment evidence and correct both in the same change.
+
+## Local development
+
+Node.js 20+ and pnpm `9.15.9` (`packageManager` in the root `package.json`). Install with `pnpm install --frozen-lockfile`.
+
+The Vite dev server listens on port 3000 and proxies `/api` to `http://localhost:5000`. The API process requires `PORT` and does not default it, so run:
+
+```bash
+PORT=5000 pnpm --filter @workspace/api-server dev
+pnpm --filter @workspace/repo-finisher dev
+```
+
+On a local hostname the SPA calls the API with relative `/api` URLs. `CORS_ALLOWED_ORIGINS` should include `http://localhost:3000` when the browser sends an Origin header through that proxy.
+
+`/api/healthz` and the landing page render without Supabase credentials. Authenticated GitHub analysis, repository writes, and Vault-backed AI settings need the trusted values listed in `.env.example`. Do not put service-role keys, signing secrets, or encryption keys in `VITE_*`.
