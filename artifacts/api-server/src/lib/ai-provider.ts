@@ -31,6 +31,12 @@ export interface AIRequest {
    * seconds instead of blocking the request through MAX_RETRIES backoffs.
    */
   retryBudget?: number;
+  /**
+   * OpenRouter models to try after the pinned model hits a transient 429/5xx.
+   * Auth, payment, unknown-model, and parameter errors stay on the pinned
+   * model so a bad key or a rejected request is not relabeled by a fallback.
+   */
+  failoverModels?: string[];
 }
 
 export interface AIResponse {
@@ -104,9 +110,111 @@ function applyOpenRouterRequestFields(
 
 type PublicHttpError = Error & {
   status?: number;
+  /** Provider HTTP status before it is mapped to a public API status. */
+  upstreamStatus?: number;
   code?: string;
   publicMessage?: string;
 };
+
+export type ProviderFailureClass =
+  | "auth"
+  | "payment"
+  | "parameter"
+  | "unknown_model"
+  | "rate_limit"
+  | "unavailable"
+  | "other";
+
+function statusFromProviderMessage(message: string): number | undefined {
+  const match = message.match(/API error (\d{3})\b/i);
+  if (!match) return undefined;
+  const status = Number(match[1]);
+  return Number.isInteger(status) ? status : undefined;
+}
+
+/**
+ * Distinguish a rejected request from a rate limit. Analysis used to tell the
+ * user every failed batch was rate-limited, including Apodex HTTP 400s for
+ * unsupported parameters and unknown model slugs.
+ */
+export function classifyProviderFailure(error: unknown): ProviderFailureClass {
+  const record = error && typeof error === "object" ? (error as PublicHttpError) : undefined;
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const code = typeof record?.code === "string" ? record.code : "";
+  const upstream =
+    typeof record?.upstreamStatus === "number"
+      ? record.upstreamStatus
+      : statusFromProviderMessage(message);
+
+  if (
+    code === "AI_PROVIDER_UNAUTHORIZED" ||
+    upstream === 401 ||
+    upstream === 403 ||
+    /API_KEY_INVALID|invalid api key|no api key|unauthorized|forbidden/i.test(message)
+  ) {
+    return "auth";
+  }
+  if (
+    code === "AI_PROVIDER_PAYMENT_REQUIRED" ||
+    upstream === 402 ||
+    /insufficient credits|openrouter_credits|exceeded your current quota/i.test(message)
+  ) {
+    return "payment";
+  }
+  if (
+    code === "AI_PROVIDER_UNKNOWN_MODEL" ||
+    upstream === 404 ||
+    /not a valid model|no endpoints found|unknown model|model.{0,80}not found/i.test(message)
+  ) {
+    return "unknown_model";
+  }
+  if (
+    upstream === 400 ||
+    /rejected the AI request|response_format|json_schema|reasoning\.effort|unsupported parameter/i.test(message)
+  ) {
+    return "parameter";
+  }
+  if (code === "AI_PROVIDER_RATE_LIMITED" || upstream === 429 || /rate[- ]?limit|too many requests/i.test(message)) {
+    return "rate_limit";
+  }
+  if (
+    code === "AI_PROVIDER_TIMEOUT" ||
+    code === "AI_PROVIDER_UNAVAILABLE" ||
+    (typeof upstream === "number" && upstream >= 500) ||
+    /timed out|timeout|unavailable|overloaded|temporarily/i.test(message)
+  ) {
+    return "unavailable";
+  }
+  return "other";
+}
+
+export function isTransientProviderFailure(error: unknown): boolean {
+  const kind = classifyProviderFailure(error);
+  return kind === "rate_limit" || kind === "unavailable";
+}
+
+/** Models a portfolio survey may use after the pinned OpenRouter model is rate-limited. */
+export function openRouterAnalysisFailoverModels(model: string | null | undefined): string[] {
+  const pinned = model?.trim() ?? "";
+  return OPENROUTER_AGENT_CHAIN.filter((candidate) => candidate !== pinned);
+}
+
+function openRouterFailoverGroups(primary: string, models: string[] | undefined): string[][] {
+  if (!models?.length) return [];
+  const seen = new Set<string>([primary.trim()]);
+  const unique: string[] = [];
+  for (const candidate of models) {
+    const model = candidate.trim();
+    if (!model || seen.has(model)) continue;
+    seen.add(model);
+    unique.push(model);
+  }
+  const groups: string[][] = [];
+  for (let index = 0; index < unique.length; index += 3) {
+    groups.push(unique.slice(index, index + 3));
+  }
+  return groups;
+}
 
 const DEFAULT_MODELS: Record<string, string> = {
   ...DEFAULT_AI_MODELS,
@@ -246,6 +354,7 @@ export function providerRequestError(provider: string, model: string, status: nu
     new Error(`${display} API error ${status} for model "${model}": ${effectiveDetail}`),
     {
       status: httpStatus,
+      upstreamStatus: status,
       code,
       publicMessage,
     },
@@ -625,44 +734,76 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
       provider === "custom") &&
     apiKey
   ) {
-    const body: Record<string, unknown> = { model, messages: request.messages };
-    if (provider === "openrouter") {
-      applyOpenRouterRequestFields(body, model, request, config.reasoningEffort);
-    } else if (request.responseFormat) {
-      body.response_format = request.responseFormat;
-    }
+    const sendChat = async (
+      activeModel: string,
+      extraModels: string[] | undefined,
+      budget: number | undefined,
+    ): Promise<AIResponse> => {
+      const body: Record<string, unknown> = { model: activeModel, messages: request.messages };
+      if (provider === "openrouter") {
+        applyOpenRouterRequestFields(body, activeModel, request, config.reasoningEffort);
+        if (extraModels && extraModels.length > 0) {
+          body.models = [activeModel, ...extraModels.filter((item) => item !== activeModel)].slice(0, 3);
+        }
+      } else if (request.responseFormat) {
+        body.response_format = request.responseFormat;
+      }
 
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      };
+      if (provider === "openrouter") {
+        headers["X-Title"] = "RepoFinisher";
+      }
+
+      const res = await fetchWithRetry(
+        provider === "qwen" ? resolveQwenEndpoint() : PROVIDER_ENDPOINTS[provider],
+        { method: "POST", headers, body: JSON.stringify(body) },
+        provider,
+        requestTimeoutMs,
+        budget,
+      );
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw providerRequestError(provider, activeModel, res.status, text);
+      }
+
+      const json = (await res.json()) as {
+        model?: string;
+        error?: { message?: string; code?: number | string } | null;
+        choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
+      };
+      throwIfErrorBody(provider, activeModel, json);
+      const raw = json.choices?.[0]?.message?.content;
+      if (typeof raw === "string") return { content: raw, model: json.model };
+      if (Array.isArray(raw)) return { content: raw.map((part) => part.text || "").join(""), model: json.model };
+      return { content: "", model: json.model };
     };
-    if (provider === "openrouter") {
-      headers["X-Title"] = "RepoFinisher";
+
+    try {
+      return await sendChat(model, undefined, request.retryBudget);
+    } catch (error) {
+      const groups = provider === "openrouter" ? openRouterFailoverGroups(model, request.failoverModels) : [];
+      if (groups.length === 0 || !isTransientProviderFailure(error)) throw error;
+      console.warn(
+        `[ai-provider] ${model} transient failure; failing over across ${groups.reduce((count, group) => count + group.length, 0)} OpenRouter model(s)`,
+      );
+      let lastError: unknown = error;
+      for (const group of groups) {
+        try {
+          const response = await sendChat(group[0], group.slice(1), 0);
+          console.warn(`[ai-provider] served ${response.model || group[0]} after ${model} failover`);
+          return response;
+        } catch (next) {
+          lastError = next;
+          const kind = classifyProviderFailure(next);
+          if (kind === "auth" || kind === "payment") throw next;
+        }
+      }
+      throw lastError;
     }
-
-    const res = await fetchWithRetry(
-      provider === "qwen" ? resolveQwenEndpoint() : PROVIDER_ENDPOINTS[provider],
-      { method: "POST", headers, body: JSON.stringify(body) },
-      provider,
-      requestTimeoutMs,
-      request.retryBudget,
-    );
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw providerRequestError(provider, model, res.status, text);
-    }
-
-    const json = (await res.json()) as {
-      model?: string;
-      error?: { message?: string; code?: number | string } | null;
-      choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
-    };
-    throwIfErrorBody(provider, model, json);
-    const raw = json.choices?.[0]?.message?.content;
-    if (typeof raw === "string") return { content: raw, model: json.model };
-    if (Array.isArray(raw)) return { content: raw.map((part) => part.text || "").join(""), model: json.model };
-    return { content: "", model: json.model };
   }
 
   if (provider === "github_models") {

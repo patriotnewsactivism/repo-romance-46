@@ -7,6 +7,8 @@ import {
   OPENROUTER_FREE_AGENT_CHAIN,
   OPENROUTER_PAID_AGENT_CHAIN,
   callAI,
+  classifyProviderFailure,
+  openRouterAnalysisFailoverModels,
   providerRequestError,
   FINAL_SYNTHESIS_TIMEOUT_MS,
   resolveAIRequestTimeoutMs,
@@ -300,6 +302,92 @@ describe("OpenRouter routing", () => {
     expect(body.reasoning).toBeUndefined();
     expect(body.response_format).toEqual({ type: "json_object" });
     expect(result.content).toBe("{\"ok\":true}");
+  });
+
+  it("fails over from a rate-limited pinned Apodex model to another configured model", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("slow down", { status: 429 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ model: OPENROUTER_FREE_AGENT_CHAIN[1], choices: [{ message: { content: "survey-ok" } }] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+
+    const result = await callAI(
+      request("survey batch", {
+        timeoutMs: 1000,
+        retryBudget: 0,
+        failoverModels: openRouterAnalysisFailoverModels("apodex/apodex-1.1-mini:free"),
+        responseFormat: {
+          type: "json_schema",
+          json_schema: {
+            name: "recommendations",
+            strict: true,
+            schema: { type: "object", additionalProperties: false, properties: { ok: { type: "boolean" } } },
+          },
+        },
+      }),
+      {
+        provider: "openrouter",
+        model: "apodex/apodex-1.1-mini:free",
+        apiKey: "test-api-key",
+        reasoningEffort: "high",
+      },
+    );
+
+    expect(result.content).toBe("survey-ok");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    const secondBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(firstBody.model).toBe("apodex/apodex-1.1-mini:free");
+    expect(firstBody.reasoning).toBeUndefined();
+    expect(firstBody.response_format).toEqual({ type: "json_object" });
+    expect(secondBody.model).not.toBe("apodex/apodex-1.1-mini:free");
+    expect(secondBody.models[0]).toBe(secondBody.model);
+  });
+
+  it("does not fail over when Apodex rejects parameters, the credential, or the model id", async () => {
+    const cases = [
+      new Response(JSON.stringify({ error: { message: "reasoning.effort is not supported" } }), { status: 400 }),
+      new Response(JSON.stringify({ error: { message: "Invalid API key provided" } }), { status: 401 }),
+      new Response(JSON.stringify({ error: { message: "apidex/apidex is not a valid model ID" } }), { status: 400 }),
+    ];
+    for (const response of cases) {
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(response);
+      await expect(
+        callAI(
+          request("survey batch", {
+            timeoutMs: 1000,
+            retryBudget: 0,
+            failoverModels: ["qwen/qwen3.8-27b:free"],
+          }),
+          { provider: "openrouter", model: "apodex/apodex-1.1-mini:free", apiKey: "test-api-key" },
+        ),
+      ).rejects.toThrow(/API error (400|401)/);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("classifies parameter, auth, and unknown-model errors separately from rate limits", () => {
+    expect(
+      classifyProviderFailure(
+        providerRequestError("openrouter", "apodex/apodex-1.1-mini:free", 400, JSON.stringify({ error: { message: "bad schema" } })),
+      ),
+    ).toBe("parameter");
+    expect(
+      classifyProviderFailure(
+        providerRequestError("openrouter", "apodex/apodex-1.1-mini:free", 401, JSON.stringify({ error: { message: "Invalid API key" } })),
+      ),
+    ).toBe("auth");
+    expect(
+      classifyProviderFailure(
+        providerRequestError("openrouter", "apidex/apidex", 400, JSON.stringify({ error: { message: "apidex/apidex is not a valid model ID" } })),
+      ),
+    ).toBe("unknown_model");
+    expect(classifyProviderFailure(providerRequestError("openrouter", "apodex/apodex-1.1-mini:free", 429, "slow down"))).toBe("rate_limit");
   });
 
   it("sends the saved OpenRouter reasoning effort without changing the exact model slug", async () => {

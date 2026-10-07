@@ -6,10 +6,12 @@ import { asyncHandler } from "../lib/async-handler";
 import { loadAiCredential, loadGithubCredential, normalizeAiProvider, requireGithubCredential } from "../lib/credentials";
 import { assertAiReady } from "../lib/ai-preflight";
 import { defaultAiModel } from "../lib/ai-model-config";
-import { callAIJson, validateWithZod } from "../lib/call-ai-json";
+import { callAIJson } from "../lib/call-ai-json";
 import { runInBackground } from "../lib/background-tasks";
 import {
   callAI,
+  classifyProviderFailure,
+  openRouterAnalysisFailoverModels,
   type AIProviderConfig,
   DEFAULT_REQUEST_TIMEOUT_MS,
   FINAL_SYNTHESIS_TIMEOUT_MS,
@@ -622,6 +624,159 @@ const AI_JSON_SCHEMA = {
   required: ["summary_md", "recommendations"],
 };
 
+type RecommendationBatch = z.infer<typeof RecommendationSchema>;
+
+function asStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter((item) => item.length > 0);
+  }
+  if (typeof value !== "string") return [];
+  const parts = value
+    .split(/\n+|;\s*/)
+    .map((item) => item.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim())
+    .filter((item) => item.length > 0);
+  return parts.length > 0 ? parts : value.trim() ? [value.trim()] : [];
+}
+
+function asScore(value: unknown, fallback: number): number {
+  const numeric = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(1, Math.min(5, Math.round(numeric)));
+}
+
+function asOptionalInt(value: unknown): number | null {
+  const numeric = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+  if (!Number.isFinite(numeric)) return null;
+  return Math.max(0, Math.round(numeric));
+}
+
+function asKind(value: unknown): "finish" | "combine" | "repurpose" {
+  const key = String(value ?? "").trim().toLowerCase();
+  if (key === "combine" || key === "merge") return "combine";
+  if (key === "repurpose" || key === "pivot") return "repurpose";
+  return "finish";
+}
+
+/**
+ * Apodex accepts json_object and ignores strict json_schema, so batch replies
+ * arrive with uppercase kinds, string scores, and alias field names. Coerce
+ * that shape into the recommendation schema instead of failing the survey.
+ */
+export function coerceRecommendationPayload(value: unknown): unknown {
+  const record = Array.isArray(value)
+    ? { recommendations: value }
+    : value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : null;
+  if (!record) return value;
+
+  const rawRecommendations = record.recommendations ?? record.items ?? record.results;
+  if (!Array.isArray(rawRecommendations)) return value;
+
+  const recommendations = [];
+  for (const raw of rawRecommendations) {
+    if (!raw || typeof raw !== "object") continue;
+    const item = raw as Record<string, unknown>;
+    const title = typeof item.title === "string" ? item.title.trim() : "";
+    const repos = asStringArray(item.repos ?? item.repo ?? item.repository ?? item.full_name);
+    const resolvedRepos = repos.length > 0 ? repos : title.includes("/") ? [title] : [];
+    const resolvedTitle = title || resolvedRepos[0] || "";
+    if (!resolvedTitle) continue;
+    const pitchSource = item.pitch ?? item.description ?? item.summary;
+    const pitch = typeof pitchSource === "string" && pitchSource.trim() ? pitchSource.trim() : resolvedTitle;
+    const nextSteps = asStringArray(item.next_steps ?? item.nextSteps ?? item.steps ?? item.actions);
+    recommendations.push({
+      kind: asKind(item.kind ?? item.type ?? item.action),
+      title: resolvedTitle,
+      repos: resolvedRepos.length > 0 ? resolvedRepos : [resolvedTitle],
+      pitch,
+      effort: asScore(item.effort, 3),
+      market_potential: asScore(item.market_potential ?? item.marketPotential ?? item.market, 3),
+      next_steps: nextSteps.length > 0 ? nextSteps : [`Finish ${resolvedTitle} from the repository evidence already collected.`],
+      tech_stack: asStringArray(item.tech_stack ?? item.techStack ?? item.stack),
+      marketing_tweet: typeof item.marketing_tweet === "string" ? item.marketing_tweet : null,
+      marketing_linkedin: typeof item.marketing_linkedin === "string" ? item.marketing_linkedin : null,
+      estimated_hours: asOptionalInt(item.estimated_hours ?? item.estimatedHours),
+    });
+  }
+
+  const summary = record.summary_md ?? record.summary ?? record.overview;
+  return {
+    summary_md: typeof summary === "string" && summary.trim() ? summary.trim() : "Analysis complete.",
+    recommendations,
+  };
+}
+
+export function acceptRecommendationPayload(value: unknown): RecommendationBatch | null {
+  const parsed = RecommendationSchema.safeParse(coerceRecommendationPayload(value));
+  if (!parsed.success || parsed.data.recommendations.length === 0) return null;
+  return parsed.data;
+}
+
+export function describeAnalysisBatchFailure(failedBatches: number, errors: unknown[]): string {
+  const present = new Set(errors.map((error) => classifyProviderFailure(error)));
+  const lead = `All ${failedBatches} AI batch(es) failed`;
+  if (present.has("auth")) {
+    return `${lead} because the AI provider rejected the credential. Re-save the provider key in Settings or switch provider.`;
+  }
+  if (present.has("payment")) {
+    return `${lead} because the AI provider has no remaining credits. Add credits or switch provider.`;
+  }
+  if (present.has("unknown_model")) {
+    return `${lead} because the configured model was not recognized. Check the model name in Settings or switch provider.`;
+  }
+  if (present.has("parameter")) {
+    return `${lead} because the AI provider rejected the request parameters. Verify the configured model or switch provider.`;
+  }
+  const transientOnly = present.size > 0 && [...present].every((kind) => kind === "rate_limit" || kind === "unavailable");
+  if (transientOnly && present.has("rate_limit") && !present.has("unavailable")) {
+    return `${lead} because the AI provider rate-limited the request. Retry shortly or switch provider.`;
+  }
+  if (transientOnly && present.has("unavailable") && !present.has("rate_limit")) {
+    return `${lead} because the AI provider was unavailable. Retry shortly or switch provider.`;
+  }
+  if (transientOnly) {
+    return `${lead} because the AI provider was rate-limited or unavailable. Retry shortly or switch provider.`;
+  }
+  return `${lead} before any repository recommendations were produced. Retry or switch provider.`;
+}
+
+export function analysisBatchOutcome(
+  results: Array<PromiseSettledResult<RecommendationBatch> | undefined>,
+):
+  | { ok: true; recommendations: RecommendationBatch["recommendations"]; summary: string; failedBatches: number }
+  | { ok: false; message: string } {
+  const recommendations: RecommendationBatch["recommendations"] = [];
+  const errors: unknown[] = [];
+  let summary = "";
+  let failedBatches = 0;
+  for (const result of results) {
+    if (!result) continue;
+    if (result.status === "fulfilled") {
+      recommendations.push(...result.value.recommendations);
+      if (!summary && result.value.summary_md) summary = result.value.summary_md;
+    } else {
+      failedBatches += 1;
+      errors.push(result.reason);
+    }
+  }
+  if (recommendations.length === 0) {
+    return {
+      ok: false,
+      message:
+        failedBatches > 0
+          ? describeAnalysisBatchFailure(failedBatches, errors)
+          : "AI analysis returned no recommendations.",
+    };
+  }
+  return {
+    ok: true,
+    recommendations,
+    summary: summary || "Analysis complete.",
+    failedBatches,
+  };
+}
+
 // ─── Stage models by provider + tier ────────────────────────────────────────
 
 interface StageModels {
@@ -795,15 +950,19 @@ async function callBatchedAI(
       ],
       responseFormat: { type: "json_schema", json_schema: { name: "recommendations", strict: true, schema: AI_JSON_SCHEMA } },
       timeoutMs: ANALYSIS_BATCH_REQUEST_TIMEOUT_MS,
+      // One backoff retry on the pinned model, then the OpenRouter chain.
+      // Auth and parameter errors are not retried as if they were rate limits.
+      retryBudget: 1,
+      failoverModels: aiConfig.provider === "openrouter" ? openRouterAnalysisFailoverModels(aiConfig.model) : undefined,
     },
     aiConfig,
-    validateWithZod(RecommendationSchema),
+    acceptRecommendationPayload,
   );
 }
 
 function isNonRetryableAIError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /API_KEY_INVALID|api key not valid|invalid api key|no api key|401|403|unauthorized|forbidden/i.test(message);
+  const kind = classifyProviderFailure(error);
+  return kind === "auth" || kind === "payment" || kind === "parameter" || kind === "unknown_model";
 }
 
 async function callBatchedAIWithRetry(
@@ -862,8 +1021,6 @@ async function runBatchedAI(
   const concurrency = aiBatchConcurrency(aiConfig.provider);
 
   let completed = 0;
-  let firstSummary = "";
-  let failedBatches = 0;
 
   const results = await parallelMap(batches, concurrency, async (batch) => {
     const result = await callBatchedAIWithRetry(batch, systemPrompt, aiConfig);
@@ -874,33 +1031,21 @@ async function runBatchedAI(
     return result;
   });
 
-  const allRecommendations: z.infer<typeof RecommendationSchema>["recommendations"] = [];
-  for (let i = 0; i < results.length; i++) {
-    const r = results[i];
-    if (r.status === "fulfilled") {
-      allRecommendations.push(...r.value.recommendations);
-      if (!firstSummary) firstSummary = r.value.summary_md;
-    } else {
-      failedBatches++;
-      console.error("[analysis] AI batch failed after retries", r.reason);
+  const outcome = analysisBatchOutcome(results);
+  if (!outcome.ok) {
+    for (const result of results) {
+      if (result.status === "rejected") console.error("[analysis] AI batch failed after retries", result.reason);
     }
+    throw new Error(outcome.message);
   }
 
-  if (allRecommendations.length === 0) {
-    throw new Error(
-      failedBatches > 0
-        ? `All ${failedBatches} AI batch(es) failed. The AI provider may be rate-limited or unavailable — try again or switch provider.`
-        : "AI analysis returned no recommendations.",
-    );
-  }
-
-  if (failedBatches > 0 && onProgress) {
-    await onProgress(`${failedBatches}/${batches.length} AI batches failed, continuing with partial results…`);
+  if (outcome.failedBatches > 0 && onProgress) {
+    await onProgress(`${outcome.failedBatches}/${batches.length} AI batches failed, continuing with partial results…`);
   }
 
   return RecommendationSchema.parse({
-    recommendations: allRecommendations,
-    summary_md: firstSummary || "Analysis complete.",
+    recommendations: outcome.recommendations,
+    summary_md: outcome.summary || "Analysis complete.",
   });
 }
 
@@ -1062,7 +1207,7 @@ Respond with valid JSON matching the exact schema. No markdown wrapping.`;
           : { responseFormat: { type: "json_schema" as const, json_schema: { name: "recommendations", strict: true, schema: AI_JSON_SCHEMA } } }),
       },
       aiConfig,
-      validateWithZod(RecommendationSchema),
+      acceptRecommendationPayload,
     );
   } catch (e) {
     console.warn("[analysis] Synthesis failed, using draft recommendations:", e instanceof Error ? e.message : e);
@@ -1117,7 +1262,7 @@ Only include NEW FINISH recommendations that improve repo coverage. If completio
         responseFormat: { type: "json_schema", json_schema: { name: "synthesis", strict: true, schema: AI_JSON_SCHEMA } },
       },
       aiConfig,
-      validateWithZod(RecommendationSchema),
+      acceptRecommendationPayload,
     );
     return validated.recommendations;
   } catch {
@@ -1245,6 +1390,8 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
           ],
           model: stageModels.profilerModel,
           timeoutMs: 60_000,
+          retryBudget: 1,
+          failoverModels: provider === "openrouter" ? openRouterAnalysisFailoverModels(stageModels.profilerModel) : undefined,
         },
         aiConfig,
       ),
@@ -1375,41 +1522,51 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
 
     let batchCompleted = 0;
     let firstSummary = "";
-    let failedBatches = 0;
+    const batchOutcomes: Array<PromiseSettledResult<RecommendationBatch> | undefined> = new Array(batches.length);
 
-    const batchResults = await withTimeout(
-      parallelMap(batches, batchConcurrency, async (batch) => {
-        const result = await callBatchedAIWithRetry(batch, customSystemPrompt, aiConfig);
-        batchCompleted++;
-        await reportProgress(`AI batch ${batchCompleted}/${batches.length} complete (${batch.length} repos)`);
-        return result;
-      }),
-      analysisBatchTimeoutMs(batches.length, batchConcurrency),
-      "AI analysis",
-    );
-
-    const draftRecommendations: z.infer<typeof RecommendationSchema>["recommendations"] = [];
-    for (let i = 0; i < batchResults.length; i++) {
-      const r = batchResults[i];
-      if (r.status === "fulfilled") {
-        draftRecommendations.push(...r.value.recommendations);
-        if (!firstSummary) firstSummary = r.value.summary_md;
+    let batchResults: PromiseSettledResult<RecommendationBatch>[];
+    try {
+      batchResults = await withTimeout(
+        parallelMap(batches, batchConcurrency, async (batch, index) => {
+          try {
+            const result = await callBatchedAIWithRetry(batch, customSystemPrompt, aiConfig);
+            batchOutcomes[index] = { status: "fulfilled", value: result };
+            batchCompleted++;
+            if (!firstSummary) firstSummary = result.summary_md;
+            await reportProgress(`AI batch ${batchCompleted}/${batches.length} complete (${batch.length} repos)`);
+            return result;
+          } catch (error) {
+            batchOutcomes[index] = { status: "rejected", reason: error };
+            throw error;
+          }
+        }),
+        analysisBatchTimeoutMs(batches.length, batchConcurrency),
+        "AI analysis",
+      );
+    } catch (error) {
+      const settled = batches.map((_, index) => batchOutcomes[index] ?? { status: "rejected" as const, reason: error });
+      const outcome = analysisBatchOutcome(settled);
+      if (outcome.ok) {
+        console.warn("[analysis] AI analysis timed out after some batches completed; keeping those results:", error);
+        batchResults = settled;
+      } else if (batchOutcomes.some(Boolean)) {
+        throw new Error(outcome.message);
       } else {
-        failedBatches++;
-        console.error("[analysis] AI batch failed after retries", r.reason);
+        throw error;
       }
     }
 
-    if (draftRecommendations.length === 0) {
-      throw new Error(
-        failedBatches > 0
-          ? `All ${failedBatches} AI batch(es) failed. The AI provider may be rate-limited — try again or switch provider.`
-          : "AI analysis returned no recommendations.",
-      );
+    for (const result of batchResults) {
+      if (result.status === "rejected") console.error("[analysis] AI batch failed after retries", result.reason);
     }
 
-    if (failedBatches > 0) {
-      await reportProgress(`${failedBatches}/${batches.length} batches failed, continuing with partial results…`);
+    const batchOutcome = analysisBatchOutcome(batchResults);
+    if (!batchOutcome.ok) throw new Error(batchOutcome.message);
+    const draftRecommendations = batchOutcome.recommendations;
+    if (!firstSummary) firstSummary = batchOutcome.summary;
+
+    if (batchOutcome.failedBatches > 0) {
+      await reportProgress(`${batchOutcome.failedBatches}/${batches.length} batches failed, continuing with partial results…`);
     }
 
     // Cross-batch completion-coverage pass for portfolios spanning multiple batches

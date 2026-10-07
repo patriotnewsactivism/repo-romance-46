@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ANALYSIS_BATCH_REQUEST_TIMEOUT_MS, aiBatchConcurrency, analysisBatchTimeoutMs, analysisJobBudgetMs, getStageModels, profilingProviderTimeoutMs, profilingTimeoutMs, isActionPlanSchemaMissing, actionPlanStateCache } from "./analysis";
-import { DEFAULT_REQUEST_TIMEOUT_MS } from "../lib/ai-provider";
+import { ANALYSIS_BATCH_REQUEST_TIMEOUT_MS, acceptRecommendationPayload, aiBatchConcurrency, analysisBatchOutcome, analysisBatchTimeoutMs, analysisJobBudgetMs, describeAnalysisBatchFailure, getStageModels, profilingProviderTimeoutMs, profilingTimeoutMs, isActionPlanSchemaMissing, actionPlanStateCache } from "./analysis";
+import { DEFAULT_REQUEST_TIMEOUT_MS, providerRequestError } from "../lib/ai-provider";
 
 describe("getStageModels", () => {
   // Production regression: provider "openrouter" had no case here, so every
@@ -100,6 +100,91 @@ describe("analysisJobBudgetMs", () => {
     expect(analysisJobBudgetMs(100)).toBe(2900000);
     expect(analysisJobBudgetMs(230)).toBe(5400000);
     expect(analysisJobBudgetMs(1000)).toBe(5400000);
+  });
+});
+
+describe("portfolio survey batch failures", () => {
+  const apodexParameter = () =>
+    providerRequestError(
+      "openrouter",
+      "apodex/apodex-1.1-mini:free",
+      400,
+      JSON.stringify({ error: { message: "reasoning.effort is not supported" } }),
+    );
+
+  it("does not describe an Apodex parameter rejection as a rate limit", () => {
+    const message = describeAnalysisBatchFailure(6, Array.from({ length: 6 }, () => apodexParameter()));
+    expect(message).toMatch(/All 6 AI batch\(es\) failed/);
+    expect(message.toLowerCase()).not.toMatch(/rate-limit/);
+    expect(message.toLowerCase()).toMatch(/rejected the request parameters/);
+  });
+
+  it("does not describe auth or unknown-model failures as rate limits", () => {
+    const auth = providerRequestError(
+      "openrouter",
+      "apodex/apodex-1.1-mini:free",
+      401,
+      JSON.stringify({ error: { message: "Invalid API key provided" } }),
+    );
+    const unknown = providerRequestError(
+      "openrouter",
+      "apidex/apidex",
+      400,
+      JSON.stringify({ error: { message: "apidex/apidex is not a valid model ID" } }),
+    );
+    expect(describeAnalysisBatchFailure(6, [auth]).toLowerCase()).not.toMatch(/rate-limit/);
+    expect(describeAnalysisBatchFailure(6, [auth]).toLowerCase()).toMatch(/credential/);
+    expect(describeAnalysisBatchFailure(6, [unknown]).toLowerCase()).not.toMatch(/rate-limit/);
+    expect(describeAnalysisBatchFailure(6, [unknown]).toLowerCase()).toMatch(/not recognized/);
+  });
+
+  it("describes an actual rate limit as a rate limit", () => {
+    const limited = providerRequestError("openrouter", "apodex/apodex-1.1-mini:free", 429, "slow down");
+    expect(describeAnalysisBatchFailure(2, [limited, limited]).toLowerCase()).toMatch(/rate-limited/);
+  });
+
+  it("keeps repository recommendations when one batch fails", () => {
+    const accepted = acceptRecommendationPayload({
+      summary: "One repo is ready to finish.",
+      recommendations: [
+        {
+          kind: "FINISH",
+          title: "Ship the API",
+          repo: "owner/repo-romance",
+          description: "The Express API is the product.",
+          effort: "2.4",
+          market_potential: 4.2,
+          steps: "Add tests\nDeploy the API",
+        },
+      ],
+    });
+    expect(accepted).not.toBeNull();
+    const outcome = analysisBatchOutcome([
+      { status: "fulfilled", value: accepted! },
+      { status: "rejected", reason: apodexParameter() },
+    ]);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.failedBatches).toBe(1);
+    expect(outcome.recommendations).toHaveLength(1);
+    expect(outcome.recommendations[0]).toMatchObject({
+      kind: "finish",
+      repos: ["owner/repo-romance"],
+      effort: 2,
+      market_potential: 4,
+    });
+    expect(outcome.recommendations[0]?.next_steps).toEqual(["Add tests", "Deploy the API"]);
+  });
+
+  it("fails the survey only when every batch failed, and says why", () => {
+    const outcome = analysisBatchOutcome([
+      { status: "rejected", reason: apodexParameter() },
+      { status: "rejected", reason: new Error("Model response could not be parsed into the expected JSON") },
+    ]);
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.message.toLowerCase()).not.toMatch(/rate-limit/);
+    expect(outcome.message.toLowerCase()).toMatch(/rejected the request parameters/);
   });
 });
 
