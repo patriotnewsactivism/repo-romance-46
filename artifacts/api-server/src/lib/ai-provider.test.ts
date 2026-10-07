@@ -267,6 +267,41 @@ describe("OpenRouter routing", () => {
     expect(result.content).toBe("next-group");
   });
 
+  it("does not send reasoning.effort or strict json_schema to Apodex", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ model: "apodex/apodex-1.1-mini:free", choices: [{ message: { content: "{\"ok\":true}" } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const result = await callAI(
+      request("apodex structured", {
+        timeoutMs: 1000,
+        responseFormat: {
+          type: "json_schema",
+          json_schema: {
+            name: "ready_test",
+            strict: true,
+            schema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+          },
+        },
+      }),
+      {
+        provider: "openrouter",
+        model: "apodex/apodex-1.1-mini:free",
+        apiKey: "test-api-key",
+        reasoningEffort: "high",
+      },
+    );
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.model).toBe("apodex/apodex-1.1-mini:free");
+    expect(body.reasoning).toBeUndefined();
+    expect(body.response_format).toEqual({ type: "json_object" });
+    expect(result.content).toBe("{\"ok\":true}");
+  });
+
   it("sends the saved OpenRouter reasoning effort without changing the exact model slug", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {

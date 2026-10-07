@@ -50,6 +50,12 @@ export interface SelectableOpenRouterModel {
   contextLength: number;
   supportsReasoning: boolean;
   supportedEfforts: OpenRouterReasoningEffort[] | null;
+  /**
+   * False when the catalog omits `supported_efforts`. OpenRouter treats that
+   * as "this model does not expose effort selection" (Apodex is the live
+   * example). An explicit `null` means every gateway effort is allowed.
+   */
+  exposesReasoningEffort: boolean;
   defaultEffort: OpenRouterReasoningEffort | null;
   defaultReasoningEnabled: boolean;
   reasoningMandatory: boolean;
@@ -83,6 +89,28 @@ function supportedEfforts(reasoning: RawOpenRouterReasoning | null | undefined):
   return values.length > 0 ? values : null;
 }
 
+function effortSelection(reasoning: RawOpenRouterReasoning | null, supportsReasoning: boolean): {
+  supportedEfforts: OpenRouterReasoningEffort[] | null;
+  exposesReasoningEffort: boolean;
+} {
+  if (!supportsReasoning) return { supportedEfforts: [], exposesReasoningEffort: false };
+  // A reasoning object that omits supported_efforts does not expose effort
+  // selection. Apodex publishes exactly `{ mandatory: false }` and rejects
+  // `reasoning.effort` with HTTP 400. An explicit null means every gateway
+  // effort is allowed. No reasoning object at all keeps the historical
+  // "unknown, allow the saved effort" behavior.
+  if (reasoning && !Object.prototype.hasOwnProperty.call(reasoning, "supported_efforts")) {
+    return { supportedEfforts: [], exposesReasoningEffort: false };
+  }
+  if (!reasoning || reasoning.supported_efforts === null) {
+    return { supportedEfforts: null, exposesReasoningEffort: true };
+  }
+  const efforts = supportedEfforts(reasoning);
+  return efforts
+    ? { supportedEfforts: efforts, exposesReasoningEffort: true }
+    : { supportedEfforts: [], exposesReasoningEffort: false };
+}
+
 export function normalizeOpenRouterModel(raw: RawOpenRouterModel, catalogRank = 0): SelectableOpenRouterModel | null {
   const id = String(raw.id || "").trim();
   if (!id) return null;
@@ -91,7 +119,7 @@ export function normalizeOpenRouterModel(raw: RawOpenRouterModel, catalogRank = 
   const parameters = new Set(raw.supported_parameters ?? []);
   const reasoning = raw.reasoning ?? null;
   const supportsReasoning = Boolean(reasoning) || parameters.has("reasoning");
-  const efforts = supportsReasoning ? supportedEfforts(reasoning) : [];
+  const efforts = effortSelection(reasoning, supportsReasoning);
 
   return {
     id,
@@ -102,7 +130,8 @@ export function normalizeOpenRouterModel(raw: RawOpenRouterModel, catalogRank = 
     outputPricePerMillion,
     contextLength: Number.isFinite(raw.context_length) ? Math.max(0, Number(raw.context_length)) : 0,
     supportsReasoning,
-    supportedEfforts: supportsReasoning ? efforts : [],
+    supportedEfforts: efforts.supportedEfforts,
+    exposesReasoningEffort: efforts.exposesReasoningEffort,
     defaultEffort: normalizeOpenRouterReasoningEffort(reasoning?.default_effort),
     defaultReasoningEnabled: Boolean(reasoning?.default_enabled),
     reasoningMandatory: Boolean(reasoning?.mandatory),

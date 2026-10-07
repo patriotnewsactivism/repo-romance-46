@@ -75,6 +75,33 @@ export const OPENROUTER_AGENT_CHAIN = [
 export const OPENROUTER_FLASHX_MODEL = "z-ai/glm-5.3-flashx";
 export const OPENROUTER_FLASH_FALLBACK_MODEL = "z-ai/glm-5.3-flash";
 
+/**
+ * Apodex (OpenRouter slug `apodex/apodex-1.1-mini:free`, often misheard as
+ * "apidex") reasons by default and only accepts a boolean `reasoning` switch.
+ * Sending `reasoning.effort` is refused with HTTP 400. The same upstream
+ * accepts `response_format: { type: "json_object" }` and refuses strict
+ * `json_schema`. Other providers keep the saved effort and schema.
+ */
+export function openRouterModelRejectsReasoningEffort(model: string): boolean {
+  return /^apodex\//i.test(model.trim());
+}
+
+function applyOpenRouterRequestFields(
+  body: Record<string, unknown>,
+  model: string,
+  request: AIRequest,
+  reasoningEffort: OpenRouterReasoningEffort | null | undefined,
+): void {
+  if (request.responseFormat) {
+    body.response_format = openRouterModelRejectsReasoningEffort(model)
+      ? { type: "json_object" }
+      : request.responseFormat;
+  }
+  if (reasoningEffort && !openRouterModelRejectsReasoningEffort(model)) {
+    body.reasoning = { effort: reasoningEffort };
+  }
+}
+
 type PublicHttpError = Error & {
   status?: number;
   code?: string;
@@ -548,8 +575,7 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     let lastError: unknown;
     for (const group of groups) {
       const body: Record<string, unknown> = { model: group[0], messages: request.messages };
-      if (request.responseFormat) body.response_format = request.responseFormat;
-      if (config.reasoningEffort) body.reasoning = { effort: config.reasoningEffort };
+      applyOpenRouterRequestFields(body, group[0], request, config.reasoningEffort);
       body.models = group;
 
       try {
@@ -600,9 +626,10 @@ export async function callAI(request: AIRequest, config: AIProviderConfig): Prom
     apiKey
   ) {
     const body: Record<string, unknown> = { model, messages: request.messages };
-    if (request.responseFormat) body.response_format = request.responseFormat;
-    if (provider === "openrouter" && config.reasoningEffort) {
-      body.reasoning = { effort: config.reasoningEffort };
+    if (provider === "openrouter") {
+      applyOpenRouterRequestFields(body, model, request, config.reasoningEffort);
+    } else if (request.responseFormat) {
+      body.response_format = request.responseFormat;
     }
 
     const headers: Record<string, string> = {

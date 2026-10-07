@@ -142,6 +142,7 @@ interface OpenRouterModel {
   contextLength: number;
   supportsReasoning: boolean;
   supportedEfforts: OpenRouterReasoningEffort[] | null;
+  exposesReasoningEffort?: boolean;
   defaultEffort: OpenRouterReasoningEffort | null;
   defaultReasoningEnabled: boolean;
   reasoningMandatory: boolean;
@@ -505,9 +506,9 @@ export default function Settings() {
   const availableReasoningEfforts = !aiModel
     ? []
     : selectedOpenRouterModel
-      ? selectedOpenRouterModel.supportsReasoning
-        ? selectedOpenRouterModel.supportedEfforts?.length ? selectedOpenRouterModel.supportedEfforts : REASONING_EFFORTS
-        : []
+      ? !selectedOpenRouterModel.supportsReasoning || selectedOpenRouterModel.exposesReasoningEffort === false
+        ? []
+        : selectedOpenRouterModel.supportedEfforts?.length ? selectedOpenRouterModel.supportedEfforts : REASONING_EFFORTS
       : REASONING_EFFORTS;
 
   if (isLoading) {
@@ -789,7 +790,7 @@ export default function Settings() {
                           type="button"
                           onClick={() => {
                             setAiModel(model.id);
-                            if (!model.supportsReasoning) setAiReasoningEffort('');
+                            if (!model.supportsReasoning || model.exposesReasoningEffort === false) setAiReasoningEffort('');
                             else if (model.defaultEffort) setAiReasoningEffort(model.defaultEffort);
                           }}
                           className={`w-full border-b p-3 text-left last:border-b-0 hover:bg-muted/40 ${aiModel === model.id ? 'bg-primary/10 ring-1 ring-inset ring-primary/50' : ''}`}
