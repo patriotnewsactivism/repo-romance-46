@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildRepoSuggestions,
+  displayScore1to100,
   estimateCommercializationProbability,
   estimateRemainingWork,
   rankInvestmentOpportunities,
+  scoreUniqueness,
 } from "./investment-intelligence";
 
 describe("Repository Investment Intelligence", () => {
@@ -17,6 +20,7 @@ describe("Repository Investment Intelligence", () => {
         marketNeed: 30,
         demand: 25,
         competitivePressure: 80,
+        uniquenessPct: 28,
         commercializationProbability: 35,
         remainingWork: { hours: 12, costUsd: { low: 720, high: 1_800 } },
         evidenceConfidence: 80,
@@ -30,6 +34,7 @@ describe("Repository Investment Intelligence", () => {
         marketNeed: 85,
         demand: 82,
         competitivePressure: 45,
+        uniquenessPct: 72,
         commercializationProbability: 74,
         remainingWork: { hours: 80, costUsd: { low: 4_800, high: 12_000 } },
         evidenceConfidence: 72,
@@ -39,6 +44,36 @@ describe("Repository Investment Intelligence", () => {
     expect(ranked[0].repo).toBe("acme/strong-opportunity");
     expect(ranked[0].rank).toBe(1);
     expect(ranked[0].finishFirstScore).toBeGreaterThan(ranked[1].finishFirstScore);
+    expect(ranked[0].uniquenessPct).toBeGreaterThanOrEqual(1);
+    expect(ranked[0].uniquenessPct).toBeLessThanOrEqual(100);
+  });
+
+  it("scores uniqueness from overlap, differentiation, and competition", () => {
+    const unique = scoreUniqueness({
+      overlapSimilarityPct: 10,
+      differentiation: 80,
+      competitivePressure: 30,
+    });
+    const crowded = scoreUniqueness({
+      overlapSimilarityPct: 85,
+      differentiation: 25,
+      competitivePressure: 90,
+    });
+    expect(unique).toBeGreaterThan(crowded);
+    expect(unique).toBeGreaterThanOrEqual(1);
+    expect(unique).toBeLessThanOrEqual(100);
+    expect(displayScore1to100(0)).toBe(1);
+  });
+
+  it("builds 3–10 repo suggestions with padding when evidence is thin", () => {
+    const suggestions = buildRepoSuggestions({
+      repo: "acme/thin",
+      nextSteps: ["Add tests"],
+      maxSuggestions: 8,
+    });
+    expect(suggestions.length).toBeGreaterThanOrEqual(3);
+    expect(suggestions.length).toBeLessThanOrEqual(10);
+    expect(suggestions.every((s) => s.title && s.action && s.why)).toBe(true);
   });
 
   it("keeps commercialization estimates bounded", () => {

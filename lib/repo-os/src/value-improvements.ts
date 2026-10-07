@@ -84,7 +84,9 @@ export function suggestValueImprovements(input: {
   analysisNextSteps?: string[];
   maxSuggestions?: number;
 }): ValueImprovementSuggestion[] {
-  const max = Math.max(5, Math.min(40, input.maxSuggestions ?? 20));
+  // Product surface shows 3–10 suggestions per repo; allow a slightly higher
+  // internal cap only when callers explicitly ask (still hard-capped at 10).
+  const max = Math.max(3, Math.min(10, input.maxSuggestions ?? 8));
   const suggestions: ValueImprovementSuggestion[] = [];
 
   for (const gap of input.completion.missingBreakdown) {

@@ -31,11 +31,26 @@ export interface InvestmentOpportunityInput {
   marketNeed: number;
   demand: number;
   competitivePressure: number;
+  /** 1–100 uniqueness / differentiation score (higher = more unique). */
+  uniquenessPct: number;
   commercializationProbability: number;
   remainingWork: RemainingWorkEstimate;
   evidenceConfidence: number;
   evidence?: IntelligenceEvidence[];
 }
+
+/** Product-facing suggestion shown on portfolio repo cards (3–10 per repo). */
+export interface RepoSuggestion {
+  id: string;
+  title: string;
+  action: string;
+  why: string;
+  effort: 1 | 2 | 3 | 4 | 5;
+}
+
+export const REPO_SUGGESTION_MIN = 3;
+export const REPO_SUGGESTION_MAX = 10;
+export const REPO_SUGGESTION_DEFAULT = 8;
 
 export interface InvestmentScoreBreakdown {
   commercialization: number;
@@ -56,6 +71,165 @@ export interface RankedInvestmentOpportunity extends InvestmentOpportunityInput 
 
 const clamp100 = (value: number): number => Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
 const midpoint = (range: MoneyRange): number => (Math.max(0, range.low) + Math.max(0, range.high)) / 2;
+
+/**
+ * Display scores for the portfolio UI are graded 1–100.
+ * Raw 0 is preserved only when the caller marks the score as not measured.
+ */
+export function displayScore1to100(value: number, options?: { notMeasured?: boolean }): number {
+  if (options?.notMeasured) return 0;
+  const clamped = clamp100(value);
+  return Math.max(1, Math.round(clamped));
+}
+
+/**
+ * Uniqueness combines inverse portfolio IP overlap, differentiation signal,
+ * and inverse competitive pressure.
+ *
+ * Weights: 45% uniqueness-from-overlap, 35% differentiation, 20% open field.
+ */
+export function scoreUniqueness(input: {
+  overlapSimilarityPct?: number | null;
+  differentiation?: number | null;
+  competitivePressure: number;
+}): number {
+  const overlap = clamp100(input.overlapSimilarityPct ?? 0);
+  const differentiation = clamp100(
+    input.differentiation == null || !Number.isFinite(input.differentiation)
+      ? 100 - clamp100(input.competitivePressure)
+      : input.differentiation,
+  );
+  const openField = 100 - clamp100(input.competitivePressure);
+  const score = 0.45 * (100 - overlap) + 0.35 * differentiation + 0.2 * openField;
+  return displayScore1to100(score);
+}
+
+const FALLBACK_SUGGESTIONS: Array<Omit<RepoSuggestion, "id">> = [
+  {
+    title: "Raise core product completeness",
+    action: "Implement the highest-value unfinished core user journey end-to-end and verify it with a smoke path.",
+    why: "Core journey gaps dominate completeness and keep commercialization probability discounted.",
+    effort: 4,
+  },
+  {
+    title: "Add production readiness evidence",
+    action: "Wire CI build/tests and a deployable target with a post-deploy smoke check.",
+    why: "Without CI and deploy evidence, readiness and evidence ceilings suppress shippable valuation.",
+    effort: 3,
+  },
+  {
+    title: "Document setup and verification",
+    action: "Add a concise README covering setup, architecture, deployment, and how to verify the critical path.",
+    why: "Clear operator docs reduce remaining work risk and raise buyer/operator confidence.",
+    effort: 2,
+  },
+  {
+    title: "Harden auth and secrets handling",
+    action: "Ensure secrets stay server-side, auth gates sensitive routes, and .env.example documents required config safely.",
+    why: "Security and secrets gaps block honest production-readiness scores.",
+    effort: 3,
+  },
+  {
+    title: "Strengthen automated tests",
+    action: "Add tests around critical flows and failure paths so CI can gate regressions.",
+    why: "Test coverage raises completeness and unlocks evidence-backed completion gains.",
+    effort: 3,
+  },
+];
+
+function slugSuggestion(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48);
+}
+
+/**
+ * Build a stable 3–10 suggestion list for a repository card.
+ * Merges value improvements and analysis next-steps, dedupes, pads, and clamps.
+ */
+export function buildRepoSuggestions(input: {
+  repo: string;
+  valueImprovements?: Array<{
+    id?: string;
+    title?: string;
+    action?: string;
+    whyItRaisesValue?: string;
+    problem?: string;
+    effort?: number;
+    priority?: number;
+  }>;
+  nextSteps?: string[];
+  maxSuggestions?: number;
+}): RepoSuggestion[] {
+  const max = Math.max(
+    REPO_SUGGESTION_MIN,
+    Math.min(REPO_SUGGESTION_MAX, input.maxSuggestions ?? REPO_SUGGESTION_DEFAULT),
+  );
+  const repoSlug = slugSuggestion(input.repo) || "repo";
+  const merged: Array<RepoSuggestion & { priority: number }> = [];
+  const seen = new Set<string>();
+
+  const push = (suggestion: RepoSuggestion, priority: number) => {
+    const key = `${suggestion.title}:${suggestion.action}`.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push({ ...suggestion, priority });
+  };
+
+  for (const item of input.valueImprovements ?? []) {
+    const action = (item.action || item.problem || "").trim();
+    const title = (item.title || action).trim();
+    if (!action || !title) continue;
+    const effort = Math.max(1, Math.min(5, Math.round(item.effort ?? 3))) as 1 | 2 | 3 | 4 | 5;
+    push(
+      {
+        id: item.id || `${repoSlug}-${slugSuggestion(title)}`,
+        title: title.slice(0, 120),
+        action,
+        why: (item.whyItRaisesValue || item.problem || "Closes a measured completeness or readiness gap.").trim(),
+        effort,
+      },
+      item.priority ?? 20,
+    );
+  }
+
+  for (const step of input.nextSteps ?? []) {
+    const trimmed = step.trim();
+    if (!trimmed) continue;
+    push(
+      {
+        id: `${repoSlug}-step-${slugSuggestion(trimmed)}`,
+        title: trimmed.length > 72 ? `${trimmed.slice(0, 69)}…` : trimmed,
+        action: trimmed,
+        why: "Portfolio analysis identified this as part of the finish path.",
+        effort: 3,
+      },
+      18,
+    );
+  }
+
+  merged.sort((a, b) => b.priority - a.priority || a.title.localeCompare(b.title));
+
+  const result: RepoSuggestion[] = merged.slice(0, max).map(({ priority: _priority, ...suggestion }) => suggestion);
+
+  let fallbackIndex = 0;
+  while (result.length < REPO_SUGGESTION_MIN && fallbackIndex < FALLBACK_SUGGESTIONS.length) {
+    const fallback = FALLBACK_SUGGESTIONS[fallbackIndex];
+    fallbackIndex += 1;
+    const candidate: RepoSuggestion = {
+      id: `${repoSlug}-fallback-${fallbackIndex}`,
+      ...fallback,
+    };
+    const key = `${candidate.title}:${candidate.action}`.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(candidate);
+  }
+
+  return result.slice(0, max);
+}
 
 function normalize(values: number[], value: number, invert = false): number {
   if (values.length <= 1) return 50;
@@ -87,6 +261,12 @@ export function rankInvestmentOpportunities(
   const costs = inputs.map((item) => Math.max(1, midpoint(item.remainingWork.costUsd)));
 
   const ranked = inputs.map((item, index): RankedInvestmentOpportunity => {
+    const uniquenessPct = displayScore1to100(
+      item.uniquenessPct ??
+        scoreUniqueness({
+          competitivePressure: item.competitivePressure,
+        }),
+    );
     const valueUnlockUsd = unlocks[index];
     const valueUnlock = logNormalize(unlocks, valueUnlockUsd);
     const costEfficiency = normalize(costs, costs[index], true);
@@ -110,12 +290,17 @@ export function rankInvestmentOpportunities(
       `${Math.round(commercialization)}% commercialization probability`,
       `$${Math.round(valueUnlockUsd).toLocaleString()} modeled value unlock`,
       `${Math.round(marketOpportunity)}/100 market opportunity`,
-      `${Math.round(item.completionPct)}% complete with ${Math.round(item.remainingWork.hours)}h estimated remaining`,
-      `${Math.round(evidenceConfidence)}/100 evidence confidence`,
+      `${displayScore1to100(item.completionPct)}/100 completeness · ${uniquenessPct}/100 uniqueness`,
+      `${displayScore1to100(item.demand)}/100 demand · ${displayScore1to100(item.competitivePressure)}/100 competition`,
+      `${Math.round(item.remainingWork.hours)}h estimated remaining · ${Math.round(evidenceConfidence)}/100 evidence confidence`,
     ];
 
     return {
       ...item,
+      uniquenessPct,
+      completionPct: displayScore1to100(item.completionPct),
+      demand: displayScore1to100(item.demand),
+      competitivePressure: displayScore1to100(item.competitivePressure),
       rank: 0,
       finishFirstScore: Math.round(finishFirstScore * 10) / 10,
       valueUnlockUsd: Math.round(valueUnlockUsd),
