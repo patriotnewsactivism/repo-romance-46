@@ -272,6 +272,9 @@ function asOpportunity(entry: unknown): InvestmentOpportunityInput | null {
   const marketNeed = finiteNumber(record.marketNeed);
   const demand = finiteNumber(record.demand);
   const competitivePressure = finiteNumber(record.competitivePressure);
+  const uniquenessPct =
+    finiteNumber(record.uniquenessPct) ??
+    (competitivePressure === null ? null : Math.max(1, Math.min(100, 100 - competitivePressure)));
   const commercializationProbability = finiteNumber(record.commercializationProbability);
   const evidenceConfidence = finiteNumber(record.evidenceConfidence);
   const remainingHours = finiteNumber(remaining?.hours);
@@ -286,6 +289,7 @@ function asOpportunity(entry: unknown): InvestmentOpportunityInput | null {
     marketNeed === null ||
     demand === null ||
     competitivePressure === null ||
+    uniquenessPct === null ||
     commercializationProbability === null ||
     evidenceConfidence === null ||
     remainingHours === null
@@ -302,6 +306,7 @@ function asOpportunity(entry: unknown): InvestmentOpportunityInput | null {
     marketNeed,
     demand,
     competitivePressure,
+    uniquenessPct,
     commercializationProbability,
     remainingWork: { hours: remainingHours, costUsd: remainingCost },
     evidenceConfidence,

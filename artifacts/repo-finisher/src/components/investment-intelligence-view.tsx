@@ -11,6 +11,14 @@ import { TieredIntelligencePanel } from '@/components/tiered-intelligence-panel'
 import { PortfolioValuationV2Panel } from '@/components/portfolio-valuation-v2-panel';
 import { DualNeedleGauge } from '@/components/dual-needle-gauge';
 import { RepositoryGrowthToolsPanel } from '@/components/repository-growth-tools-panel';
+import { RepoScoreMeters } from '@/components/repo-score-meters';
+import { RepoSuggestionsList } from '@/components/repo-suggestions-list';
+import {
+  resolveRepoSuggestions,
+  uniquenessScore,
+  type PortfolioIntelligenceSnapshot,
+  type PortfolioRankingItem,
+} from '@/lib/portfolio-types';
 import {
   AlertTriangle,
   DollarSign,
@@ -31,70 +39,12 @@ interface EvidenceItem {
   source?: string;
 }
 
-interface RankingItem {
-  repo: string;
-  rank: number;
-  finishFirstScore: number;
-  completionPct: number;
-  productionReadinessPct: number;
-  presentValueUsd: { low: number; high: number };
-  potentialValueUsd: { low: number; high: number };
-  marketNeed: number;
-  demand: number;
-  competitivePressure: number;
-  commercializationProbability: number;
-  remainingWork: { hours: number; costUsd: { low: number; high: number } };
-  evidenceConfidence: number;
+interface RankingItem extends PortfolioRankingItem {
   evidence: EvidenceItem[];
-  rationale: string[];
-  details?: {
-    kind?: string;
-    title?: string;
-    pitch?: string;
-    analysisItemRank?: number | null;
-    scoringPass?: string;
-    completion?: { overall?: number; evidenceCeiling?: number | null };
-    recommendedNextSteps?: string[];
-    valueImprovements?: Array<{
-      id: string;
-      title: string;
-      category: string;
-      problem: string;
-      action: string;
-      whyItRaisesValue: string;
-      estimatedCompletionLiftPts: number;
-      valueImpact: number;
-      effort: number;
-      priority: number;
-      acceptanceHint: string;
-    }>;
-    market?: { market_summary?: string };
-  };
 }
 
-interface IntelligenceResult {
-  methodologyVersion: string;
-  generatedAt: string;
-  analysisId: string;
+interface IntelligenceResult extends Omit<PortfolioIntelligenceSnapshot, 'ranking'> {
   ranking: RankingItem[];
-  errors: string[];
-  portfolio: {
-    reposRequested?: number;
-    reposScored: number;
-    reposInAnalysis?: number;
-    reposDeferred?: number;
-    valueImprovementsGenerated?: number;
-    coveragePct?: number;
-    partialFailures?: number;
-    scope?: string;
-    presentValueLow: number;
-    presentValueHigh: number;
-    potentialValueLow: number;
-    potentialValueHigh: number;
-    weightedCommercializationProbability: number;
-  };
-  recommendation: string;
-  evidencePolicy: string;
 }
 
 function money(value: number) {
@@ -361,59 +311,47 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
             </div>
           </div>
 
+          <RepoScoreMeters
+            completeness={item.completionPct}
+            uniqueness={uniquenessScore(item)}
+            demand={item.demand}
+            competition={item.competitivePressure}
+          />
+
           <div className="grid gap-2 grid-cols-2 xl:grid-cols-4">
-            <div className="rounded border p-3"><div className="text-xs text-muted-foreground">Completion</div><div className="font-semibold">{item.completionPct}%</div><div className="text-[11px] text-muted-foreground">Readiness {item.productionReadinessPct}%{item.details?.completion?.evidenceCeiling != null ? ` · evidence ceiling ${item.details.completion.evidenceCeiling}%` : ""}</div></div>
+            <div className="rounded border p-3"><div className="text-xs text-muted-foreground">Readiness</div><div className="font-semibold">{item.productionReadinessPct}%</div><div className="text-[11px] text-muted-foreground">{item.details?.completion?.evidenceCeiling != null ? `Evidence ceiling ${item.details.completion.evidenceCeiling}%` : "Production readiness"}</div></div>
             <div className="rounded border p-3"><div className="text-xs text-muted-foreground">Standalone present → potential</div><div className="font-semibold break-words">{money(item.presentValueUsd.low)}–{money(item.presentValueUsd.high)}</div><div className="text-[11px] text-emerald-500 break-words">→ {money(item.potentialValueUsd.low)}–{money(item.potentialValueUsd.high)}</div></div>
             <div className="rounded border p-3"><div className="text-xs text-muted-foreground">Remaining work</div><div className="font-semibold">~{Math.round(item.remainingWork.hours)}h</div><div className="text-[11px] text-muted-foreground break-words">{money(item.remainingWork.costUsd.low)}–{money(item.remainingWork.costUsd.high)}</div></div>
-            <div className="rounded border p-3"><div className="text-xs text-muted-foreground">Commercialization</div><div className="font-semibold">{item.commercializationProbability}%</div><div className="text-[11px] text-muted-foreground">Evidence {item.evidenceConfidence}/100</div></div>
+            <div className="rounded border p-3"><div className="text-xs text-muted-foreground">Commercialization</div><div className="font-semibold">{item.commercializationProbability}%</div><div className="text-[11px] text-muted-foreground">Evidence {item.evidenceConfidence}/100 · need {item.marketNeed}/100</div></div>
           </div>
 
-          <div className="grid gap-2 sm:grid-cols-3">
-            <div className="rounded border p-3 text-sm flex justify-between gap-3"><span className="text-muted-foreground">Market need</span><span className="font-semibold">{item.marketNeed}/100</span></div>
-            <div className="rounded border p-3 text-sm flex justify-between gap-3"><span className="text-muted-foreground">Demand</span><span className="font-semibold">{item.demand}/100</span></div>
-            <div className="rounded border p-3 text-sm flex justify-between gap-3"><span className="text-muted-foreground">Competitive pressure</span><span className="font-semibold">{item.competitivePressure}/100</span></div>
-          </div>
+          {(() => {
+            const suggestions = resolveRepoSuggestions(item);
+            const nextSteps = suggestions.map((suggestion) => suggestion.action);
+            return (
+              <>
+                <RepoSuggestionsList suggestions={suggestions} defaultOpen={item.rank <= 3} />
 
-          {item.details?.valueImprovements && item.details.valueImprovements.length > 0 && (
-            <details className="rounded border p-3" open={item.rank <= 3}>
-              <summary className="cursor-pointer text-sm font-medium flex items-center gap-2">
-                <TrendingUp className="h-4 w-4 text-primary" />
-                {item.details.valueImprovements.length} ways to raise value
-              </summary>
-              <ul className="mt-3 space-y-2">
-                {item.details.valueImprovements.slice(0, 12).map((suggestion) => (
-                  <li key={suggestion.id} className="rounded-md border p-3 text-sm space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{suggestion.title}</span>
-                      <Badge variant="outline">impact {suggestion.valueImpact}/5</Badge>
-                      <Badge variant="secondary">~+{suggestion.estimatedCompletionLiftPts} pts</Badge>
-                      <Badge variant="outline">effort {suggestion.effort}/5</Badge>
-                    </div>
-                    <p className="text-xs text-muted-foreground leading-relaxed">{suggestion.action}</p>
-                    <p className="text-[11px] text-muted-foreground">{suggestion.whyItRaisesValue}</p>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-
-          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 space-y-2">
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              A single finish pass opens one draft PR. To actually drive the repo to finished targets, use <span className="font-medium text-foreground">Finish until target</span> — it re-scores and iterates until 95% completion / 90% readiness or a safe stop.
-            </p>
-            <FinishUntilTargetControl
-              repo={item.repo}
-              nextSteps={item.details?.recommendedNextSteps ?? []}
-              analysisId={analysisId}
-              itemRank={typeof item.details?.analysisItemRank === "number" ? item.details.analysisItemRank : undefined}
-            />
-          </div>
-          <FinishRepoAction
-            repo={item.repo}
-            nextSteps={item.details?.recommendedNextSteps ?? []}
-            analysisId={analysisId}
-            itemRank={typeof item.details?.analysisItemRank === "number" ? item.details.analysisItemRank : undefined}
-          />
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 space-y-2">
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    A single finish pass opens one draft PR. To actually drive the repo to finished targets, use <span className="font-medium text-foreground">Finish until target</span> — it re-scores and iterates until 95% completion / 90% readiness or a safe stop.
+                  </p>
+                  <FinishUntilTargetControl
+                    repo={item.repo}
+                    nextSteps={nextSteps}
+                    analysisId={analysisId}
+                    itemRank={typeof item.details?.analysisItemRank === "number" ? item.details.analysisItemRank : undefined}
+                  />
+                </div>
+                <FinishRepoAction
+                  repo={item.repo}
+                  nextSteps={nextSteps}
+                  analysisId={analysisId}
+                  itemRank={typeof item.details?.analysisItemRank === "number" ? item.details.analysisItemRank : undefined}
+                />
+              </>
+            );
+          })()}
           <RepositoryGrowthToolsPanel
             analysisId={analysisId}
             itemRank={typeof item.details?.analysisItemRank === "number" ? item.details.analysisItemRank : item.rank}
@@ -423,7 +361,7 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
           <details className="rounded border p-3">
             <summary className="cursor-pointer text-sm font-medium flex items-center gap-2"><DollarSign className="h-4 w-4" /> Evidence ledger</summary>
             <div className="mt-3 space-y-2">
-              {item.evidence.map((evidence, index) => (
+              {(item.evidence ?? []).map((evidence, index) => (
                 <div key={`${evidence.label}-${index}`} className="rounded-md border p-3">
                   <div className="flex items-center gap-2 flex-wrap"><Badge variant="outline" className={evidenceClass(evidence)}>{evidence.class.replace('_', ' ')}</Badge><span className="text-sm font-medium">{evidence.label}</span></div>
                   <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{evidence.detail}</p>

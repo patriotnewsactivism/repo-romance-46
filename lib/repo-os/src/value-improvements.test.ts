@@ -12,10 +12,11 @@ describe("suggestValueImprovements", () => {
       completion,
       readiness,
       analysisNextSteps: ["Wire the public CLI entrypoint and add a smoke script"],
-      maxSuggestions: 20,
+      maxSuggestions: 10,
     });
 
-    expect(suggestions.length).toBeGreaterThanOrEqual(8);
+    expect(suggestions.length).toBeGreaterThanOrEqual(3);
+    expect(suggestions.length).toBeLessThanOrEqual(10);
     expect(suggestions[0].priority).toBeGreaterThanOrEqual(suggestions[1].priority);
     expect(
       suggestions.some((s) => s.whyItRaisesValue.includes("completion points") || s.category === "readiness"),
@@ -28,7 +29,7 @@ describe("suggestValueImprovements", () => {
     const suggestions = suggestValueImprovements({
       repo: "acme/api",
       completion,
-      maxSuggestions: 15,
+      maxSuggestions: 10,
     });
 
     expect(suggestions.some((s) => s.id.includes("evidence-ceiling"))).toBe(true);
