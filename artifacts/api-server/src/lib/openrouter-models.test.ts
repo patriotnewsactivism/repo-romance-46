@@ -31,6 +31,7 @@ describe("OpenRouter model normalization", () => {
       contextLength: 1_000_000,
       supportsReasoning: true,
       supportedEfforts: ["high", "xhigh"],
+      exposesReasoningEffort: true,
       defaultEffort: "high",
       supportsReasoningMaxTokens: true,
       supportsTools: true,
@@ -44,6 +45,35 @@ describe("OpenRouter model normalization", () => {
     expect(model?.inputPricePerMillion).toBeNull();
     expect(model?.outputPricePerMillion).toBeNull();
     expect(model?.isFree).toBe(false);
+  });
+
+  it("does not expose effort selection when the catalog omits supported_efforts", () => {
+    const model = normalizeOpenRouterModel({
+      id: "apodex/apodex-1.1-mini:free",
+      name: "Apodex: Apodex 1.1 Mini (free)",
+      pricing: { prompt: "0", completion: "0" },
+      supported_parameters: ["reasoning", "response_format", "structured_outputs", "tools"],
+      reasoning: { mandatory: false },
+    });
+    expect(model).toMatchObject({
+      id: "apodex/apodex-1.1-mini:free",
+      supportsReasoning: true,
+      supportedEfforts: [],
+      exposesReasoningEffort: false,
+      reasoningMandatory: false,
+      isFree: true,
+    });
+  });
+
+  it("treats an explicit null supported_efforts list as every gateway effort", () => {
+    const model = normalizeOpenRouterModel({
+      id: "vendor/open-effort",
+      reasoning: { mandatory: false, supported_efforts: null },
+    });
+    expect(model).toMatchObject({
+      supportedEfforts: null,
+      exposesReasoningEffort: true,
+    });
   });
 
   it("rejects unsupported saved reasoning effort values", () => {
