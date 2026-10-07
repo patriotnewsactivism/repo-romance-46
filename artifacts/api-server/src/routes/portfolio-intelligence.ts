@@ -1,10 +1,13 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod";
 import {
+  buildRepoSuggestions,
+  displayScore1to100,
   estimateCommercializationProbability,
   estimateRemainingWork,
   projectPotential,
   rankInvestmentOpportunities,
+  scoreUniqueness,
   valueRepository,
   type IntelligenceEvidence,
   type InvestmentOpportunityInput,
@@ -198,7 +201,27 @@ function marketModel(repo: GhRepo, context: AnalysisItemContext | null) {
   const traction = tractionScore(repo);
   const marketNeed = Math.round(clamp(context?.marketPotential ? context.marketPotential * 20 : 45 + traction * 0.22));
   const demand = Math.round(clamp(28 + traction * 0.48 + activity * 0.18));
-  const competitivePressure = 50;
+  // Derive competition from crowdedness proxies instead of a flat 50:
+  // popular/generic repos score higher; focused topics + homepage lower pressure.
+  const competitivePressure = Math.round(
+    clamp(
+      38 +
+        Math.min(28, Math.log10((repo.stargazers_count || 0) + 10) * 9) +
+        Math.min(12, Math.log10((repo.forks_count || 0) + 2) * 5) -
+        Math.min(15, (repo.topics?.length ?? 0) * 3) -
+        (repo.homepage ? 6 : 0) -
+        (repo.description && repo.description.length > 60 ? 4 : 0),
+    ),
+  );
+  const differentiation = Math.round(
+    clamp(
+      50 +
+        Math.min(20, (repo.topics?.length ?? 0) * 3) +
+        (repo.homepage ? 8 : 0) +
+        (repo.description && repo.description.length > 40 ? 6 : 0) -
+        Math.min(20, Math.log10((repo.forks_count || 0) + 2) * 4),
+    ),
+  );
   const baseCustomers = Math.max(20, Math.round((marketNeed + demand) * 1.15));
   const scenarios: ScenarioInput[] = [
     {
@@ -226,7 +249,7 @@ function marketModel(repo: GhRepo, context: AnalysisItemContext | null) {
       assumptions: ["Upside scenario only; not observed traction or a forecast"],
     },
   ];
-  return { marketNeed, demand, competitivePressure, scenarios, activity, traction };
+  return { marketNeed, demand, competitivePressure, differentiation, scenarios, activity, traction };
 }
 
 function missingSteps(signals: ReturnType<typeof structuralScores>["signals"]) {
@@ -257,7 +280,8 @@ function inspectRepoFromAnalysisContext(repoName: string, context: AnalysisItemC
 
   const marketNeed = Math.round(clamp(context?.marketPotential ? context.marketPotential * 20 : 48));
   const demand = Math.round(clamp(28 + marketNeed * 0.42));
-  const competitivePressure = 52;
+  const competitivePressure = Math.round(clamp(48 + (context?.marketPotential ? (5 - context.marketPotential) * 4 : 4)));
+  const differentiation = Math.round(clamp(context?.marketPotential ? 40 + context.marketPotential * 8 : 52));
   const scenarios: ScenarioInput[] = [
     {
       name: "conservative",
@@ -353,15 +377,25 @@ function inspectRepoFromAnalysisContext(repoName: string, context: AnalysisItemC
   ];
 
   const recommendedNextSteps = (context?.nextSteps ?? []).slice(0, 10);
+  const uniquenessPct = scoreUniqueness({
+    differentiation,
+    competitivePressure,
+  });
+  const suggestions = buildRepoSuggestions({
+    repo: repoName,
+    nextSteps: recommendedNextSteps,
+    maxSuggestions: 8,
+  });
   const opportunity: InvestmentOpportunityInput = {
     repo: repoName,
-    completionPct: completion,
+    completionPct: displayScore1to100(completion),
     productionReadinessPct: readiness,
     presentValueUsd: present.range,
     potentialValueUsd: { low: potentialLow, high: potentialHigh },
     marketNeed,
-    demand,
-    competitivePressure,
+    demand: displayScore1to100(demand),
+    competitivePressure: displayScore1to100(competitivePressure),
+    uniquenessPct,
     commercializationProbability,
     remainingWork,
     evidenceConfidence,
@@ -405,9 +439,11 @@ function inspectRepoFromAnalysisContext(repoName: string, context: AnalysisItemC
         market_need_score: marketNeed,
         demand_score: demand,
         competitive_pressure_score: competitivePressure,
+        differentiation,
         confidence: evidenceConfidence,
         market_summary: "Analysis-backed fallback valuation used because fresh GitHub telemetry was unavailable.",
       },
+      suggestions,
       recommendedNextSteps,
       degradedEvidence: true,
       degradedReason: reason,
@@ -522,15 +558,26 @@ async function inspectRepo(token: string, repoName: string, context: AnalysisIte
     ...missingSteps(structural.signals),
   ].filter((step, index, all) => step && all.indexOf(step) === index).slice(0, 10);
 
+  const uniquenessPct = scoreUniqueness({
+    differentiation: market.differentiation,
+    competitivePressure: market.competitivePressure,
+  });
+  const suggestions = buildRepoSuggestions({
+    repo: repoName,
+    nextSteps: recommendedNextSteps,
+    maxSuggestions: 8,
+  });
+
   const opportunity: InvestmentOpportunityInput = {
     repo: repoName,
-    completionPct: structural.completion,
+    completionPct: displayScore1to100(structural.completion),
     productionReadinessPct: structural.readiness,
     presentValueUsd: present.range,
     potentialValueUsd: { low: potentialLow, high: potentialHigh },
     marketNeed: market.marketNeed,
-    demand: market.demand,
-    competitivePressure: market.competitivePressure,
+    demand: displayScore1to100(market.demand),
+    competitivePressure: displayScore1to100(market.competitivePressure),
+    uniquenessPct,
     commercializationProbability,
     remainingWork,
     evidenceConfidence,
@@ -561,9 +608,11 @@ async function inspectRepo(token: string, repoName: string, context: AnalysisIte
         market_need_score: market.marketNeed,
         demand_score: market.demand,
         competitive_pressure_score: market.competitivePressure,
+        differentiation: market.differentiation,
         confidence: evidenceConfidence,
         market_summary: "Full-portfolio planning model using analysis context and verified GitHub telemetry.",
       },
+      suggestions,
       recommendedNextSteps,
     },
   };
@@ -684,6 +733,9 @@ router.post(
         productionReadinessPct: Number(measured.productionReadinessPct ?? entry.opportunity.productionReadinessPct),
         presentValueUsd: (measured.presentValueUsd as typeof entry.opportunity.presentValueUsd) ?? entry.opportunity.presentValueUsd,
         potentialValueUsd: (measured.potentialValueUsd as typeof entry.opportunity.potentialValueUsd) ?? entry.opportunity.potentialValueUsd,
+        demand: Number(measured.demand ?? entry.opportunity.demand),
+        competitivePressure: Number(measured.competitivePressure ?? entry.opportunity.competitivePressure),
+        uniquenessPct: Number(measured.uniquenessPct ?? entry.opportunity.uniquenessPct),
         evidenceConfidence: Number(measured.evidenceConfidence ?? entry.opportunity.evidenceConfidence),
         commercializationProbability: Number(measured.commercializationProbability ?? entry.opportunity.commercializationProbability),
         remainingWork: (measured.remainingWork as typeof entry.opportunity.remainingWork) ?? entry.opportunity.remainingWork,

@@ -28,8 +28,28 @@ import {
   AlertTriangle,
   Loader2,
   Save,
+  Github,
+  Bot,
+  Filter,
+  Bell,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
+
+type SettingsSection = 'github' | 'ai' | 'analysis' | 'discovery' | 'notifications';
+
+const SETTINGS_SECTIONS: Array<{
+  id: SettingsSection;
+  label: string;
+  description: string;
+  icon: typeof Github;
+}> = [
+  { id: 'github', label: 'Account / GitHub', description: 'Connection and sign-out', icon: Github },
+  { id: 'ai', label: 'AI provider', description: 'Model, key, and readiness', icon: Bot },
+  { id: 'analysis', label: 'Analysis quality', description: 'Fast, balanced, or deep', icon: Brain },
+  { id: 'discovery', label: 'Repository discovery', description: 'What appears in portfolio scans', icon: Filter },
+  { id: 'notifications', label: 'Notifications', description: 'Email and schedule prefs', icon: Bell },
+];
 
 type CredentialSource = 'byok' | 'platform' | 'none';
 type AiProvider = 'google' | 'openai' | 'anthropic' | 'openrouter' | 'qwen';
@@ -221,7 +241,11 @@ export default function Settings() {
   const [excludeArchived, setExcludeArchived] = useState(true);
   const [minStars, setMinStars] = useState('0');
   const [maxRepos, setMaxRepos] = useState('1000');
+  const [emailNotifications, setEmailNotifications] = useState(false);
+  const [scheduleEnabled, setScheduleEnabled] = useState(false);
+  const [scheduleFrequency, setScheduleFrequency] = useState<'weekly' | 'monthly'>('weekly');
   const [filtersInitialized, setFiltersInitialized] = useState(false);
+  const [activeSection, setActiveSection] = useState<SettingsSection>('github');
 
   useEffect(() => {
     getSession().then(session => {
@@ -236,6 +260,13 @@ export default function Settings() {
       setExcludeArchived(preferences.filter_exclude_archived ?? true);
       setMinStars(String(preferences.filter_min_stars ?? 0));
       setMaxRepos(preferences.filter_max_repos ? String(preferences.filter_max_repos) : '1000');
+      setEmailNotifications(Boolean(preferences.email_notifications));
+      setScheduleEnabled(Boolean(preferences.schedule_enabled));
+      setScheduleFrequency(
+        preferences.schedule_frequency === 'weekly' || preferences.schedule_frequency === 'monthly'
+          ? preferences.schedule_frequency
+          : 'weekly',
+      );
       setFiltersInitialized(true);
     }
   }, [preferences, filtersInitialized]);
@@ -299,17 +330,20 @@ export default function Settings() {
           filter_exclude_archived: excludeArchived,
           filter_min_stars: parsedMinStars,
           filter_max_repos: parsedMaxRepos,
+          email_notifications: emailNotifications,
+          schedule_enabled: scheduleEnabled,
+          schedule_frequency: scheduleFrequency,
         }
       },
       {
         onSuccess: (updated) => {
-          toast.success('Repository settings saved');
+          toast.success('Settings saved');
           if (updated) {
             queryClient.setQueryData(getGetPreferencesQueryKey(), updated);
           }
         },
         onError: (error) => {
-          toast.error('Failed to save repository settings', { description: error.message });
+          toast.error('Failed to save settings', { description: error.message });
         }
       }
     );
@@ -502,14 +536,54 @@ export default function Settings() {
         onSignOut={() => void handleSignOut()}
       />
 
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+          <p className="text-sm text-muted-foreground">
+            Configure GitHub, AI, analysis quality, portfolio discovery, and notifications.
+          </p>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
+          <nav
+            className="flex gap-2 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0"
+            aria-label="Settings sections"
+          >
+            {SETTINGS_SECTIONS.map((section) => {
+              const Icon = section.icon;
+              const selected = activeSection === section.id;
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  onClick={() => setActiveSection(section.id)}
+                  className={cn(
+                    'flex min-w-[10.5rem] items-start gap-3 rounded-lg border px-3 py-3 text-left transition-colors lg:min-w-0',
+                    selected
+                      ? 'border-primary bg-primary/10 text-foreground'
+                      : 'border-border text-muted-foreground hover:border-primary/40 hover:text-foreground',
+                  )}
+                  data-testid={`settings-nav-${section.id}`}
+                >
+                  <Icon className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-foreground">{section.label}</span>
+                    <span className="block text-xs text-muted-foreground">{section.description}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+
+          <div className="space-y-6 min-w-0">
+        {activeSection === 'github' && (
         <Card>
           <CardHeader>
-            <CardTitle>GitHub Connection</CardTitle>
+            <CardTitle>Account / GitHub</CardTitle>
             <CardDescription>Manage your GitHub account connection</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {githubStatus?.connected && (
+            {githubStatus?.connected ? (
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3 min-w-0">
                   {githubStatus.avatarUrl ? (
@@ -536,16 +610,22 @@ export default function Settings() {
                   Disconnect
                 </Button>
               </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                GitHub is not connected. Sign in from the portfolio page to analyze repositories.
+              </p>
             )}
           </CardContent>
         </Card>
+        )}
 
+        {activeSection === 'analysis' && (
         <Card>
           <CardHeader>
-            <CardTitle>Analysis Tier</CardTitle>
-            <CardDescription>Choose the AI analysis depth for future runs</CardDescription>
+            <CardTitle>Analysis quality</CardTitle>
+            <CardDescription>Choose the AI analysis depth for future portfolio scans</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             <div className="grid gap-4 md:grid-cols-3">
               {tierCards.map(tier => {
                 const Icon = tier.icon;
@@ -569,12 +649,24 @@ export default function Settings() {
                 );
               })}
             </div>
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                onClick={handleSave}
+                disabled={updatePreferences.isPending}
+                data-testid="button-save-analysis-settings"
+              >
+                {updatePreferences.isPending ? 'Saving…' : 'Save analysis quality'}
+              </Button>
+            </div>
           </CardContent>
         </Card>
+        )}
 
+        {activeSection === 'ai' && (
         <Card>
           <CardHeader>
-            <CardTitle>AI Provider & Model</CardTitle>
+            <CardTitle>AI provider & model</CardTitle>
             <CardDescription>
               Pick a capable model from the catalog; manual model IDs are optional, not required.
             </CardDescription>
@@ -865,11 +957,15 @@ export default function Settings() {
             </div>
           </CardContent>
         </Card>
+        )}
 
+        {activeSection === 'discovery' && (
         <Card>
           <CardHeader>
-            <CardTitle>Repository Filters</CardTitle>
-            <CardDescription>Analyze a selected limit or every accessible repository in one portfolio run.</CardDescription>
+            <CardTitle>Repository discovery</CardTitle>
+            <CardDescription>
+              Control what appears in your portfolio scan — languages, stars, archived repos, and scope.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -924,19 +1020,92 @@ export default function Settings() {
                 <p className="text-xs text-muted-foreground">All accessible repositories uses paginated GitHub discovery up to 1,000 repos. The selected AI model does not silently shrink that scope.</p>
               </div>
             </div>
+
+            <div className="flex justify-end sticky bottom-4">
+              <Button
+                type="button"
+                onClick={handleSave}
+                disabled={updatePreferences.isPending}
+                size="lg"
+                data-testid="button-save-settings"
+              >
+                {updatePreferences.isPending ? 'Saving…' : 'Save discovery settings'}
+              </Button>
+            </div>
           </CardContent>
         </Card>
+        )}
 
-        <div className="flex justify-end">
-          <Button
-            type="button"
-            onClick={handleSave}
-            disabled={updatePreferences.isPending}
-            size="lg"
-            data-testid="button-save-settings"
-          >
-            {updatePreferences.isPending ? 'Saving...' : 'Save Repository Settings'}
-          </Button>
+        {activeSection === 'notifications' && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Notifications</CardTitle>
+            <CardDescription>Email alerts and optional scheduled portfolio scans.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="email-notifications" className="cursor-pointer min-w-0">
+                <div className="font-semibold mb-1">Email notifications</div>
+                <div className="text-sm text-muted-foreground">
+                  Receive email when a portfolio scan or finish run needs attention
+                </div>
+              </Label>
+              <Switch
+                id="email-notifications"
+                checked={emailNotifications}
+                onCheckedChange={setEmailNotifications}
+                data-testid="switch-email-notifications"
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="schedule-enabled" className="cursor-pointer min-w-0">
+                <div className="font-semibold mb-1">Scheduled scans</div>
+                <div className="text-sm text-muted-foreground">
+                  Periodically re-scan your portfolio with the current discovery filters
+                </div>
+              </Label>
+              <Switch
+                id="schedule-enabled"
+                checked={scheduleEnabled}
+                onCheckedChange={setScheduleEnabled}
+                data-testid="switch-schedule-enabled"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="schedule-frequency">Schedule frequency</Label>
+              <Select
+                value={scheduleFrequency}
+                onValueChange={(value) =>
+                  setScheduleFrequency(value as 'weekly' | 'monthly')
+                }
+                disabled={!scheduleEnabled}
+              >
+                <SelectTrigger id="schedule-frequency" data-testid="select-schedule-frequency">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="weekly">Weekly</SelectItem>
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                onClick={handleSave}
+                disabled={updatePreferences.isPending}
+                data-testid="button-save-notification-settings"
+              >
+                {updatePreferences.isPending ? 'Saving…' : 'Save notification settings'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+        )}
+          </div>
         </div>
       </div>
     </div>

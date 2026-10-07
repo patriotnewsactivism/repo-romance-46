@@ -2,7 +2,9 @@ import { Router, type IRouter } from "express";
 import { z } from "zod";
 import {
   buildRepoIndex,
+  buildRepoSuggestions,
   classifyRepository,
+  displayScore1to100,
   estimateCommercializationProbability,
   estimateRemainingWork,
   primaryKind,
@@ -10,6 +12,7 @@ import {
   rankInvestmentOpportunities,
   scoreCompletion,
   scoreProductionReadiness,
+  scoreUniqueness,
   suggestValueImprovements,
   valueImprovementsToNextSteps,
   valueRepository,
@@ -712,27 +715,53 @@ async function inspectOneRepo(
     completion,
     readiness,
     analysisNextSteps: context?.nextSteps ?? [],
-    maxSuggestions: 24,
+    maxSuggestions: 10,
+  });
+
+  const suggestions = buildRepoSuggestions({
+    repo: repoName,
+    valueImprovements,
+    nextSteps: [...(context?.nextSteps ?? []), ...market.recommended_next_steps],
+    maxSuggestions: 8,
   });
 
   const recommendedNextSteps = [
-    ...valueImprovementsToNextSteps(valueImprovements, 16),
+    ...valueImprovementsToNextSteps(valueImprovements, 10),
     ...market.recommended_next_steps,
     ...(context?.nextSteps ?? []),
   ]
     .filter((step, index, all) => step && all.indexOf(step) === index)
-    .slice(0, 20);
+    .slice(0, 10);
+
+  const differentiation = Math.round(
+    Math.max(
+      1,
+      Math.min(
+        100,
+        55 +
+          Math.min(20, (repo.topics?.length ?? 0) * 3) +
+          (repo.homepage ? 8 : 0) +
+          (repo.description && repo.description.length > 40 ? 6 : 0) -
+          Math.min(25, Math.log10(competition.totalCount + 1) * 8),
+      ),
+    ),
+  );
+  const uniquenessPct = scoreUniqueness({
+    differentiation,
+    competitivePressure: market.competitive_pressure_score,
+  });
 
   return {
     opportunity: {
       repo: repoName,
-      completionPct: completion.overall,
+      completionPct: displayScore1to100(completion.overall),
       productionReadinessPct: readiness.overall,
       presentValueUsd: current.range,
       potentialValueUsd: potentialRange,
       marketNeed: market.market_need_score,
-      demand: market.demand_score,
-      competitivePressure: market.competitive_pressure_score,
+      demand: displayScore1to100(market.demand_score),
+      competitivePressure: displayScore1to100(market.competitive_pressure_score),
+      uniquenessPct,
       commercializationProbability,
       remainingWork,
       evidenceConfidence,
@@ -761,8 +790,9 @@ async function inspectOneRepo(
         homepage: repo.homepage,
         topics: repo.topics ?? [],
       },
-      market: { ...market, githubCompetition: competition },
+      market: { ...market, githubCompetition: competition, differentiation },
       valueImprovements,
+      suggestions,
       recommendedNextSteps,
       autonomousAgentPlan: [
         {
