@@ -11,6 +11,7 @@ import { FinishRepoAction } from '@/components/finish-repo-action';
 import { FinishUntilTargetControl } from '@/components/finish-until-target-control';
 import { VibeToolsPanel } from '@/components/vibe-tools-panel';
 import { RepositoryGrowthToolsPanel } from '@/components/repository-growth-tools-panel';
+import { RepositoryPagination, useRepositoryPagination } from '@/components/repository-pagination';
 import type { Milestone } from '@workspace/api-client-react';
 
 interface RecommendationCardProps {
@@ -27,6 +28,9 @@ export function RecommendationCard({ recommendation, analysisId, isPublic = fals
   const [activeMilestone, setActiveMilestone] = useState<Milestone | null>(null);
   const [showMerge, setShowMerge] = useState(false);
   const getMergeInstructions = useGetMergeInstructions();
+  const repoPagination = useRepositoryPagination(recommendation.repos, JSON.stringify([
+    analysisId, recommendation.id, recommendation.repos,
+  ]));
 
   const kindColors = {
     finish: 'bg-green-500/10 text-green-500 border-green-500/20',
@@ -72,8 +76,13 @@ export function RecommendationCard({ recommendation, analysisId, isPublic = fals
             size="sm"
             onClick={() => setIsOpen(!isOpen)}
             data-testid={`button-expand-${recommendation.rank}`}
-            aria-label={isOpen ? 'Collapse recommendation details' : 'Expand recommendation details'}
+            aria-expanded={isOpen}
+            aria-label={isOpen
+              ? 'Collapse recommendation details'
+              : canAutoFinish ? 'Expand recommendation details and finish options' : 'Expand recommendation details'}
+            className="gap-1 shrink-0"
           >
+            {canAutoFinish && <span className="text-xs">{isOpen ? 'Hide options' : 'Finish options'}</span>}
             {isOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </Button>
         </div>
@@ -118,38 +127,38 @@ export function RecommendationCard({ recommendation, analysisId, isPublic = fals
           </div>
         </div>
 
-        {canAutoFinish && (
-          <div className="space-y-3 border-t border-border pt-4">
-            <div>
-              <h4 className="font-semibold text-sm">Autonomous Finish</h4>
-              <p className="text-xs text-muted-foreground">
-                {activeMilestone
-                  ? `Working ${activeMilestone.title} — its goals replace the default next steps.`
-                  : 'Choose a single bounded completion run or the iterative finish-until-target controller.'}
-              </p>
-            </div>
-            {recommendation.repos.map((repo) => (
-              <div key={repo} className="space-y-3">
-                <FinishRepoAction
-                  repo={repo}
-                  nextSteps={activeMilestone?.goals ?? recommendation.next_steps}
-                  analysisId={analysisId}
-                  itemRank={recommendation.rank}
-                  initialResult={recommendation.finish_result}
-                />
-                <FinishUntilTargetControl
-                  repo={repo}
-                  analysisId={analysisId}
-                  itemRank={recommendation.rank}
-                  nextSteps={activeMilestone?.goals ?? recommendation.next_steps}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-
         <Collapsible open={isOpen} onOpenChange={setIsOpen}>
           <CollapsibleContent className="space-y-4 pt-4 border-t border-border">
+            {!isPublic && repoPagination.pageCount > 1 && <RepositoryPagination {...repoPagination} />}
+            {canAutoFinish && (
+              <div className="space-y-3">
+                <div>
+                  <h4 className="font-semibold text-sm">Autonomous Finish</h4>
+                  <p className="text-xs text-muted-foreground">
+                    {activeMilestone
+                      ? `Working ${activeMilestone.title} — its goals replace the default next steps.`
+                      : 'Choose a single bounded completion run or the iterative finish-until-target controller.'}
+                  </p>
+                </div>
+                {repoPagination.rows.map((repo) => (
+                  <div key={repo} className="space-y-3">
+                    <FinishRepoAction
+                      repo={repo}
+                      nextSteps={activeMilestone?.goals ?? recommendation.next_steps}
+                      analysisId={analysisId}
+                      itemRank={recommendation.rank}
+                      initialResult={recommendation.finish_result}
+                    />
+                    <FinishUntilTargetControl
+                      repo={repo}
+                      analysisId={analysisId}
+                      itemRank={recommendation.rank}
+                      nextSteps={activeMilestone?.goals ?? recommendation.next_steps}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
             {recommendation.next_steps && recommendation.next_steps.length > 0 && (
               <div className="space-y-2">
                 <h4 className="font-semibold text-sm">Next Steps</h4>
@@ -263,7 +272,7 @@ export function RecommendationCard({ recommendation, analysisId, isPublic = fals
               />
             )}
 
-            {!isPublic && recommendation.repos.map((repo) => (
+            {!isPublic && repoPagination.rows.map((repo) => (
               <RepositoryGrowthToolsPanel
                 key={`growth-${repo}`}
                 analysisId={analysisId}
@@ -271,6 +280,7 @@ export function RecommendationCard({ recommendation, analysisId, isPublic = fals
                 repo={repo}
               />
             ))}
+            {!isPublic && repoPagination.pageCount > 1 && <RepositoryPagination {...repoPagination} />}
           </CollapsibleContent>
         </Collapsible>
       </CardContent>

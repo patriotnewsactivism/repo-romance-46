@@ -3,6 +3,7 @@ import { customFetch } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { useStatusPolling } from "@/hooks/use-status-polling";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -166,13 +167,13 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
   const runId = detail?.run.id ?? preview?.runId ?? null;
   const status = detail?.run.status ?? preview?.status ?? null;
 
-  const fetchRun = useCallback(async (id: string) => {
-    return customFetch<RunDetailResponse>(`/api/repo-finisher/runs/${id}`, { responseType: "json" });
+  const fetchRun = useCallback(async (id: string, signal?: AbortSignal) => {
+    return customFetch<RunDetailResponse>(`/api/repo-finisher/runs/${id}`, { responseType: "json", signal });
   }, []);
 
-  const loadRun = useCallback(async (id: string) => {
-    const data = await fetchRun(id);
-    setDetail(data);
+  const loadRun = useCallback(async (id: string, signal?: AbortSignal) => {
+    const data = await fetchRun(id, signal);
+    if (!signal?.aborted) setDetail(data);
     return data;
   }, [fetchRun]);
 
@@ -233,11 +234,12 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
     };
   }, [analysisId, fetchRun, repo]);
 
-  useEffect(() => {
-    if (!runId || (status !== "executing" && status !== "verifying" && status !== "repairing")) return;
-    const timer = window.setInterval(() => void refreshRun(true), 4000);
-    return () => window.clearInterval(timer);
-  }, [refreshRun, runId, status]);
+  useStatusPolling(
+    status === "executing" || status === "verifying" || status === "repairing" ? runId : null,
+    async (signal) => {
+      if (runId) await loadRun(runId, signal);
+    },
+  );
 
   const handleOneClickFinish = async () => {
     setBusy("finish");

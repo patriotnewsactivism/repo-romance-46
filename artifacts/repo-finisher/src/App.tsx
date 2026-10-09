@@ -3,7 +3,7 @@ import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@ta
 import { Toaster as SonnerToaster } from 'sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Route, Switch, Router as WouterRouter, useLocation } from 'wouter';
-import { setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react';
+import { ApiError, setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react';
 import { supabase } from '@/integrations/supabase/client';
 import { captureOperationalError, setSentryRoute, setSentryUser } from '@/lib/observability';
 
@@ -63,6 +63,10 @@ const queryClient = new QueryClient({
     queries: {
       staleTime: 1000 * 60,
       refetchOnWindowFocus: false,
+      // A 429 has already exhausted the API budget; immediate retries only
+      // add pressure and can keep Settings from recovering.
+      retry: (failureCount, error) =>
+        !(error instanceof ApiError && error.status === 429) && failureCount < 3,
     },
   },
 });

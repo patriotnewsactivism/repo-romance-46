@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { customFetch } from "@workspace/api-client-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { useStatusPolling } from "@/hooks/use-status-polling";
 import { DollarSign, ExternalLink, FileText, Loader2, Search, ShieldCheck, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
@@ -62,6 +64,18 @@ type RunDetail = {
   verification: { state: string; message: string } | null;
 };
 
+type PanelState = {
+  growth: GrowthResult | null;
+  preview: Preview | null;
+  detail: RunDetail | null;
+  busy: "research" | "plan" | "execute" | null;
+  docs: string[];
+};
+
+function initialPanelState(): PanelState {
+  return { growth: null, preview: null, detail: null, busy: null, docs: ["README.md", "AGENTS.md", "PLAN.md", "docs"] };
+}
+
 const DOC_OPTIONS = ["README.md", "AGENTS.md", "PLAN.md", "ROADMAP.md", "docs"] as const;
 
 function money(value: number) {
@@ -75,42 +89,50 @@ async function postJson<T>(path: string, body: unknown) {
 }
 
 export function RepositoryGrowthToolsPanel({ analysisId, itemRank, repo }: { analysisId: string; itemRank: number; repo: string }) {
-  const [growth, setGrowth] = useState<GrowthResult | null>(null);
-  const [preview, setPreview] = useState<Preview | null>(null);
-  const [detail, setDetail] = useState<RunDetail | null>(null);
-  const [busy, setBusy] = useState<"research" | "plan" | "execute" | null>(null);
-  const [docs, setDocs] = useState<string[]>(["README.md", "AGENTS.md", "PLAN.md", "docs"]);
+  const queryClient = useQueryClient();
+  const queryKey = useMemo(() => ["repository-growth-tools-panel", analysisId, itemRank, repo], [analysisId, itemRank, repo]);
+  // Pagination unmounts rows; keep generated plans and in-flight action results
+  // in this session's query cache without repeating the costly POST requests.
+  const { data: state } = useQuery<PanelState>({
+    queryKey,
+    enabled: false,
+    initialData: initialPanelState,
+    gcTime: Infinity,
+    staleTime: Infinity,
+  });
+  const { growth, preview, detail, busy, docs } = state;
+  const updateState = useCallback((patch: Partial<PanelState>) => {
+    queryClient.setQueryData<PanelState>(queryKey, (current) => ({ ...(current ?? initialPanelState()), ...patch }));
+  }, [queryClient, queryKey]);
 
-  const loadRun = useCallback(async (runId: string) => {
-    const result = await customFetch<RunDetail>(`/api/repo-finisher/runs/${runId}`, { responseType: "json" });
-    setDetail(result);
+  const loadRun = useCallback(async (runId: string, signal?: AbortSignal) => {
+    const result = await customFetch<RunDetail>(`/api/repo-finisher/runs/${runId}`, { responseType: "json", signal });
+    if (!signal?.aborted) updateState({ detail: result });
     return result;
-  }, []);
+  }, [updateState]);
 
-  useEffect(() => {
-    const status = detail?.run.status;
-    if (!preview?.runId || !status || !["executing", "verifying", "repairing"].includes(status)) return;
-    const timer = window.setInterval(() => void loadRun(preview.runId).catch(() => undefined), 4000);
-    return () => window.clearInterval(timer);
-  }, [detail?.run.status, loadRun, preview?.runId]);
+  useStatusPolling(
+    detail && ["executing", "verifying", "repairing"].includes(detail.run.status) ? preview?.runId ?? null : null,
+    async (signal) => {
+      if (preview?.runId) await loadRun(preview.runId, signal);
+    },
+  );
 
   const research = async () => {
-    setBusy("research");
+    updateState({ busy: "research" });
     try {
       const result = await postJson<GrowthResult>("/api/repo-growth-tools/research", { repo, analysisId, itemRank });
-      setGrowth(result);
+      updateState({ growth: result });
       toast.success(result.research_status === "live" ? "Live market research and growth analysis ready." : "Growth analysis ready; live market research is not configured.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message.slice(0, 240) : "Growth research failed.");
     } finally {
-      setBusy(null);
+      updateState({ busy: null });
     }
   };
 
   const plan = async (kind: "feature" | "documentation", title: string, goals: string[], documentationTargets?: string[]) => {
-    setBusy("plan");
-    setPreview(null);
-    setDetail(null);
+    updateState({ busy: "plan", preview: null, detail: null });
     try {
       const result = await postJson<Preview>("/api/repo-growth-tools/preview", {
         repo,
@@ -121,18 +143,18 @@ export function RepositoryGrowthToolsPanel({ analysisId, itemRank, repo }: { ana
         goals,
         documentationTargets,
       });
-      setPreview(result);
+      updateState({ preview: result });
       toast.success("Exact plan ready. Inspect the proposed files before approving execution.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message.slice(0, 260) : "Unable to build a safe implementation plan.");
     } finally {
-      setBusy(null);
+      updateState({ busy: null });
     }
   };
 
   const approveAndExecute = async () => {
     if (!preview) return;
-    setBusy("execute");
+    updateState({ busy: "execute" });
     try {
       await postJson(`/api/repo-finisher/runs/${preview.runId}/approve`, { planHash: preview.planHash });
       await postJson(`/api/repo-finisher/runs/${preview.runId}/execute`, {});
@@ -142,11 +164,14 @@ export function RepositoryGrowthToolsPanel({ analysisId, itemRank, repo }: { ana
       await loadRun(preview.runId).catch(() => undefined);
       toast.error(error instanceof Error ? error.message.slice(0, 260) : "Implementation failed.");
     } finally {
-      setBusy(null);
+      updateState({ busy: null });
     }
   };
 
-  const toggleDoc = (target: string) => setDocs((current) => current.includes(target) ? current.filter((value) => value !== target) : [...current, target]);
+  const toggleDoc = (target: string) => queryClient.setQueryData<PanelState>(queryKey, (current) => {
+    const saved = current ?? initialPanelState();
+    return { ...saved, docs: saved.docs.includes(target) ? saved.docs.filter((value) => value !== target) : [...saved.docs, target] };
+  });
 
   return (
     <div className="space-y-3 pt-3 border-t border-border">

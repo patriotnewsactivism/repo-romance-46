@@ -9,6 +9,7 @@ import { FinishUntilTargetControl } from '@/components/finish-until-target-contr
 import { PortfolioFinishControl } from '@/components/portfolio-finish-control';
 import { RepoScoreMeters } from '@/components/repo-score-meters';
 import { RepoSuggestionsList } from '@/components/repo-suggestions-list';
+import { RepositoryPagination, useRepositoryPagination } from '@/components/repository-pagination';
 import {
   displayScore,
   resolveRepoSuggestions,
@@ -106,6 +107,10 @@ export function PortfolioRepoBrowser({
     });
     return rows;
   }, [snapshot, query, sort, minCompleteness, closestOnly, language]);
+
+  const pagination = useRepositoryPagination(filtered, JSON.stringify([
+    analysisId, snapshot?.generatedAt, query, sort, minCompleteness, closestOnly, language,
+  ]));
 
   if (loading && !snapshot) {
     return (
@@ -236,15 +241,16 @@ export function PortfolioRepoBrowser({
       </Card>
 
       <p className="text-xs text-muted-foreground">
-        Showing {filtered.length} of {snapshot.ranking.length} scored repositories
+        {filtered.length} of {snapshot.ranking.length} scored repositories match the current filters
       </p>
+      <RepositoryPagination {...pagination} />
 
       <div className="space-y-3">
-        {filtered.map((item) => {
+        {pagination.rows.map((item) => {
           const suggestions = resolveRepoSuggestions(item);
           const nextSteps = suggestions.map((suggestion) => suggestion.action);
           return (
-            <Card key={item.repo} className="overflow-hidden" data-testid={`card-repo-${item.repo}`}>
+            <Card key={`${analysisId}:${item.repo}`} className="overflow-hidden" data-testid={`card-repo-${item.repo}`}>
               <CardContent className="space-y-4 pt-5">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
                   <div className="min-w-0 flex-1 space-y-2">
@@ -312,6 +318,7 @@ export function PortfolioRepoBrowser({
           );
         })}
       </div>
+      {pagination.pageCount > 1 && <RepositoryPagination {...pagination} />}
     </div>
   );
 }

@@ -13,6 +13,7 @@ import { DualNeedleGauge } from '@/components/dual-needle-gauge';
 import { RepositoryGrowthToolsPanel } from '@/components/repository-growth-tools-panel';
 import { RepoScoreMeters } from '@/components/repo-score-meters';
 import { RepoSuggestionsList } from '@/components/repo-suggestions-list';
+import { RepositoryPagination, useRepositoryPagination } from '@/components/repository-pagination';
 import {
   resolveRepoSuggestions,
   uniquenessScore,
@@ -141,6 +142,7 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pagination = useRepositoryPagination(data?.ranking ?? [], `${analysisId}:${data?.generatedAt ?? ''}`);
 
   const load = async () => {
     setLoading(true);
@@ -291,8 +293,10 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
         </Card>
       )}
 
-      {data.ranking.map((item) => (
-        <Card key={item.repo} className="p-4 sm:p-5 space-y-4 overflow-hidden">
+      <RepositoryPagination {...pagination} />
+
+      {pagination.rows.map((item) => (
+        <Card key={`${analysisId}:${item.repo}`} className="p-4 sm:p-5 space-y-4 overflow-hidden">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
@@ -371,6 +375,7 @@ export function InvestmentIntelligenceView({ analysisId }: { analysisId: string 
           </details>
         </Card>
       ))}
+      {pagination.pageCount > 1 && <RepositoryPagination {...pagination} />}
     </div>
   );
 }
