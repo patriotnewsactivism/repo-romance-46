@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { ANALYSIS_BATCH_REQUEST_TIMEOUT_MS, acceptRecommendationPayload, aiBatchConcurrency, analysisBatchOutcome, analysisBatchTimeoutMs, analysisJobBudgetMs, describeAnalysisBatchFailure, getStageModels, profilingProviderTimeoutMs, profilingTimeoutMs, isActionPlanSchemaMissing, actionPlanStateCache } from "./analysis";
 import { DEFAULT_REQUEST_TIMEOUT_MS, providerRequestError } from "../lib/ai-provider";
+import {
+  HIGH_COMPLETION_SCORE,
+  UNGROUNDED_BATCH_MESSAGE,
+  adjustCompletionFromDigest,
+  completionSignalsForRecommendations,
+  groundRecommendationsInDigests,
+  storedSurveyCompletion,
+} from "../lib/survey-evidence";
 
 describe("getStageModels", () => {
   // Production regression: provider "openrouter" had no case here, so every
@@ -77,6 +85,14 @@ describe("profilingTimeoutMs", () => {
 describe("OpenRouter portfolio batch runtime", () => {
   it("limits OpenRouter analysis concurrency to two heavy requests", () => {
     expect(aiBatchConcurrency("openrouter")).toBe(2);
+    expect(aiBatchConcurrency("openrouter", "openai/gpt-4o")).toBe(2);
+  });
+
+  it("runs a pinned free-tier OpenRouter model at concurrency 1", () => {
+    expect(aiBatchConcurrency("openrouter", "apodex/apodex-1.1-mini:free")).toBe(1);
+    expect(aiBatchConcurrency("openrouter", "nex-agi/nex-n2.5-mini:free")).toBe(1);
+    expect(aiBatchConcurrency("openai", "vendor/model:free")).toBe(4);
+    expect(aiBatchConcurrency("github_models", "vendor/model:free")).toBe(2);
   });
 
   it("gives each heavy analysis request seven minutes", () => {
@@ -185,6 +201,159 @@ describe("portfolio survey batch failures", () => {
     if (outcome.ok) return;
     expect(outcome.message.toLowerCase()).not.toMatch(/rate-limit/);
     expect(outcome.message.toLowerCase()).toMatch(/rejected the request parameters/);
+    expect(outcome.message).toMatch(/Provider failure class: parameter/);
+  });
+
+  it("does not call an evidence-gate failure rate-limited", () => {
+    const outcome = analysisBatchOutcome([
+      { status: "rejected", reason: new Error(UNGROUNDED_BATCH_MESSAGE) },
+    ]);
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.message.toLowerCase()).not.toMatch(/rate-limit/);
+    expect(outcome.message.toLowerCase()).toMatch(/cited the repository digest/);
+    expect(outcome.message).not.toMatch(/Provider failure class:/);
+  });
+});
+
+describe("digest evidence gate", () => {
+  const thinDigest = [
+    "REPO: owner/thin-repo",
+    "DESC: unfinished library",
+    "LANG: TypeScript · stars: 0 · forks: 0 · pushed: 2020-01-01T00:00:00Z · size: 2KB",
+    "FILES (2 total, top 2):",
+    "package.json",
+    "src/index.ts",
+    "",
+    "--- FILE: package.json ---",
+    '{"name":"thin-repo","scripts":{"build":"tsc"}}',
+  ].join("\n");
+
+  const evidencedDigest = [
+    "REPO: owner/ready-repo",
+    "LANG: TypeScript · stars: 3 · forks: 0 · pushed: 2020-01-01T00:00:00Z · size: 40KB",
+    "README (truncated):",
+    "Setup, test, and deploy this service.",
+    "FILES (6 total, top 6):",
+    "README.md",
+    "package.json",
+    "src/index.ts",
+    "src/index.test.ts",
+    ".github/workflows/ci.yml",
+    "Dockerfile",
+    "",
+    "--- FILE: package.json ---",
+    '{"scripts":{"test":"vitest"}}',
+    "",
+    "--- FILE: .github/workflows/ci.yml ---",
+    "name: CI",
+  ].join("\n");
+
+  const coercedFinish = () =>
+    acceptRecommendationPayload({
+      summary: "Done.",
+      recommendations: [
+        {
+          kind: "FINISH",
+          title: "owner/thin-repo",
+          description: "owner/thin-repo",
+          effort: 1,
+          market_potential: 5,
+        },
+      ],
+    });
+
+  it("drops a coerced FINISH that does not cite the digest", () => {
+    const accepted = coercedFinish();
+    expect(accepted).not.toBeNull();
+    expect(accepted?.recommendations[0]?.next_steps[0]).toMatch(/repository evidence already collected/);
+    expect(groundRecommendationsInDigests(accepted!.recommendations, [thinDigest])).toEqual([]);
+  });
+
+  it("keeps a recommendation that cites a real digest path", () => {
+    const accepted = acceptRecommendationPayload({
+      recommendations: [
+        {
+          kind: "finish",
+          title: "Finish the library",
+          repos: ["owner/thin-repo"],
+          pitch: "Export the server from src/index.ts.",
+          effort: 3,
+          market_potential: 3,
+          next_steps: ["Add a test script. The digest has no tests.", "Document setup. README is missing."],
+        },
+      ],
+      summary_md: "ok",
+    });
+    const kept = groundRecommendationsInDigests(accepted!.recommendations, [thinDigest]);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]?.repos).toEqual(["owner/thin-repo"]);
+  });
+
+  it("keeps a missing-README claim only when the digest has no README", () => {
+    const claim = (repo: string) =>
+      acceptRecommendationPayload({
+        recommendations: [
+          {
+            kind: "finish",
+            title: `Finish ${repo}`,
+            repos: [repo],
+            pitch: "The repository has no README.",
+            effort: 2,
+            market_potential: 2,
+            next_steps: ["Add a README with setup and verification steps."],
+          },
+        ],
+        summary_md: "ok",
+      })!.recommendations;
+
+    expect(groundRecommendationsInDigests(claim("owner/thin-repo"), [thinDigest])).toHaveLength(1);
+    expect(groundRecommendationsInDigests(claim("owner/ready-repo"), [evidencedDigest])).toEqual([]);
+  });
+
+  it("keeps a recommendation that names a workflow present in the digest", () => {
+    const accepted = acceptRecommendationPayload({
+      recommendations: [
+        {
+          kind: "finish",
+          title: "Keep CI green",
+          repos: ["owner/ready-repo"],
+          pitch: "The .github/workflows/ci.yml workflow already runs the test script.",
+          effort: 2,
+          market_potential: 3,
+          next_steps: ["Extend .github/workflows/ci.yml to publish the image."],
+        },
+      ],
+      summary_md: "ok",
+    });
+    expect(groundRecommendationsInDigests(accepted!.recommendations, [evidencedDigest, thinDigest])).toHaveLength(1);
+  });
+
+  it("does not give a high finish score when the digest has no tests, CI, or README", () => {
+    const scored = adjustCompletionFromDigest(thinDigest, { kind: "finish", effort: 1, nextStepCount: 1 });
+    expect(scored.modelEstimate).toBeGreaterThanOrEqual(HIGH_COMPLETION_SCORE);
+    expect(scored.signals).toMatchObject({ hasTests: false, hasCi: false, hasReadme: false });
+    expect(scored.completionPct).toBeLessThan(HIGH_COMPLETION_SCORE);
+    expect(scored.completionPct).toBeLessThan(scored.modelEstimate ?? 100);
+    expect(scored.completionPct).toBeGreaterThan(0);
+
+    const rich = adjustCompletionFromDigest(evidencedDigest, { kind: "finish", effort: 1, nextStepCount: 1 });
+    expect(rich.signals).toMatchObject({ hasTests: true, hasCi: true, hasReadme: true, hasDeploy: true });
+    expect(rich.completionPct).toBeGreaterThan(scored.completionPct);
+
+    const stored = completionSignalsForRecommendations( [thinDigest], [
+      {
+        kind: "finish",
+        title: "owner/thin-repo",
+        repos: ["owner/thin-repo"],
+        pitch: "Finish it.",
+        effort: 1,
+        next_steps: ["Finish owner/thin-repo from the repository evidence already collected."],
+      },
+    ]);
+    expect(stored["owner/thin-repo"]?.completionPct).toBeLessThan(HIGH_COMPLETION_SCORE);
+    expect(storedSurveyCompletion({ modelEstimate: 84, digestCompletionPct: null })).toBeLessThan(HIGH_COMPLETION_SCORE);
+    expect(storedSurveyCompletion({ modelEstimate: 84, digestCompletionPct: scored.completionPct })).toBe(scored.completionPct);
   });
 });
 
