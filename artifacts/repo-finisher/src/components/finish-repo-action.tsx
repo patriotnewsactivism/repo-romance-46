@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { customFetch } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useStatusPolling } from "@/hooks/use-status-polling";
+import { useRepoHistory } from "@/hooks/use-repo-history";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -158,24 +159,77 @@ function statusClass(status: RunStatus | null) {
 
 export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initialResult, compact = false }: FinishRepoActionProps) {
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
-  const [detail, setDetail] = useState<RunDetailResponse | null>(null);
+  const [dismissedRunId, setDismissedRunId] = useState<string | null>(null);
   const [busy, setBusy] = useState<"finish" | "approve" | "execute" | "cancel" | "refresh" | "prompt" | "copy" | null>(null);
   const [showPlan, setShowPlan] = useState(false);
-  const [externalPrompt, setExternalPrompt] = useState<ExternalPromptResponse | null>(null);
   const [promptProvider, setPromptProvider] = useState<ExternalPromptProvider>("provider-neutral");
-
-  const runId = detail?.run.id ?? preview?.runId ?? null;
-  const status = detail?.run.status ?? preview?.status ?? null;
 
   const fetchRun = useCallback(async (id: string, signal?: AbortSignal) => {
     return customFetch<RunDetailResponse>(`/api/repo-finisher/runs/${id}`, { responseType: "json", signal });
   }, []);
 
-  const loadRun = useCallback(async (id: string, signal?: AbortSignal) => {
+  const restoreRun = useCallback(async (signal: AbortSignal) => {
+    const params = new URLSearchParams({ repo, limit: "1" });
+    if (analysisId) params.set("analysisId", analysisId);
+    const runs = await customFetch<Array<{ id: string }>>(`/api/repo-finisher/runs?${params.toString()}`, { responseType: "json", signal });
+    return Array.isArray(runs) && runs.length > 0 ? fetchRun(runs[0].id, signal) : null;
+  }, [analysisId, fetchRun, repo]);
+
+  const restorePrompt = useCallback(async (signal: AbortSignal): Promise<ExternalPromptResponse | null> => {
+    const params = new URLSearchParams({ repo, limit: "1" });
+    if (analysisId) params.set("analysisId", analysisId);
+    const prompts = await customFetch<Array<{ id: string }>>(`/api/repo-finisher/external-prompts?${params.toString()}`, { responseType: "json", signal });
+    if (!Array.isArray(prompts) || prompts.length === 0) return null;
+    const full = await customFetch<{
+      id: string;
+      created_at: string;
+      prompt_md: string;
+      provider_hint: ExternalPromptProvider;
+      prompt_version: string;
+      assessment: ExternalPromptResponse["assessment"];
+    }>(`/api/repo-finisher/external-prompts/${prompts[0].id}`, { responseType: "json", signal });
+    return full.prompt_md ? {
+      id: full.id,
+      createdAt: full.created_at,
+      prompt: full.prompt_md,
+      provider: full.provider_hint,
+      promptVersion: full.prompt_version,
+      assessment: full.assessment,
+      note: "Restored from the last generated handoff for this repository.",
+    } : null;
+  }, [analysisId, repo]);
+
+  const runHistory = useRepoHistory("run", repo, analysisId, restoreRun);
+  const promptHistory = useRepoHistory("external-prompt", repo, analysisId, restorePrompt);
+  const { scope } = runHistory;
+  const detail = runHistory.data
+    && runHistory.data.run.id !== dismissedRunId
+    && (!preview || runHistory.data.run.id === preview.runId) ? runHistory.data : null;
+  const externalPrompt = promptHistory.data;
+  const runId = detail?.run.id ?? preview?.runId ?? null;
+  const status = detail?.run.status ?? preview?.status ?? null;
+
+  const postForCurrentUser = async <T,>(path: string, body?: unknown): Promise<T> => {
+    if (!scope.userId || !scope.isCurrent()) throw new Error("Your account changed. Start the action again.");
+    const result = await postJson<T>(path, body);
+    if (!scope.userId || !scope.isCurrent()) throw new Error("Your account changed. Start the action again.");
+    return result;
+  };
+
+  useLayoutEffect(() => {
+    setPreview(null);
+    setDismissedRunId(null);
+    setBusy(null);
+    setShowPlan(false);
+  }, [repo, analysisId, scope.generation]);
+
+  const loadRun = useCallback(async (id: string, signal?: AbortSignal, latest = false) => {
+    if (!runHistory.scope.userId || !runHistory.scope.isCurrent()) throw new Error("Your account changed. Refresh the current account's run.");
+    const readRevision = runHistory.beginRead();
     const data = await fetchRun(id, signal);
-    if (!signal?.aborted) setDetail(data);
+    if (!signal?.aborted) await runHistory.publish(data, latest, readRevision);
     return data;
-  }, [fetchRun]);
+  }, [fetchRun, runHistory.publish, runHistory.beginRead, runHistory.scope]);
 
   const refreshRun = useCallback(async (quiet = false) => {
     if (!runId) return;
@@ -190,49 +244,8 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
   }, [loadRun, runId]);
 
   useEffect(() => {
-    let cancelled = false;
-    const params = new URLSearchParams({ repo, limit: "1" });
-    if (analysisId) params.set("analysisId", analysisId);
-    customFetch<Array<{ id: string }>>(`/api/repo-finisher/runs?${params.toString()}`, { responseType: "json" })
-      .then(async (runs) => {
-        if (cancelled || !Array.isArray(runs) || runs.length === 0) return;
-        const loaded = await fetchRun(runs[0].id);
-        if (cancelled) return;
-        setDetail(loaded);
-        setShowPlan(Boolean(loaded.run.summary));
-      })
-      .catch(() => undefined);
-
-    const promptParams = new URLSearchParams({ repo, limit: "1" });
-    if (analysisId) promptParams.set("analysisId", analysisId);
-    customFetch<Array<{ id: string }>>(`/api/repo-finisher/external-prompts?${promptParams.toString()}`, { responseType: "json" })
-      .then(async (prompts) => {
-        if (cancelled || !Array.isArray(prompts) || prompts.length === 0) return;
-        const full = await customFetch<{
-          id: string;
-          created_at: string;
-          prompt_md: string;
-          provider_hint: ExternalPromptProvider;
-          prompt_version: string;
-          assessment: ExternalPromptResponse["assessment"];
-        }>(`/api/repo-finisher/external-prompts/${prompts[0].id}`, { responseType: "json" });
-        if (cancelled || !full.prompt_md) return;
-        setExternalPrompt({
-          id: full.id,
-          createdAt: full.created_at,
-          prompt: full.prompt_md,
-          provider: full.provider_hint,
-          promptVersion: full.prompt_version,
-          assessment: full.assessment,
-          note: "Restored from the last generated handoff for this repository.",
-        });
-      })
-      .catch(() => undefined);
-
-    return () => {
-      cancelled = true;
-    };
-  }, [analysisId, fetchRun, repo]);
+    if (!preview && detail?.run.summary) setShowPlan(true);
+  }, [detail?.run.id, preview]);
 
   useStatusPolling(
     status === "executing" || status === "verifying" || status === "repairing" ? runId : null,
@@ -244,11 +257,12 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
   const handleOneClickFinish = async () => {
     setBusy("finish");
     setPreview(null);
-    setDetail(null);
+    setDismissedRunId(runHistory.data?.run.id ?? null);
     setShowPlan(false);
     let createdRunId: string | null = null;
 
     try {
+      await runHistory.prepareForUpdate();
       const payload: Record<string, unknown> = {
         repo,
         nextSteps,
@@ -259,13 +273,13 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
       };
       if (typeof itemRank === "number" && itemRank >= 0) payload.itemRank = itemRank;
 
-      const planned = await postJson<PreviewResponse>("/api/repo-finisher/agentic-preview", payload);
+      const planned = await postForCurrentUser<PreviewResponse>("/api/repo-finisher/agentic-preview", payload);
       createdRunId = planned.runId;
-      setPreview(planned);
+      if (scope.isCurrent()) setPreview(planned);
 
-      await postJson(`/api/repo-finisher/runs/${planned.runId}/approve`, { planHash: planned.planHash });
-      await postJson(`/api/repo-finisher/runs/${planned.runId}/execute`);
-      const latest = await loadRun(planned.runId);
+      await postForCurrentUser(`/api/repo-finisher/runs/${planned.runId}/approve`, { planHash: planned.planHash });
+      await postForCurrentUser(`/api/repo-finisher/runs/${planned.runId}/execute`);
+      const latest = await loadRun(planned.runId, undefined, true);
 
       if (latest.run.status === "succeeded") {
         toast.success(`${repo.split("/")[1]} was finished and verified in a draft PR.`);
@@ -277,7 +291,7 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
         toast.success(`Autonomous completion run started for ${repo.split("/")[1]}.`);
       }
     } catch (error) {
-      if (createdRunId) await loadRun(createdRunId).catch(() => undefined);
+      if (createdRunId) await loadRun(createdRunId, undefined, true).catch(() => undefined);
       toast.error(error instanceof Error ? error.message.slice(0, 240) : "Autonomous finishing failed.");
     } finally {
       setBusy(null);
@@ -287,10 +301,11 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
   const handleExternalPrompt = async () => {
     setBusy("prompt");
     try {
+      await promptHistory.prepareForUpdate();
       const payload: Record<string, unknown> = { repo, analysisId, provider: promptProvider };
       if (typeof itemRank === "number" && itemRank >= 0) payload.itemRank = itemRank;
-      const generated = await postJson<ExternalPromptResponse>("/api/repo-finisher/external-prompt", payload);
-      setExternalPrompt(generated);
+      const generated = await postForCurrentUser<ExternalPromptResponse>("/api/repo-finisher/external-prompt", payload);
+      await promptHistory.publish(generated, true);
       toast.success(`Current-state completion prompt generated for ${repo.split("/")[1]}.`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message.slice(0, 240) : "Unable to generate external completion prompt.");
@@ -319,7 +334,8 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
     if (!approvalRunId || !approvalPlanHash) return;
     setBusy("approve");
     try {
-      await postJson(`/api/repo-finisher/runs/${approvalRunId}/approve`, { planHash: approvalPlanHash });
+      await runHistory.prepareForUpdate();
+      await postForCurrentUser(`/api/repo-finisher/runs/${approvalRunId}/approve`, { planHash: approvalPlanHash });
       await loadRun(approvalRunId);
       toast.success("Exact plan approved. You can resume execution.");
     } catch (error) {
@@ -333,7 +349,8 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
     if (!runId) return;
     setBusy("execute");
     try {
-      await postJson(`/api/repo-finisher/runs/${runId}/execute`);
+      await runHistory.prepareForUpdate();
+      await postForCurrentUser(`/api/repo-finisher/runs/${runId}/execute`);
       await loadRun(runId);
       toast.success("Execution resumed; CI verification and any explicitly authorized bounded repair remain enforced.");
     } catch (error) {
@@ -348,7 +365,8 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
     if (!runId) return;
     setBusy("cancel");
     try {
-      await postJson(`/api/repo-finisher/runs/${runId}/cancel`);
+      await runHistory.prepareForUpdate();
+      await postForCurrentUser(`/api/repo-finisher/runs/${runId}/cancel`);
       await loadRun(runId);
       toast.success("Completion run cancelled.");
     } catch (error) {
@@ -360,7 +378,7 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
 
   const reset = () => {
     setPreview(null);
-    setDetail(null);
+    setDismissedRunId(runHistory.data?.run.id ?? null);
     setShowPlan(false);
   };
 

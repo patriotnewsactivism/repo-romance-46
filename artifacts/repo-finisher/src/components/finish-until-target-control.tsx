@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { customFetch } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useStatusPolling } from "@/hooks/use-status-polling";
+import { useRepoHistory } from "@/hooks/use-repo-history";
 import { CheckCircle2, ExternalLink, Loader2, RefreshCw, Repeat2, ShieldCheck, Square } from "lucide-react";
 import { toast } from "sonner";
 
@@ -61,7 +62,6 @@ export function FinishUntilTargetControl({
   itemRank?: number;
   nextSteps?: string[];
 }) {
-  const [detail, setDetail] = useState<DetailResponse | null>(null);
   const [busy, setBusy] = useState<"create" | "refresh" | "cancel" | null>(null);
   const [expanded, setExpanded] = useState(false);
 
@@ -69,33 +69,45 @@ export function FinishUntilTargetControl({
     return customFetch<DetailResponse>(`/api/repo-finisher/completion-sessions/${sessionId}`, { responseType: "json", signal });
   }, []);
 
+  const restoreSession = useCallback(async (signal: AbortSignal) => {
+    const sessions = await customFetch<FinishSession[]>(`/api/repo-finisher/completion-sessions?repo=${encodeURIComponent(repo)}`, { responseType: "json", signal });
+    if (!Array.isArray(sessions) || sessions.length === 0) return null;
+    const recent = sessions.find((candidate) => candidate.status === "active") ?? sessions[0];
+    return fetchSession(recent.id, signal);
+  }, [fetchSession, repo]);
+
+  // This endpoint selects sessions by repository regardless of analysisId.
+  const sessionHistory = useRepoHistory("completion-session", repo, undefined, restoreSession);
+  const detail = sessionHistory.data ?? null;
+
+  const postForCurrentUser = async <T,>(path: string, body?: unknown): Promise<T> => {
+    if (!sessionHistory.scope.userId || !sessionHistory.scope.isCurrent()) throw new Error("Your account changed. Start the action again.");
+    const result = await postJson<T>(path, body);
+    if (!sessionHistory.scope.userId || !sessionHistory.scope.isCurrent()) throw new Error("Your account changed. Start the action again.");
+    return result;
+  };
+
+  useLayoutEffect(() => {
+    setBusy(null);
+    setExpanded(false);
+  }, [repo, sessionHistory.scope.generation]);
+
   const load = useCallback(async (sessionId: string, quiet = false, signal?: AbortSignal) => {
     if (!quiet) setBusy("refresh");
     try {
+      if (!sessionHistory.scope.userId || !sessionHistory.scope.isCurrent()) throw new Error("Your account changed. Refresh the current account's session.");
+      const readRevision = sessionHistory.beginRead();
       const result = await fetchSession(sessionId, signal);
-      if (!signal?.aborted) setDetail(result);
+      if (!signal?.aborted) await sessionHistory.publish(result, false, readRevision);
       return result;
     } finally {
       if (!quiet) setBusy(null);
     }
-  }, [fetchSession]);
+  }, [fetchSession, sessionHistory.publish, sessionHistory.beginRead, sessionHistory.scope]);
 
   useEffect(() => {
-    let cancelled = false;
-    customFetch<FinishSession[]>(`/api/repo-finisher/completion-sessions?repo=${encodeURIComponent(repo)}`, { responseType: "json" })
-      .then(async (sessions) => {
-        if (cancelled || !Array.isArray(sessions) || sessions.length === 0) return;
-        const recent = sessions.find((candidate) => candidate.status === "active") ?? sessions[0];
-        const loaded = await fetchSession(recent.id);
-        if (cancelled) return;
-        setDetail(loaded);
-        if (loaded.session.status === "active") setExpanded(true);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [analysisId, fetchSession, repo]);
+    if (detail?.session.status === "active") setExpanded(true);
+  }, [detail?.session.id]);
 
   useStatusPolling(
     detail?.session.status === "active" ? detail.session.id : null,
@@ -107,6 +119,7 @@ export function FinishUntilTargetControl({
   const start = async () => {
     setBusy("create");
     try {
+      await sessionHistory.prepareForUpdate();
       const payload: Record<string, unknown> = {
         repo,
         analysisId,
@@ -118,10 +131,10 @@ export function FinishUntilTargetControl({
         boundedAutonomyAcknowledged: true,
       };
       if (typeof itemRank === "number") payload.itemRank = itemRank;
-      const result = await postJson<CreateResponse>("/api/repo-finisher/completion-sessions", payload);
-      const loaded = await load(result.session.id, true);
-      setDetail(loaded);
-      setExpanded(true);
+      const result = await postForCurrentUser<CreateResponse>("/api/repo-finisher/completion-sessions", payload);
+      await sessionHistory.publish({ session: result.session, iterations: [], events: [], automaticMerge: false });
+      await load(result.session.id, true);
+      if (sessionHistory.scope.isCurrent()) setExpanded(true);
       if (result.session.status === "succeeded") {
         toast.success("Repository already meets the requested finish targets.");
       } else {
@@ -131,11 +144,8 @@ export function FinishUntilTargetControl({
       const message = error instanceof Error ? error.message : "Unable to start finish-until-target.";
       if (/already exists/i.test(message)) {
         try {
-          const sessions = await customFetch<FinishSession[]>(`/api/repo-finisher/completion-sessions?repo=${encodeURIComponent(repo)}`, { responseType: "json" });
-          const recent = sessions.find((candidate) => candidate.status === "active") ?? sessions[0];
-          if (recent) {
-            const loaded = await load(recent.id, true);
-            setDetail(loaded);
+          const loaded = await sessionHistory.refetch();
+          if (loaded.data && sessionHistory.scope.isCurrent()) {
             setExpanded(true);
             toast.success("Resumed the existing finish-until-target session.");
             return;
@@ -154,7 +164,8 @@ export function FinishUntilTargetControl({
     if (!detail?.session.id) return;
     setBusy("cancel");
     try {
-      await postJson(`/api/repo-finisher/completion-sessions/${detail.session.id}/cancel`);
+      await sessionHistory.prepareForUpdate();
+      await postForCurrentUser(`/api/repo-finisher/completion-sessions/${detail.session.id}/cancel`);
       await load(detail.session.id, true);
       toast.success("Finish-until-target stopped. The draft branch/PR was preserved for inspection.");
     } catch (error) {

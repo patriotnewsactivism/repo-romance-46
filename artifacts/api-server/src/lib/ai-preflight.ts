@@ -1,4 +1,10 @@
-import { callAI, type AIProviderConfig, type AIResponse } from "./ai-provider";
+import {
+  callAI,
+  classifyProviderFailure,
+  type AIProviderConfig,
+  type AIResponse,
+  type ProviderFailureClass,
+} from "./ai-provider";
 
 const PREFLIGHT_TIMEOUT_MS = 20_000;
 // Free OpenRouter models stall in bursts (a healthy model can take 1s, then 40s
@@ -16,6 +22,8 @@ type PublicHttpError = Error & {
   status?: number;
   code?: string;
   publicMessage?: string;
+  /** Sanitized classification for callers; never carries the upstream body. */
+  providerFailureKind?: ProviderFailureClass;
 };
 
 /** Turn a provider failure into a message a person can act on. */
@@ -25,31 +33,34 @@ export function describePreflightFailure(
   error: unknown,
 ): string {
   const raw = error instanceof Error ? error.message : String(error);
+  const kind = classifyProviderFailure(error);
   const label = model ? `${provider} / ${model}` : provider;
   if (
-    /401|unauthor|missing authentication|invalid.*key|incorrect api key/i.test(
+    kind === "auth" || /401|unauthor|missing authentication|invalid.*key|incorrect api key/i.test(
       raw,
     )
   ) {
     return `The ${provider} key was rejected (${label}). Re-save the key in Settings, or switch provider.`;
   }
-  if (/402|insufficient|credit|billing|balance/i.test(raw)) {
+  if (kind === "payment" || /402|insufficient|credit|billing|balance/i.test(raw)) {
     return `The ${provider} account has no credit for ${label}. Add credit or pick a free model.`;
   }
   if (
-    /404|not found|no endpoints|model.*not.*(found|exist|available)|invalid model/i.test(
+    kind === "unknown_model" || /404|not found|no endpoints|model.*not.*(found|exist|available)|invalid model/i.test(
       raw,
     )
   ) {
     return `${provider} does not recognise the model "${model ?? "(default)"}". Check the exact name in Settings.`;
   }
-  if (/429|rate.?limit|too many/i.test(raw)) {
+  if (kind === "rate_limit" || /429|rate.?limit|too many/i.test(raw)) {
     return `${label} is rate-limited right now. Retry shortly or choose another model.`;
   }
   if (/timed out|exceeded|abort/i.test(raw)) {
     return `${label} did not answer within ${PREFLIGHT_FREE_RETRY_TIMEOUT_MS / 1000}s. Free models stall under load: retry in a minute, or pick the default pool / a paid model.`;
   }
-  return `${label} failed its readiness check: ${raw.slice(0, 200)}`;
+  // Provider bodies can contain credentials or request details. Keep unknown
+  // failures actionable without reflecting any upstream text to the browser.
+  return `${label} failed its readiness check. Check the provider credential and selected model, then try again.`;
 }
 
 /**
@@ -112,6 +123,7 @@ export async function assertAiReady(config: AIProviderConfig): Promise<AIRespons
       status: 422,
       code: "AI_PREFLIGHT_FAILED",
       publicMessage: message,
+      providerFailureKind: classifyProviderFailure(error),
     }) as PublicHttpError;
   }
 }

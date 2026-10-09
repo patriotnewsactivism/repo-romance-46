@@ -1,15 +1,12 @@
 import { useEffect, useRef } from "react";
-import { ApiError } from "@workspace/api-client-react";
+import { readRateLimitCooldown } from "@/lib/api-rate-limit";
 
 const POLL_INTERVAL_MS = 30_000;
 
 function retryDelay(error: unknown): number {
-  if (!(error instanceof ApiError) || error.status !== 429) return POLL_INTERVAL_MS;
-  const retryAfter = error.headers.get("Retry-After");
-  if (!retryAfter) return POLL_INTERVAL_MS;
-  const seconds = Number(retryAfter);
-  const delay = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter) - Date.now();
-  return Number.isFinite(delay) ? Math.max(POLL_INTERVAL_MS, delay) : POLL_INTERVAL_MS;
+  const now = Date.now();
+  const cooldown = readRateLimitCooldown(error, now);
+  return cooldown ? Math.max(POLL_INTERVAL_MS, cooldown.retryAt - now) : POLL_INTERVAL_MS;
 }
 
 /** Poll active work without overlapping requests or spending quota in hidden tabs. */
