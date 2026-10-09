@@ -36,6 +36,10 @@ interface PortfolioRepoBrowserProps {
 
 function languageHint(item: PortfolioRankingItem): string {
   if (item.details?.language) return item.details.language;
+  const githubLanguage = item.details?.github && 'language' in item.details.github
+    ? (item.details.github as { language?: string | null }).language
+    : null;
+  if (githubLanguage) return githubLanguage;
   const kind = item.details?.kind;
   return kind || 'repo';
 }
@@ -50,13 +54,26 @@ export function PortfolioRepoBrowser({
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortKey>('finish-first');
   const [minCompleteness, setMinCompleteness] = useState(0);
+  const [language, setLanguage] = useState('all');
   const [closestOnly, setClosestOnly] = useState(false);
+
+  const languages = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of snapshot?.ranking ?? []) {
+      const hint = languageHint(item);
+      if (hint && hint !== 'repo') set.add(hint);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [snapshot]);
 
   const filtered = useMemo(() => {
     const ranking = snapshot?.ranking ?? [];
     const q = query.trim().toLowerCase();
     let rows = ranking.filter((item) => {
       if (q && !item.repo.toLowerCase().includes(q) && !(item.details?.title || '').toLowerCase().includes(q)) {
+        return false;
+      }
+      if (language !== 'all' && languageHint(item).toLowerCase() !== language.toLowerCase()) {
         return false;
       }
       if (displayScore(item.completionPct) < minCompleteness) return false;
@@ -88,7 +105,7 @@ export function PortfolioRepoBrowser({
       return a.repo.localeCompare(b.repo);
     });
     return rows;
-  }, [snapshot, query, sort, minCompleteness, closestOnly]);
+  }, [snapshot, query, sort, minCompleteness, closestOnly, language]);
 
   if (loading && !snapshot) {
     return (
@@ -174,6 +191,22 @@ export function PortfolioRepoBrowser({
               <option value="uniqueness">Uniqueness</option>
               <option value="demand">Demand</option>
               <option value="competition">Competition</option>
+            </select>
+          </label>
+          <label className="space-y-1 text-xs text-muted-foreground">
+            Language
+            <select
+              className="flex h-9 w-full min-w-[8rem] rounded-md border border-input bg-background px-3 text-sm text-foreground"
+              value={language}
+              onChange={(event) => setLanguage(event.target.value)}
+              data-testid="select-portfolio-language"
+            >
+              <option value="all">All languages</option>
+              {languages.map((entry) => (
+                <option key={entry} value={entry}>
+                  {entry}
+                </option>
+              ))}
             </select>
           </label>
           <label className="space-y-1 text-xs text-muted-foreground">

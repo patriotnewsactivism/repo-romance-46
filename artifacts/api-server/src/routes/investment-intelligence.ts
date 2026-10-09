@@ -6,6 +6,7 @@ import {
   classifyRepository,
   displayScore1to100,
   estimateCommercializationProbability,
+  estimatePortfolioOverlapPct,
   estimateRemainingWork,
   primaryKind,
   projectPotential,
@@ -788,8 +789,10 @@ async function inspectOneRepo(
         sourceFiles: sourceFiles.length,
         sourceBytes,
         homepage: repo.homepage,
+        language: repo.language,
         topics: repo.topics ?? [],
       },
+      language: repo.language,
       market: { ...market, githubCompetition: competition, differentiation },
       valueImprovements,
       suggestions,
@@ -895,7 +898,38 @@ export async function generateAndPersistInvestmentIntelligence(input: {
     throw new Error(`Investment intelligence failed for every repository: ${errors.join("; ")}`);
   }
 
-  const ranked = rankInvestmentOpportunities(inspected.map((entry) => entry.opportunity));
+  const overlaps = estimatePortfolioOverlapPct(
+    inspected.map((entry) => {
+      const github = entry.details.github as
+        | { language?: string | null; topics?: string[] }
+        | undefined;
+      const context = contexts.get(entry.opportunity.repo);
+      return {
+        repo: entry.opportunity.repo,
+        title: context?.title ?? entry.opportunity.repo.split("/").pop() ?? entry.opportunity.repo,
+        pitch: context?.pitch ?? null,
+        language: typeof github?.language === "string" ? github.language : null,
+        topics: Array.isArray(github?.topics) ? github.topics : null,
+        kind: typeof entry.details.kind === "string" ? entry.details.kind : null,
+      };
+    }),
+  );
+  const opportunities = inspected.map((entry) => {
+    const overlapSimilarityPct = overlaps.get(entry.opportunity.repo) ?? 0;
+    const differentiation =
+      typeof (entry.details.market as { differentiation?: number } | undefined)?.differentiation === "number"
+        ? (entry.details.market as { differentiation: number }).differentiation
+        : null;
+    return {
+      ...entry.opportunity,
+      uniquenessPct: scoreUniqueness({
+        overlapSimilarityPct,
+        differentiation,
+        competitivePressure: entry.opportunity.competitivePressure,
+      }),
+    };
+  });
+  const ranked = rankInvestmentOpportunities(opportunities);
   const detailByRepo = new Map(inspected.map((entry) => [entry.details.repo, entry.details]));
   const ranking = ranked.map((entry) => ({
     ...entry,
