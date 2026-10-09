@@ -4,6 +4,7 @@ import {
   buildRepoSuggestions,
   displayScore1to100,
   estimateCommercializationProbability,
+  estimatePortfolioOverlapPct,
   estimateRemainingWork,
   projectPotential,
   rankInvestmentOpportunities,
@@ -432,14 +433,17 @@ function inspectRepoFromAnalysisContext(repoName: string, context: AnalysisItemC
       kind: context?.kind || "finish",
       title: context?.title || repoName.split("/").pop() || repoName,
       pitch: context?.pitch || "Repository valuation derived from completed portfolio analysis evidence.",
+      language: null,
       github: {
         stars: 0,
         forks: 0,
         subscribers: 0,
         openIssues: 0,
         lastPush: "",
+        language: null,
         sourceFiles: 0,
         sourceBytes: 0,
+        topics: [],
       },
       completion: {
         overall: completion,
@@ -614,14 +618,17 @@ async function inspectRepo(token: string, repoName: string, context: AnalysisIte
       kind: context?.kind || "finish",
       title: context?.title || repo.name,
       pitch: context?.pitch || repo.description || "No repository description supplied.",
+      language: repo.language,
       github: {
         stars: repo.stargazers_count,
         forks: repo.forks_count,
         subscribers: repo.subscribers_count,
         openIssues: repo.open_issues_count,
         lastPush: repo.pushed_at,
+        language: repo.language,
         sourceFiles: structural.source.files,
         sourceBytes: structural.source.bytes,
+        topics: repo.topics ?? [],
       },
       completion: { overall: structural.completion, signals: structural.signals },
       readiness: { overall: structural.readiness },
@@ -770,10 +777,52 @@ router.post(
       ? (existingIntelligence.ranking as Array<Record<string, unknown>>)
       : [];
     const measuredByRepo = new Map(existingRanking.map((row) => [String(row.repo || ""), row]));
+    const overlaps = estimatePortfolioOverlapPct(
+      inspected.map((entry) => ({
+        repo: entry.opportunity.repo,
+        title: typeof entry.details.title === "string" ? entry.details.title : null,
+        pitch: typeof entry.details.pitch === "string" ? entry.details.pitch : null,
+        language:
+          typeof entry.details.language === "string"
+            ? entry.details.language
+            : typeof (entry.details.github as { language?: string } | undefined)?.language === "string"
+              ? (entry.details.github as { language?: string }).language
+              : null,
+        topics: Array.isArray((entry.details.github as { topics?: string[] } | undefined)?.topics)
+          ? (entry.details.github as { topics?: string[] }).topics
+          : null,
+        kind: typeof entry.details.kind === "string" ? entry.details.kind : null,
+      })),
+    );
     const opportunities = inspected.map((entry) => {
       const measured = existingIsMeasured ? measuredByRepo.get(entry.opportunity.repo) : undefined;
+      const overlapSimilarityPct = overlaps.get(entry.opportunity.repo) ?? 0;
+      const uniquenessPct = scoreUniqueness({
+        overlapSimilarityPct,
+        differentiation:
+          typeof (entry.details.market as { differentiation?: number } | undefined)?.differentiation === "number"
+            ? (entry.details.market as { differentiation?: number }).differentiation
+            : null,
+        competitivePressure: entry.opportunity.competitivePressure,
+      });
       if (!measured || typeof measured.completionPct !== "number") {
-        return { ...entry.opportunity, evidence: [...(entry.opportunity.evidence ?? []), { class: "derived" as const, label: "Scoring pass", detail: "Coverage heuristic. Open Finish, Value & Reports after a deep score to replace this with measured completion." }] };
+        return {
+          ...entry.opportunity,
+          uniquenessPct,
+          evidence: [
+            ...(entry.opportunity.evidence ?? []),
+            {
+              class: "derived" as const,
+              label: "Scoring pass",
+              detail: "Coverage heuristic. Open Finish, Value & Reports after a deep score to replace this with measured completion.",
+            },
+            {
+              class: "derived" as const,
+              label: "Portfolio uniqueness",
+              detail: `Uniqueness ${uniquenessPct}/100 using ${overlapSimilarityPct}% strongest in-portfolio overlap.`,
+            },
+          ],
+        };
       }
       return {
         ...entry.opportunity,
@@ -783,7 +832,7 @@ router.post(
         potentialValueUsd: (measured.potentialValueUsd as typeof entry.opportunity.potentialValueUsd) ?? entry.opportunity.potentialValueUsd,
         demand: Number(measured.demand ?? entry.opportunity.demand),
         competitivePressure: Number(measured.competitivePressure ?? entry.opportunity.competitivePressure),
-        uniquenessPct: Number(measured.uniquenessPct ?? entry.opportunity.uniquenessPct),
+        uniquenessPct,
         evidenceConfidence: Number(measured.evidenceConfidence ?? entry.opportunity.evidenceConfidence),
         commercializationProbability: Number(measured.commercializationProbability ?? entry.opportunity.commercializationProbability),
         remainingWork: (measured.remainingWork as typeof entry.opportunity.remainingWork) ?? entry.opportunity.remainingWork,
