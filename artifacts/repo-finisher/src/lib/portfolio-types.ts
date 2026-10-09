@@ -51,7 +51,7 @@ export interface PortfolioRankingItem {
       acceptanceHint: string;
     }>;
     market?: { market_summary?: string; differentiation?: number };
-    github?: { stars?: number; lastPush?: string };
+    github?: { stars?: number; lastPush?: string; language?: string | null; topics?: string[] };
     completion?: { overall?: number; evidenceCeiling?: number | null };
   };
 }
