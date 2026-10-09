@@ -3,6 +3,7 @@ import {
   buildRepoSuggestions,
   displayScore1to100,
   estimateCommercializationProbability,
+  estimatePortfolioOverlapPct,
   estimateRemainingWork,
   rankInvestmentOpportunities,
   scoreUniqueness,
@@ -74,6 +75,36 @@ describe("Repository Investment Intelligence", () => {
     expect(suggestions.length).toBeGreaterThanOrEqual(3);
     expect(suggestions.length).toBeLessThanOrEqual(10);
     expect(suggestions.every((s) => s.title && s.action && s.why)).toBe(true);
+  });
+
+  it("estimates higher portfolio overlap for near-duplicate product descriptions", () => {
+    const overlaps = estimatePortfolioOverlapPct([
+      {
+        repo: "acme/invoice-saas",
+        title: "Invoice SaaS",
+        pitch: "Subscription billing invoices for small businesses",
+        language: "TypeScript",
+        topics: ["saas", "billing", "invoices"],
+        kind: "finish",
+      },
+      {
+        repo: "acme/billing-invoices",
+        title: "Billing Invoices",
+        pitch: "Subscription billing invoices SaaS for small businesses",
+        language: "TypeScript",
+        topics: ["saas", "billing", "invoices"],
+        kind: "finish",
+      },
+      {
+        repo: "acme/garden-sensor",
+        title: "Garden Sensor",
+        pitch: "Soil moisture firmware for outdoor planters",
+        language: "C",
+        topics: ["iot", "firmware"],
+        kind: "finish",
+      },
+    ]);
+    expect(overlaps.get("acme/invoice-saas") ?? 0).toBeGreaterThan(overlaps.get("acme/garden-sensor") ?? 0);
   });
 
   it("keeps commercialization estimates bounded", () => {

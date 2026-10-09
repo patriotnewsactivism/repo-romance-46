@@ -82,6 +82,63 @@ export function displayScore1to100(value: number, options?: { notMeasured?: bool
   return Math.max(1, Math.round(clamped));
 }
 
+function tokenSet(parts: Array<string | null | undefined>): Set<string> {
+  const tokens = new Set<string>();
+  for (const part of parts) {
+    if (!part) continue;
+    for (const token of part.toLowerCase().split(/[^a-z0-9]+/g)) {
+      if (token.length >= 3) tokens.add(token);
+    }
+  }
+  return tokens;
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let intersection = 0;
+  for (const value of a) if (b.has(value)) intersection += 1;
+  return intersection / Math.max(1, a.size + b.size - intersection);
+}
+
+/**
+ * Estimate each repo's strongest in-portfolio IP overlap (0–100).
+ * Used to sharpen uniqueness when full portfolio valuation is unavailable.
+ */
+export function estimatePortfolioOverlapPct(
+  repos: Array<{
+    repo: string;
+    title?: string | null;
+    pitch?: string | null;
+    language?: string | null;
+    topics?: string[] | null;
+    kind?: string | null;
+  }>,
+): Map<string, number> {
+  const prepared = repos.map((repo) => ({
+    repo: repo.repo,
+    language: repo.language?.toLowerCase() || "",
+    kind: repo.kind?.toLowerCase() || "",
+    topics: new Set((repo.topics ?? []).map((topic) => topic.toLowerCase())),
+    tokens: tokenSet([repo.repo, repo.title ?? undefined, repo.pitch ?? undefined, ...(repo.topics ?? [])]),
+  }));
+  const overlaps = new Map<string, number>();
+  for (let i = 0; i < prepared.length; i += 1) {
+    let best = 0;
+    for (let j = 0; j < prepared.length; j += 1) {
+      if (i === j) continue;
+      let score = jaccard(prepared[i].tokens, prepared[j].tokens) * 0.72;
+      if (prepared[i].language && prepared[i].language === prepared[j].language) score += 0.1;
+      if (prepared[i].kind && prepared[i].kind === prepared[j].kind) score += 0.08;
+      if (prepared[i].topics.size && prepared[j].topics.size) {
+        score += jaccard(prepared[i].topics, prepared[j].topics) * 0.1;
+      }
+      best = Math.max(best, Math.min(1, score));
+    }
+    overlaps.set(prepared[i].repo, Math.round(best * 1000) / 10);
+  }
+  return overlaps;
+}
+
 /**
  * Uniqueness combines inverse portfolio IP overlap, differentiation signal,
  * and inverse competitive pressure.
