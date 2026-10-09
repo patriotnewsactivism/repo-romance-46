@@ -3,6 +3,7 @@ import { customFetch } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { useStatusPolling } from "@/hooks/use-status-polling";
 import { CheckCircle2, ExternalLink, Loader2, RefreshCw, Repeat2, ShieldCheck, Square } from "lucide-react";
 import { toast } from "sonner";
 
@@ -64,15 +65,15 @@ export function FinishUntilTargetControl({
   const [busy, setBusy] = useState<"create" | "refresh" | "cancel" | null>(null);
   const [expanded, setExpanded] = useState(false);
 
-  const fetchSession = useCallback(async (sessionId: string) => {
-    return customFetch<DetailResponse>(`/api/repo-finisher/completion-sessions/${sessionId}`, { responseType: "json" });
+  const fetchSession = useCallback(async (sessionId: string, signal?: AbortSignal) => {
+    return customFetch<DetailResponse>(`/api/repo-finisher/completion-sessions/${sessionId}`, { responseType: "json", signal });
   }, []);
 
-  const load = useCallback(async (sessionId: string, quiet = false) => {
+  const load = useCallback(async (sessionId: string, quiet = false, signal?: AbortSignal) => {
     if (!quiet) setBusy("refresh");
     try {
-      const result = await fetchSession(sessionId);
-      setDetail(result);
+      const result = await fetchSession(sessionId, signal);
+      if (!signal?.aborted) setDetail(result);
       return result;
     } finally {
       if (!quiet) setBusy(null);
@@ -96,12 +97,12 @@ export function FinishUntilTargetControl({
     };
   }, [analysisId, fetchSession, repo]);
 
-  useEffect(() => {
-    const session = detail?.session;
-    if (!session || session.status !== "active") return;
-    const timer = window.setInterval(() => void load(session.id, true).catch(() => undefined), 5000);
-    return () => window.clearInterval(timer);
-  }, [detail?.session?.id, detail?.session?.status, load]);
+  useStatusPolling(
+    detail?.session.status === "active" ? detail.session.id : null,
+    async (signal) => {
+      if (detail?.session.id) await load(detail.session.id, true, signal);
+    },
+  );
 
   const start = async () => {
     setBusy("create");
