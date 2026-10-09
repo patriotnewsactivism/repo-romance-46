@@ -427,8 +427,20 @@ router.post(
       captureException(error, {
         tags: { subsystem: "ai-provider-test", provider: credential.provider },
       });
-      const publicMessage =
-        (error as { publicMessage?: string }).publicMessage ?? providerTestMessage(error);
+      const preflightError = error as { publicMessage?: string; providerFailureKind?: string };
+      const publicMessage = preflightError.publicMessage ?? providerTestMessage(error);
+      if (preflightError.providerFailureKind === "rate_limit") {
+        // The probe does not preserve upstream Retry-After headers. Offer a
+        // conservative retry interval, rather than claiming a provider hint.
+        const retryAfterSeconds = 60;
+        res.setHeader("Retry-After", String(retryAfterSeconds));
+        res.status(429).json({
+          error: publicMessage,
+          code: "AI_PROVIDER_RATE_LIMITED",
+          retry_after: retryAfterSeconds,
+        });
+        return;
+      }
       throw Object.assign(new Error(publicMessage), { status: 422 });
     }
   }),

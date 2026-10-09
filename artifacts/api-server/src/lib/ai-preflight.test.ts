@@ -85,7 +85,47 @@ describe("assertAiReady", () => {
       status: 422,
       code: "AI_PREFLIGHT_FAILED",
       publicMessage: expect.stringMatching(/key was rejected/),
+      providerFailureKind: "auth",
     });
+  });
+
+  it("preserves the analysis 422 contract while classifying a provider rate limit", async () => {
+    vi.spyOn(provider, "callAI").mockRejectedValue(
+      Object.assign(new Error("private provider response"), {
+        upstreamStatus: 429,
+        code: "AI_PROVIDER_RATE_LIMITED",
+        publicMessage: "private upstream message",
+      }),
+    );
+    await expect(
+      assertAiReady({ provider: "qwen", model: "qwen-plus", apiKey: "private-key" }),
+    ).rejects.toMatchObject({
+      status: 422,
+      code: "AI_PREFLIGHT_FAILED",
+      providerFailureKind: "rate_limit",
+      publicMessage: "qwen / qwen-plus is rate-limited right now. Retry shortly or choose another model.",
+    });
+  });
+
+  it("does not copy raw bodies, secrets or unknown statuses into a preflight error", async () => {
+    vi.spyOn(provider, "callAI").mockRejectedValue(
+      Object.assign(new Error("provider failed: api_key=private-key, response=private-body"), {
+        status: 418,
+        upstreamStatus: 418,
+        code: "PRIVATE_UPSTREAM_CODE",
+        details: { api_key: "private-key" },
+      }),
+    );
+    const error = await assertAiReady({ provider: "qwen", model: "qwen-plus", apiKey: "private-key" })
+      .catch((failure: unknown) => failure);
+    expect(error).toMatchObject({
+      status: 422,
+      code: "AI_PREFLIGHT_FAILED",
+      providerFailureKind: "other",
+    });
+    expect(error).not.toHaveProperty("upstreamStatus");
+    expect(error).not.toHaveProperty("details");
+    expect(String(error)).not.toMatch(/private-key|private-body|PRIVATE_UPSTREAM_CODE/);
   });
 });
 

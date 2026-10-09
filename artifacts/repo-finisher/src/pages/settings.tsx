@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'wouter';
 import {
   useGetPreferences,
@@ -6,6 +6,7 @@ import {
   getGetPreferencesQueryKey,
   useDisconnectGithub,
   useGetGithubStatus,
+  getGetGithubStatusQueryKey,
   customFetch,
 } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -35,6 +36,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { useRateLimitCooldown } from '@/hooks/use-rate-limit-cooldown';
 
 type SettingsSection = 'github' | 'ai' | 'analysis' | 'discovery' | 'notifications';
 
@@ -213,10 +215,18 @@ function formatContext(tokens: number) {
 export default function Settings() {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
-  const { data: preferences, isLoading } = useGetPreferences();
-  const { data: githubStatus } = useGetGithubStatus();
+  const { recordRateLimit, sharedSeconds, providerSeconds, sharedScope, canRequestApi, canTestProvider } = useRateLimitCooldown();
+  const { data: preferences, isLoading, error: preferencesError } = useGetPreferences({ query: { queryKey: getGetPreferencesQueryKey(), enabled: sharedSeconds === 0 } });
+  const { data: githubStatus, error: githubStatusError } = useGetGithubStatus({ query: { queryKey: getGetGithubStatusQueryKey(), enabled: sharedSeconds === 0 } });
   const updatePreferences = useUpdatePreferences();
   const disconnectGithub = useDisconnectGithub();
+  const aiDraftEdited = useRef(false);
+  const aiDraftVersion = useRef(0);
+  const aiActionInFlight = useRef(false);
+  const preferencesSaveInFlight = useRef(false);
+  const aiStatusInFlight = useRef(false);
+  const aiWriteGeneration = useRef(0);
+  const catalogInFlight = useRef(false);
 
   const [aiProvider, setAiProvider] = useState<AiProvider>('openrouter');
   const [aiModel, setAiModel] = useState('');
@@ -248,6 +258,16 @@ export default function Settings() {
   const [filtersInitialized, setFiltersInitialized] = useState(false);
   const [activeSection, setActiveSection] = useState<SettingsSection>('github');
 
+  const editAiDraft = () => {
+    aiDraftEdited.current = true;
+    aiDraftVersion.current += 1;
+  };
+
+  useEffect(() => {
+    recordRateLimit(preferencesError);
+    recordRateLimit(githubStatusError);
+  }, [preferencesError, githubStatusError, recordRateLimit]);
+
   useEffect(() => {
     getSession().then(session => {
       if (!session) setLocation('/auth');
@@ -273,17 +293,27 @@ export default function Settings() {
   }, [preferences, filtersInitialized]);
 
   const loadAiStatus = async () => {
+    if (!canRequestApi() || aiStatusInFlight.current) return;
+    aiStatusInFlight.current = true;
+    const requestGeneration = aiWriteGeneration.current;
     setAiStatusLoading(true);
     setAiStatusError(null);
     try {
       const status = await customFetch<AiProviderStatus>('/api/preferences/ai-status', { responseType: 'json' });
+      if (requestGeneration !== aiWriteGeneration.current) return;
       setAiStatus(status);
-      setAiProvider(normalizeProvider(status.requested_provider || status.active_provider));
-      setAiModel(status.requested_model || '');
-      setAiReasoningEffort(status.requested_reasoning_effort || '');
+      if (!aiDraftEdited.current) {
+        setAiProvider(normalizeProvider(status.requested_provider || status.active_provider));
+        setAiModel(status.requested_model || '');
+        setAiReasoningEffort(status.requested_reasoning_effort || '');
+      }
     } catch (error) {
-      setAiStatusError(error instanceof Error ? error.message : 'Unable to read AI provider status');
+      recordRateLimit(error);
+      if (requestGeneration === aiWriteGeneration.current) {
+        setAiStatusError(error instanceof Error ? error.message : 'Unable to read AI provider status');
+      }
     } finally {
+      aiStatusInFlight.current = false;
       setAiStatusLoading(false);
     }
   };
@@ -293,6 +323,8 @@ export default function Settings() {
   }, []);
 
   const loadOpenRouterModels = async () => {
+    if (!canRequestApi() || catalogInFlight.current) return;
+    catalogInFlight.current = true;
     setOpenRouterModelsLoading(true);
     setOpenRouterModelsError(null);
     try {
@@ -303,8 +335,10 @@ export default function Settings() {
       );
       setOpenRouterModels(result.models || []);
     } catch (error) {
+      recordRateLimit(error);
       setOpenRouterModelsError(error instanceof Error ? error.message : 'Unable to load OpenRouter models');
     } finally {
+      catalogInFlight.current = false;
       setOpenRouterModelsLoading(false);
     }
   };
@@ -315,6 +349,8 @@ export default function Settings() {
   }, [aiProvider, openRouterSort, aiStatus?.stored_key_set]);
 
   const handleSave = () => {
+    if (!canRequestApi() || preferencesSaveInFlight.current) return;
+    preferencesSaveInFlight.current = true;
     const languagesArray = filterLanguages
       .split(',')
       .map(l => l.trim())
@@ -344,13 +380,19 @@ export default function Settings() {
           }
         },
         onError: (error) => {
+          recordRateLimit(error);
           toast.error('Failed to save settings', { description: error.message });
-        }
+        },
+        onSettled: () => { preferencesSaveInFlight.current = false; },
       }
     );
   };
 
   const handleSaveAiProvider = async () => {
+    if (!canRequestApi() || aiActionInFlight.current) return;
+    aiActionInFlight.current = true;
+    aiWriteGeneration.current += 1;
+    const submittedVersion = aiDraftVersion.current;
     setSavingAi(true);
     try {
       const saved = await customFetch<AiSaveResult>('/api/preferences/ai', {
@@ -364,25 +406,35 @@ export default function Settings() {
         }),
       });
       setAiStatus(saved);
-      setAiProvider(normalizeProvider(saved.requested_provider || saved.active_provider));
-      setAiModel(saved.requested_model || '');
-      setAiReasoningEffort(saved.requested_reasoning_effort || '');
-      setAiKey('');
+      setAiStatusError(null);
+      if (aiDraftVersion.current === submittedVersion) {
+        aiDraftEdited.current = false;
+        setAiProvider(normalizeProvider(saved.requested_provider || saved.active_provider));
+        setAiModel(saved.requested_model || '');
+        setAiReasoningEffort(saved.requested_reasoning_effort || '');
+        setAiKey('');
+      }
       toast.success(`${providerLabel(saved.active_provider)} settings saved`, {
         description: saved.configured
           ? `${credentialLabel(saved.credential_source)}${saved.active_model ? ` · ${saved.active_model}` : ''}`
           : 'Settings were saved, but this provider still needs a usable credential.',
       });
     } catch (error) {
+      recordRateLimit(error);
       toast.error('Failed to save AI provider', {
         description: error instanceof Error ? error.message : 'The AI provider settings could not be saved.',
       });
     } finally {
+      aiActionInFlight.current = false;
       setSavingAi(false);
     }
   };
 
   const handleClearAiKey = async () => {
+    if (!canRequestApi() || aiActionInFlight.current) return;
+    aiActionInFlight.current = true;
+    aiWriteGeneration.current += 1;
+    const submittedVersion = aiDraftVersion.current;
     setSavingAi(true);
     try {
       const saved = await customFetch<AiSaveResult>('/api/preferences/ai', {
@@ -396,18 +448,23 @@ export default function Settings() {
         }),
       });
       setAiStatus(saved);
-      setAiKey('');
+      setAiStatusError(null);
+      if (aiDraftVersion.current === submittedVersion) setAiKey('');
       toast.success('Stored API key removed');
     } catch (error) {
+      recordRateLimit(error);
       toast.error('Failed to remove stored API key', {
         description: error instanceof Error ? error.message : 'The stored key could not be removed.',
       });
     } finally {
+      aiActionInFlight.current = false;
       setSavingAi(false);
     }
   };
 
   const handleTestProvider = async () => {
+    if (!canTestProvider() || aiActionInFlight.current) return;
+    aiActionInFlight.current = true;
     setTestingAi(true);
     try {
       const result = await customFetch<AiTestResult>('/api/preferences/ai-test', {
@@ -420,10 +477,12 @@ export default function Settings() {
       });
       await loadAiStatus();
     } catch (error) {
+      recordRateLimit(error);
       toast.error('AI provider test failed', {
         description: error instanceof Error ? error.message : 'The provider did not pass the readiness check.',
       });
     } finally {
+      aiActionInFlight.current = false;
       setTestingAi(false);
     }
   };
@@ -545,6 +604,18 @@ export default function Settings() {
           </p>
         </div>
 
+        {sharedSeconds > 0 && (
+          <div role="status" aria-live="polite" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm" data-testid="settings-rate-limit-cooldown">
+            <p className="font-medium">{sharedScope === 'api' ? 'API request limit reached.' : 'Too many requests.'} Try again in {sharedSeconds}s.</p>
+            <p className="mt-1 text-muted-foreground">Your edits are kept. Save again when the countdown ends.</p>
+          </div>
+        )}
+        {providerSeconds > 0 && (
+          <div role="status" aria-live="polite" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm" data-testid="settings-provider-cooldown">
+            AI provider request limit reached. You can test again in {providerSeconds}s.
+          </div>
+        )}
+
         <div className="grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
           <nav
             className="flex gap-2 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0"
@@ -654,7 +725,7 @@ export default function Settings() {
               <Button
                 type="button"
                 onClick={handleSave}
-                disabled={updatePreferences.isPending}
+                disabled={updatePreferences.isPending || sharedSeconds > 0}
                 data-testid="button-save-analysis-settings"
               >
                 {updatePreferences.isPending ? 'Saving…' : 'Save analysis quality'}
@@ -677,6 +748,7 @@ export default function Settings() {
               <div className="space-y-2">
                 <Label htmlFor="ai-provider">Provider</Label>
                 <Select value={aiProvider} onValueChange={(value) => {
+                  editAiDraft();
                   setAiProvider(value as AiProvider);
                   setAiModel('');
                   setAiReasoningEffort('');
@@ -698,7 +770,7 @@ export default function Settings() {
                 {aiProvider !== 'openrouter' ? (
                   <>
                     <Label htmlFor="ai-model">Model preset</Label>
-                    <Select value={aiModel ? selectedCatalogModel : '__default__'} onValueChange={(value) => setAiModel(value === '__default__' || value === '__custom__' ? '' : value)}>
+                    <Select value={aiModel ? selectedCatalogModel : '__default__'} onValueChange={(value) => { editAiDraft(); setAiModel(value === '__default__' || value === '__custom__' ? '' : value); }}>
                       <SelectTrigger id="ai-model" data-testid="select-ai-model">
                         <SelectValue placeholder="Choose a model" />
                       </SelectTrigger>
@@ -714,13 +786,13 @@ export default function Settings() {
                   <>
                     <div className="flex items-center justify-between gap-2">
                       <Label htmlFor="openrouter-model-search">Live OpenRouter catalog</Label>
-                      <Button type="button" variant="ghost" size="sm" onClick={() => void loadOpenRouterModels()} disabled={openRouterModelsLoading}>
+                      <Button type="button" variant="ghost" size="sm" onClick={() => void loadOpenRouterModels()} disabled={openRouterModelsLoading || sharedSeconds > 0}>
                         {openRouterModelsLoading ? 'Loading…' : 'Refresh'}
                       </Button>
                     </div>
                     <button
                       type="button"
-                      onClick={() => setAiModel(OPENROUTER_FREE_AGENT_POOL_MODEL)}
+                      onClick={() => { editAiDraft(); setAiModel(OPENROUTER_FREE_AGENT_POOL_MODEL); }}
                       className={`w-full rounded-md border p-3 text-left hover:bg-muted/40 ${aiModel === OPENROUTER_FREE_AGENT_POOL_MODEL ? 'bg-primary/10 ring-1 ring-inset ring-primary/50' : ''}`}
                       data-testid="button-free-agent-pool"
                     >
@@ -789,6 +861,7 @@ export default function Settings() {
                           key={model.id}
                           type="button"
                           onClick={() => {
+                            editAiDraft();
                             setAiModel(model.id);
                             if (!model.supportsReasoning || model.exposesReasoningEffort === false) setAiReasoningEffort('');
                             else if (model.defaultEffort) setAiReasoningEffort(model.defaultEffort);
@@ -819,7 +892,7 @@ export default function Settings() {
                 )}
                 <Input
                   value={aiModel}
-                  onChange={(e) => setAiModel(e.target.value)}
+                  onChange={(e) => { editAiDraft(); setAiModel(e.target.value); }}
                   placeholder={`Exact model slug: ${modelPlaceholder(aiProvider)}`}
                   autoCapitalize="none"
                   autoCorrect="off"
@@ -832,7 +905,7 @@ export default function Settings() {
                 {aiProvider === 'openrouter' && availableReasoningEfforts.length > 0 ? (
                   <div className="space-y-2 rounded-md border p-3">
                     <Label>Reasoning effort</Label>
-                    <Select value={aiReasoningEffort || '__default__'} onValueChange={(value) => setAiReasoningEffort(value === '__default__' ? '' : value as OpenRouterReasoningEffort)}>
+                    <Select value={aiReasoningEffort || '__default__'} onValueChange={(value) => { editAiDraft(); setAiReasoningEffort(value === '__default__' ? '' : value as OpenRouterReasoningEffort); }}>
                       <SelectTrigger data-testid="select-openrouter-reasoning"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__default__">Model/provider default</SelectItem>
@@ -857,7 +930,7 @@ export default function Settings() {
                 id="ai-key"
                 type="password"
                 value={aiKey}
-                onChange={(e) => setAiKey(e.target.value)}
+                onChange={(e) => { editAiDraft(); setAiKey(e.target.value); }}
                 placeholder={aiStatus?.stored_key_set || preferences?.custom_ai_key_set ? 'A key is stored — type to replace it' : 'Optional provider API key'}
                 autoCapitalize="none"
                 autoCorrect="off"
@@ -875,7 +948,7 @@ export default function Settings() {
               <Button
                 type="button"
                 onClick={handleSaveAiProvider}
-                disabled={savingAi}
+                disabled={savingAi || testingAi || sharedSeconds > 0}
                 data-testid="button-save-ai-provider"
               >
                 {savingAi ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
@@ -886,7 +959,7 @@ export default function Settings() {
                   type="button"
                   variant="outline"
                   onClick={handleClearAiKey}
-                  disabled={savingAi}
+                  disabled={savingAi || testingAi || sharedSeconds > 0}
                   data-testid="button-clear-ai-key"
                 >
                   Remove stored key
@@ -931,7 +1004,7 @@ export default function Settings() {
                   variant="outline"
                   size="sm"
                   onClick={handleTestProvider}
-                  disabled={testingAi || !aiStatus?.configured || aiHasUnsavedChanges}
+                  disabled={testingAi || savingAi || sharedSeconds > 0 || providerSeconds > 0 || !aiStatus?.configured || aiHasUnsavedChanges}
                   data-testid="button-test-ai-provider"
                 >
                   {testingAi && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
@@ -942,7 +1015,8 @@ export default function Settings() {
                   variant="ghost"
                   size="sm"
                   onClick={() => void loadAiStatus()}
-                  disabled={aiStatusLoading}
+                  disabled={aiStatusLoading || savingAi || testingAi || sharedSeconds > 0}
+                  data-testid="button-refresh-ai-status"
                 >
                   Refresh status
                 </Button>
@@ -1026,7 +1100,7 @@ export default function Settings() {
               <Button
                 type="button"
                 onClick={handleSave}
-                disabled={updatePreferences.isPending}
+                disabled={updatePreferences.isPending || sharedSeconds > 0}
                 size="lg"
                 data-testid="button-save-settings"
               >
@@ -1097,7 +1171,7 @@ export default function Settings() {
               <Button
                 type="button"
                 onClick={handleSave}
-                disabled={updatePreferences.isPending}
+                disabled={updatePreferences.isPending || sharedSeconds > 0}
                 data-testid="button-save-notification-settings"
               >
                 {updatePreferences.isPending ? 'Saving…' : 'Save notification settings'}

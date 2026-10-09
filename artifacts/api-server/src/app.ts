@@ -1,7 +1,5 @@
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
-import cors from "cors";
 import helmet from "helmet";
-import rateLimit from "express-rate-limit";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import aiSettingsRolloutRouter from "./routes/ai-settings-rollout";
@@ -9,10 +7,11 @@ import { logger } from "./lib/logger";
 import { config } from "./lib/config";
 import { flushSentry, installExpressErrorHandler } from "./instrument";
 import { runInBackground } from "./lib/background-tasks";
+import { apiCors, installApiRateLimits } from "./middleware/api-rate-limits";
 
 const app: Express = express();
 
-// Behind Cloud Run / a load balancer the client IP arrives in X-Forwarded-For;
+// Behind Railway's load balancer the client IP arrives in X-Forwarded-For;
 // without this the rate limiter would bucket every request under one proxy IP.
 app.set("trust proxy", 1);
 
@@ -38,59 +37,14 @@ app.use(helmet({ crossOriginResourcePolicy: { policy: "same-site" } }));
  * with none configured the API accepts only same-origin (no Origin header)
  * requests, which is the correct default when the SPA is served beside it.
  */
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin) return callback(null, true);
-      if (config.corsAllowedOrigins.includes(origin)) return callback(null, true);
-      return callback(null, false);
-    },
-    credentials: true,
-  }),
-);
+app.use(apiCors(config.corsAllowedOrigins));
 
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 
-const globalLimiter = rateLimit({
-  windowMs: 60_000,
-  limit: 300,
-  standardHeaders: "draft-7",
-  legacyHeaders: false,
-  message: { error: "Too many requests — slow down." },
-});
-
-/**
- * Routes that spend money or write to someone's repository get a much tighter
- * budget than reads. Read-only GET/HEAD/OPTIONS requests are explicitly skipped
- * so status polling cannot consume the same quota as AI runs and repo writes.
- */
-const expensiveLimiter = rateLimit({
-  windowMs: 60_000,
-  limit: 10,
-  standardHeaders: "draft-7",
-  legacyHeaders: false,
-  skip: (req) => req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS",
-  message: { error: "Too many analysis or repository-write requests — try again in a minute." },
-});
-
-// A crashing browser can emit the same exception repeatedly. Keep telemetry
-// useful without allowing a client-side error loop to flood Sentry or the API.
-const telemetryLimiter = rateLimit({
-  windowMs: 60_000,
-  limit: 30,
-  standardHeaders: "draft-7",
-  legacyHeaders: false,
-  message: { error: "Too many client error reports — slow down." },
-});
-
-app.use("/api", globalLimiter);
-app.post("/api/preferences/ai-test", expensiveLimiter);
-app.post("/api/observability/client-error", telemetryLimiter);
-app.use(
-  ["/api/analysis", "/api/repo-finisher", "/api/vibe-tools", "/api/valuation", "/api/investment-intelligence"],
-  expensiveLimiter,
-);
+// Reads share the global quota; only writes consume the tighter expensive
+// quota. Client telemetry retains its own budget. All remain before auth.
+installApiRateLimits(app, { logger });
 
 // Keep AI settings usable during a rolling Supabase migration. These focused
 // handlers run before the main router and fall back to the encrypted legacy

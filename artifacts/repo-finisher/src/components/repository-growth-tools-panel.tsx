@@ -1,10 +1,11 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { customFetch } from "@workspace/api-client-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useStatusPolling } from "@/hooks/use-status-polling";
+import { useAuthenticatedCacheScope } from "@/lib/authenticated-cache";
 import { DollarSign, ExternalLink, FileText, Loader2, Search, ShieldCheck, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
@@ -90,7 +91,12 @@ async function postJson<T>(path: string, body: unknown) {
 
 export function RepositoryGrowthToolsPanel({ analysisId, itemRank, repo }: { analysisId: string; itemRank: number; repo: string }) {
   const queryClient = useQueryClient();
-  const queryKey = useMemo(() => ["repository-growth-tools-panel", analysisId, itemRank, repo], [analysisId, itemRank, repo]);
+  const authScope = useAuthenticatedCacheScope();
+  const queryKey = useMemo(() => ["repository-growth-tools-panel", authScope.userId, analysisId, itemRank, repo], [authScope.userId, analysisId, itemRank, repo]);
+  const identity = JSON.stringify(queryKey);
+  const identityRef = useRef(identity);
+  identityRef.current = identity;
+  const isCurrent = useCallback(() => authScope.isCurrent() && identityRef.current === identity, [authScope, identity]);
   // Pagination unmounts rows; keep generated plans and in-flight action results
   // in this session's query cache without repeating the costly POST requests.
   const { data: state } = useQuery<PanelState>({
@@ -102,14 +108,23 @@ export function RepositoryGrowthToolsPanel({ analysisId, itemRank, repo }: { ana
   });
   const { growth, preview, detail, busy, docs } = state;
   const updateState = useCallback((patch: Partial<PanelState>) => {
+    if (!authScope.userId || !isCurrent()) return;
     queryClient.setQueryData<PanelState>(queryKey, (current) => ({ ...(current ?? initialPanelState()), ...patch }));
-  }, [queryClient, queryKey]);
+  }, [queryClient, queryKey, authScope.userId, isCurrent]);
+
+  const postForCurrentUser = async <T,>(path: string, body: unknown): Promise<T> => {
+    if (!authScope.userId || !isCurrent()) throw new Error("Your account changed. Start the action again.");
+    const result = await postJson<T>(path, body);
+    if (!authScope.userId || !isCurrent()) throw new Error("Your account changed. Start the action again.");
+    return result;
+  };
 
   const loadRun = useCallback(async (runId: string, signal?: AbortSignal) => {
+    if (!authScope.userId || !isCurrent()) throw new Error("Your account changed. Refresh the current account's run.");
     const result = await customFetch<RunDetail>(`/api/repo-finisher/runs/${runId}`, { responseType: "json", signal });
     if (!signal?.aborted) updateState({ detail: result });
     return result;
-  }, [updateState]);
+  }, [updateState, isCurrent, authScope.userId]);
 
   useStatusPolling(
     detail && ["executing", "verifying", "repairing"].includes(detail.run.status) ? preview?.runId ?? null : null,
@@ -121,7 +136,7 @@ export function RepositoryGrowthToolsPanel({ analysisId, itemRank, repo }: { ana
   const research = async () => {
     updateState({ busy: "research" });
     try {
-      const result = await postJson<GrowthResult>("/api/repo-growth-tools/research", { repo, analysisId, itemRank });
+      const result = await postForCurrentUser<GrowthResult>("/api/repo-growth-tools/research", { repo, analysisId, itemRank });
       updateState({ growth: result });
       toast.success(result.research_status === "live" ? "Live market research and growth analysis ready." : "Growth analysis ready; live market research is not configured.");
     } catch (error) {
@@ -134,7 +149,7 @@ export function RepositoryGrowthToolsPanel({ analysisId, itemRank, repo }: { ana
   const plan = async (kind: "feature" | "documentation", title: string, goals: string[], documentationTargets?: string[]) => {
     updateState({ busy: "plan", preview: null, detail: null });
     try {
-      const result = await postJson<Preview>("/api/repo-growth-tools/preview", {
+      const result = await postForCurrentUser<Preview>("/api/repo-growth-tools/preview", {
         repo,
         analysisId,
         itemRank,
@@ -156,8 +171,8 @@ export function RepositoryGrowthToolsPanel({ analysisId, itemRank, repo }: { ana
     if (!preview) return;
     updateState({ busy: "execute" });
     try {
-      await postJson(`/api/repo-finisher/runs/${preview.runId}/approve`, { planHash: preview.planHash });
-      await postJson(`/api/repo-finisher/runs/${preview.runId}/execute`, {});
+      await postForCurrentUser(`/api/repo-finisher/runs/${preview.runId}/approve`, { planHash: preview.planHash });
+      await postForCurrentUser(`/api/repo-finisher/runs/${preview.runId}/execute`, {});
       const latest = await loadRun(preview.runId);
       toast.success(latest.run.status === "succeeded" ? "Implementation verified in a draft PR." : "Implementation started; verification remains enforced.");
     } catch (error) {
@@ -168,10 +183,13 @@ export function RepositoryGrowthToolsPanel({ analysisId, itemRank, repo }: { ana
     }
   };
 
-  const toggleDoc = (target: string) => queryClient.setQueryData<PanelState>(queryKey, (current) => {
-    const saved = current ?? initialPanelState();
-    return { ...saved, docs: saved.docs.includes(target) ? saved.docs.filter((value) => value !== target) : [...saved.docs, target] };
-  });
+  const toggleDoc = (target: string) => {
+    if (!authScope.userId || !isCurrent()) return;
+    queryClient.setQueryData<PanelState>(queryKey, (current) => {
+      const saved = current ?? initialPanelState();
+      return { ...saved, docs: saved.docs.includes(target) ? saved.docs.filter((value) => value !== target) : [...saved.docs, target] };
+    });
+  };
 
   return (
     <div className="space-y-3 pt-3 border-t border-border">

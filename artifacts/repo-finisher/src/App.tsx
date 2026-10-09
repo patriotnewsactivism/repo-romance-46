@@ -6,6 +6,7 @@ import { Route, Switch, Router as WouterRouter, useLocation } from 'wouter';
 import { ApiError, setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react';
 import { supabase } from '@/integrations/supabase/client';
 import { captureOperationalError, setSentryRoute, setSentryUser } from '@/lib/observability';
+import { AuthenticatedCacheProvider } from '@/lib/authenticated-cache';
 
 import Landing from '@/pages/landing';
 import Auth from '@/pages/auth';
@@ -111,13 +112,15 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
-          <ObservabilityContext />
-          <Router />
-        </WouterRouter>
-        <SonnerToaster position="top-right" theme="dark" />
-      </TooltipProvider>
+      <AuthenticatedCacheProvider>
+        <TooltipProvider>
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
+            <ObservabilityContext />
+            <Router />
+          </WouterRouter>
+          <SonnerToaster position="top-right" theme="dark" />
+        </TooltipProvider>
+      </AuthenticatedCacheProvider>
     </QueryClientProvider>
   );
 }
