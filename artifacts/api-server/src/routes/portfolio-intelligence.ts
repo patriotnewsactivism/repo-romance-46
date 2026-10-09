@@ -17,6 +17,12 @@ import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
 import { loadGithubCredential } from "../lib/credentials";
 import { recordRepoLearning } from "../lib/adaptive-learning";
+import {
+  modelFinishEstimate,
+  readDigestCompletionMap,
+  storedSurveyCompletion,
+  type DigestSignals,
+} from "../lib/survey-evidence";
 
 /** Null is typeof "object" in JS; treat it as missing intelligence rather than a snapshot. */
 export function storedInvestmentIntelligence(value: unknown): Record<string, unknown> {
@@ -66,6 +72,9 @@ interface AnalysisItemContext {
   effort: number;
   estimatedHours: number | null;
   nextSteps: string[];
+  digestCompletionPct?: number | null;
+  digestReadinessPct?: number | null;
+  digestSignals?: DigestSignals | null;
 }
 
 function clamp(value: number, min = 0, max = 100) {
@@ -270,8 +279,22 @@ function isGithubRateLimitError(error: unknown) {
 function inspectRepoFromAnalysisContext(repoName: string, context: AnalysisItemContext | null, reason: string) {
   const effort = Math.max(1, Math.min(5, context?.effort || 3));
   const nextStepCount = context?.nextSteps?.length ?? 0;
-  const completion = Math.round(clamp(84 - (effort - 1) * 9 - Math.min(10, nextStepCount) * 1.2, 24, 84));
-  const readiness = Math.round(clamp(completion - 14, 12, 76));
+  // The old formula scored a FINISH with effort 1 at 84 with no file evidence.
+  // Digest completion is the stored signal. Without it, the model estimate is
+  // capped below a high finish score.
+  const modelEstimate = modelFinishEstimate({
+    kind: context?.kind || "finish",
+    effort,
+    nextStepCount,
+  });
+  const completion = storedSurveyCompletion({
+    modelEstimate,
+    digestCompletionPct: context?.digestCompletionPct ?? null,
+  });
+  const readiness =
+    context?.digestReadinessPct != null && Number.isFinite(context.digestReadinessPct)
+      ? Math.round(clamp(context.digestReadinessPct))
+      : Math.round(clamp(completion - 14, 12, 76));
   const estimatedTotalHours = Math.max(
     context?.estimatedHours || 0,
     40,
@@ -420,7 +443,7 @@ function inspectRepoFromAnalysisContext(repoName: string, context: AnalysisItemC
       },
       completion: {
         overall: completion,
-        signals: {
+        signals: context?.digestSignals ?? {
           hasSource: false,
           hasManifest: false,
           hasReadme: false,
@@ -628,7 +651,7 @@ router.post(
     const [{ data: analysis, error: analysisError }, { data: items, error: itemsError }] = await Promise.all([
       req.supabase!
         .from("analyses")
-        .select("id, analyzed_repo_names, investment_intelligence")
+        .select("id, analyzed_repo_names, investment_intelligence, portfolio_stats")
         .eq("id", id)
         .eq("user_id", userId)
         .maybeSingle(),
@@ -645,6 +668,31 @@ router.post(
 
     const itemRows = (items ?? []) as Array<Record<string, unknown>>;
     const contexts = contextsByRepo(itemRows);
+    const digestScores = readDigestCompletionMap((analysis as Record<string, unknown>).portfolio_stats);
+    for (const [repo, score] of digestScores) {
+      const existing =
+        contexts.get(repo) ??
+        [...contexts.entries()].find(([name]) => name.toLowerCase() === repo.toLowerCase())?.[1];
+      if (existing) {
+        existing.digestCompletionPct = score.completionPct;
+        existing.digestReadinessPct = score.productionReadinessPct;
+        existing.digestSignals = score.signals;
+        continue;
+      }
+      contexts.set(repo, {
+        repo,
+        kind: "finish",
+        title: repo.split("/").pop() || repo,
+        pitch: "",
+        marketPotential: 0,
+        effort: 3,
+        estimatedHours: null,
+        nextSteps: [],
+        digestCompletionPct: score.completionPct,
+        digestReadinessPct: score.productionReadinessPct,
+        digestSignals: score.signals,
+      });
+    }
     const analyzedNames = Array.isArray((analysis as Record<string, unknown>).analyzed_repo_names)
       ? ((analysis as Record<string, unknown>).analyzed_repo_names as unknown[]).map(String)
       : [];

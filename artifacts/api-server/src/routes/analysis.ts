@@ -17,6 +17,13 @@ import {
   FINAL_SYNTHESIS_TIMEOUT_MS,
 } from "../lib/ai-provider";
 import { captureException, flushSentry } from "../instrument";
+import {
+  UNGROUNDED_BATCH_MESSAGE,
+  completionSignalsForRecommendations,
+  groundBatchRecommendations,
+  groundRecommendationsInDigests,
+  isUngroundedSurveyError,
+} from "../lib/survey-evidence";
 
 const router: IRouter = Router();
 
@@ -714,31 +721,36 @@ export function acceptRecommendationPayload(value: unknown): RecommendationBatch
 }
 
 export function describeAnalysisBatchFailure(failedBatches: number, errors: unknown[]): string {
-  const present = new Set(errors.map((error) => classifyProviderFailure(error)));
   const lead = `All ${failedBatches} AI batch(es) failed`;
+  if (errors.length > 0 && errors.every((error) => isUngroundedSurveyError(error))) {
+    return `${lead} because no recommendation cited the repository digest. A FINISH label alone is not repository evidence.`;
+  }
+  const providerErrors = errors.filter((error) => !isUngroundedSurveyError(error));
+  const present = new Set(providerErrors.map((error) => classifyProviderFailure(error)));
+  const classNote = present.size > 0 ? ` Provider failure class: ${[...present].join(", ")}.` : "";
   if (present.has("auth")) {
-    return `${lead} because the AI provider rejected the credential. Re-save the provider key in Settings or switch provider.`;
+    return `${lead} because the AI provider rejected the credential. Re-save the provider key in Settings or switch provider.${classNote}`;
   }
   if (present.has("payment")) {
-    return `${lead} because the AI provider has no remaining credits. Add credits or switch provider.`;
+    return `${lead} because the AI provider has no remaining credits. Add credits or switch provider.${classNote}`;
   }
   if (present.has("unknown_model")) {
-    return `${lead} because the configured model was not recognized. Check the model name in Settings or switch provider.`;
+    return `${lead} because the configured model was not recognized. Check the model name in Settings or switch provider.${classNote}`;
   }
   if (present.has("parameter")) {
-    return `${lead} because the AI provider rejected the request parameters. Verify the configured model or switch provider.`;
+    return `${lead} because the AI provider rejected the request parameters. Verify the configured model or switch provider.${classNote}`;
   }
   const transientOnly = present.size > 0 && [...present].every((kind) => kind === "rate_limit" || kind === "unavailable");
   if (transientOnly && present.has("rate_limit") && !present.has("unavailable")) {
-    return `${lead} because the AI provider rate-limited the request. Retry shortly or switch provider.`;
+    return `${lead} because the AI provider rate-limited the request. Retry shortly or switch provider.${classNote}`;
   }
   if (transientOnly && present.has("unavailable") && !present.has("rate_limit")) {
-    return `${lead} because the AI provider was unavailable. Retry shortly or switch provider.`;
+    return `${lead} because the AI provider was unavailable. Retry shortly or switch provider.${classNote}`;
   }
   if (transientOnly) {
-    return `${lead} because the AI provider was rate-limited or unavailable. Retry shortly or switch provider.`;
+    return `${lead} because the AI provider was rate-limited or unavailable. Retry shortly or switch provider.${classNote}`;
   }
-  return `${lead} before any repository recommendations were produced. Retry or switch provider.`;
+  return `${lead} before any repository recommendations were produced. Retry or switch provider.${classNote}`;
 }
 
 export function analysisBatchOutcome(
@@ -984,14 +996,17 @@ async function callBatchedAIWithRetry(
   throw lastErr instanceof Error ? lastErr : new Error("AI batch failed");
 }
 
-export function aiBatchConcurrency(provider: string): number {
+export function aiBatchConcurrency(provider: string, model?: string | null): number {
   switch (provider) {
     case "github_models":
+      return 2;
     case "openrouter":
       // Large OpenRouter portfolio prompts can queue behind provider capacity.
       // Five concurrent 60k-token-class requests caused every batch to hit the
-      // old 45s deadline. Keep two in flight so the selected model has room to
-      // stream a complete structured response.
+      // old 45s deadline. Paid models keep two in flight. A pinned `:free`
+      // slug runs one batch at a time so a free-tier stall does not fail the
+      // whole survey. Callers that have not resolved a slug stay at 2.
+      if (typeof model === "string" && model.includes(":free")) return 1;
       return 2;
     case "openai":
     case "custom":
@@ -1018,17 +1033,18 @@ async function runBatchedAI(
 ): Promise<z.infer<typeof RecommendationSchema>> {
   const budget = maxInputTokensForProvider(aiConfig.provider);
   const batches = chunkDigests(digests, budget).filter((b) => b.length > 0);
-  const concurrency = aiBatchConcurrency(aiConfig.provider);
+  const concurrency = aiBatchConcurrency(aiConfig.provider, aiConfig.model);
 
   let completed = 0;
 
   const results = await parallelMap(batches, concurrency, async (batch) => {
     const result = await callBatchedAIWithRetry(batch, systemPrompt, aiConfig);
+    const grounded = groundBatchRecommendations(result, batch);
     completed++;
     if (onProgress) {
       await onProgress(`AI batch ${completed}/${batches.length} complete (${batch.length} repos)`);
     }
-    return result;
+    return grounded;
   });
 
   const outcome = analysisBatchOutcome(results);
@@ -1518,7 +1534,7 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
     const budget = maxInputTokensForProvider(provider);
     const batches = chunkDigests(digests, budget).filter((b) => b.length > 0);
     const hasMultipleBatches = batches.length > 1;
-    const batchConcurrency = aiBatchConcurrency(provider);
+    const batchConcurrency = aiBatchConcurrency(provider, stageModels.synthesisModel);
 
     let batchCompleted = 0;
     let firstSummary = "";
@@ -1529,7 +1545,10 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
       batchResults = await withTimeout(
         parallelMap(batches, batchConcurrency, async (batch, index) => {
           try {
-            const result = await callBatchedAIWithRetry(batch, customSystemPrompt, aiConfig);
+            const result = groundBatchRecommendations(
+              await callBatchedAIWithRetry(batch, customSystemPrompt, aiConfig),
+              batch,
+            );
             batchOutcomes[index] = { status: "fulfilled", value: result };
             batchCompleted++;
             if (!firstSummary) firstSummary = result.summary_md;
@@ -1584,7 +1603,8 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
         console.warn("[analysis] Cross-batch synthesis timed out, continuing with batch results:", e);
         return [];
       });
-      if (crossBatchRecs.length > 0) draftRecommendations.push(...crossBatchRecs);
+      const groundedCrossBatch = groundRecommendationsInDigests(crossBatchRecs, digests);
+      if (groundedCrossBatch.length > 0) draftRecommendations.push(...groundedCrossBatch);
     }
 
     // ── Step 5: Self-critique pass ───────────────────────────────────────────
@@ -1638,6 +1658,16 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
       });
     });
 
+    const groundedFinal = groundRecommendationsInDigests(finalResult.recommendations, digests);
+    const coveredRepos = new Set(groundedFinal.flatMap((recommendation) => recommendation.repos.map((repo) => repo.trim().toLowerCase())));
+    const uncoveredDrafts = draftRecommendations.filter((recommendation) =>
+      recommendation.repos.every((repo) => !coveredRepos.has(repo.trim().toLowerCase())),
+    );
+    finalResult.recommendations = [...groundedFinal, ...uncoveredDrafts];
+    if (finalResult.recommendations.length === 0) {
+      throw new Error(UNGROUNDED_BATCH_MESSAGE);
+    }
+
     finalResult.portfolio_stats = computePortfolioStats(shortlist);
 
     const ranked = [...finalResult.recommendations].sort(
@@ -1683,6 +1713,9 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
         metadata_only_count: metaOnlyRepos.length,
         total_repos_seen: shortlist.length,
       },
+      // Per-repo completion from the digest, not the model's FINISH claim.
+      // Read by portfolio scoring when fresh GitHub telemetry is unavailable.
+      _digest_completion: completionSignalsForRecommendations(digests, finalResult.recommendations),
     };
 
     const updatePayload: Record<string, unknown> = {
