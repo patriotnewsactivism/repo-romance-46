@@ -107,6 +107,10 @@ Vercel stores browser-safe build/runtime variables.
 
 Do not cross these trust boundaries.
 
+## Apex ↔ Think Tank self-heal loop
+
+A scheduled GitHub Actions workflow (`.github/workflows/apex-thinktank-sync.yml`, code in `scripts/src/apex-sync/`) is the only automation that writes to another repository. It reads Apex component health with a read-only token, debates a minimal patch with Think Tank, verifies it locally, and opens a draft PR in Apex. It does not touch the Vercel frontend, the Railway API/worker, or Supabase state. Details and gates: [`APEX_THINKTANK_LOOP.md`](APEX_THINKTANK_LOOP.md).
+
 ## Legacy infrastructure
 
 Cloud Run and Cloud Run Jobs are retired. Legacy files may remain temporarily for migration history or cleanup, but active code, CI, documentation, and operations must target Vercel/Railway/Supabase.

@@ -1,0 +1,73 @@
+name: Apex ThinkTank Sync
+
+# Scheduled self-heal loop: Apex health -> Finisher plan -> Think Tank debate -> LOCAL test gate -> DRAFT PR in Apex.
+# Dry-run by default: it only acts when the repository variable APEX_SYNC_LIVE is "true".
+# See docs/APEX_THINKTANK_LOOP.md before changing gates, secrets, or the PR behavior.
+
+on:
+  schedule:
+    # Every 30 minutes. GitHub cron is best-effort; every tick is idempotent.
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Force a dry run even if APEX_SYNC_LIVE is true
+        type: boolean
+        default: true
+      incident_override:
+        description: 'Optional JSON incident: {"component","errorSignature","files":[...],"severity"}'
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apex-thinktank-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install orchestrator dependencies
+        run: pnpm install --frozen-lockfile --filter @workspace/scripts...
+
+      - name: Unit-test the orchestrator gates
+        run: pnpm --filter @workspace/scripts test
+
+      - name: Restore spend/dedupe ledger
+        uses: actions/cache@v4
+        with:
+          path: .apex-sync/ledger.json
+          key: apex-sync-ledger-${{ github.run_id }}
+          restore-keys: apex-sync-ledger-
+
+      - name: Observe, gate, debate, verify, open draft PR
+        env:
+          # Live only when the repo variable opts in AND this is not a forced dry-run dispatch.
+          APEX_SYNC_LIVE: ${{ vars.APEX_SYNC_LIVE == 'true' && inputs.dry_run != true && 'true' || 'false' }}
+          APEX_BASE_URL: ${{ vars.APEX_BASE_URL }}
+          APEX_API_KEY: ${{ secrets.APEX_API_KEY }}
+          APEX_REPO: patriotnewsactivism/Apex
+          APEX_REPO_TOKEN: ${{ secrets.APEX_REPO_TOKEN }}
+          THINKTANK_ENDPOINT: ${{ vars.THINKTANK_ENDPOINT || 'https://debate.donmatthews.live' }}
+          INCIDENT_OVERRIDE: ${{ inputs.incident_override }}
+          APEX_SYNC_LEDGER: .apex-sync/ledger.json
+        run: pnpm --filter @workspace/scripts run apex-sync
