@@ -68,3 +68,6 @@ Thumbs.db
 
 # ...but the documented template is checked in on purpose
 !.env.example
+
+# apex-sync local ledger
+.apex-sync/

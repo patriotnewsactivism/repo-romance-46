@@ -1,5 +1,17 @@
 # RepoFinisher Architecture Decisions
 
+## D003 — Apex ↔ Think Tank self-heal loop runs in GitHub Actions and opens draft PRs only
+
+**Status:** accepted 2026-10-19.
+
+The loop (Apex health → Finisher plan → Think Tank debate → local test gate → Apex PR) runs as a scheduled GitHub Actions job in this repository, not from an assistant chat schedule (1-hour floor, prompt-only, no event bus) and not as a Railway worker (it needs no durable queue; the ledger plus open-PR check make each tick idempotent).
+
+- Correctness is decided only by running the regression test locally: it must fail on the base commit and pass with the patch, and the Apex package typecheck must pass. Think Tank output is advisory; consensus is never proof.
+- The loop may only push `fix/apex-*` branches and open **draft** PRs. It never merges, never pushes to `main`, and never triggers a deploy. This keeps the AGENTS.md repository-write contract intact; Vercel, Railway and Supabase deployment verification stays with the normal release process.
+- It is dry-run unless the repository variable `APEX_SYNC_LIVE` is `true`.
+
+See [`APEX_THINKTANK_LOOP.md`](APEX_THINKTANK_LOOP.md).
+
 ## D002 — Split production runtime: Vercel + Railway + Supabase + GitHub
 
 **Status:** accepted — 2026-09-19

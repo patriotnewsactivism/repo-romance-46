@@ -64,6 +64,8 @@ Normal generated repository work must:
 
 Automatic merge is not authorized by default.
 
+The scheduled Apex ↔ Think Tank loop (`docs/APEX_THINKTANK_LOOP.md`) is bound by this contract: it may only push `fix/apex-*` branches and open draft PRs, and a patch counts as verified only when its regression test fails before and passes after, run locally. Model or debate consensus is never evidence.
+
 ## Railway worker contract
 
 Finish-until-target work is durable state in Supabase, not an HTTP request lifetime.
