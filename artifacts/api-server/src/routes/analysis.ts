@@ -436,7 +436,7 @@ export function profilingTimeoutMs(repoCount: number): number {
 export function analysisJobBudgetMs(repoCount: number): number {
   const count = Math.max(0, repoCount);
   // 30 minute minimum for ordinary portfolios; scale to a hard 90 minute cap
-  // for full portfolios around 230 repos. Railway can sustain this work, while
+  // for full portfolios around 230 repos. The persistent API can sustain this work, while
   // the cap still protects against a genuinely stuck analysis.
   return Math.min(5_400_000, Math.max(1_800_000, 900_000 + count * 20_000));
 }
@@ -1339,7 +1339,7 @@ async function runAnalysisJob(ctx: AnalysisContext, analysisId: string): Promise
     await supabase.from("analyses").update({ error: msg, updated_at: new Date().toISOString() }).eq("id", analysisId);
   };
 
-  // Railway API/worker processes can outlive the old serverless request
+  // Contabo API/worker processes can outlive the old serverless request
   // ceiling that originally motivated this guard. Keep a hard budget so hung
   // AI calls still fail clearly, but allow large portfolios enough time to
   // finish digests + synthesis + valuation kickoff.

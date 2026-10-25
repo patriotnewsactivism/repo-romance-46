@@ -74,7 +74,7 @@ interface AiProviderStatus {
     qwen: { platformConfigured: boolean };
   };
   live_research_configured?: boolean;
-  completion_worker?: "railway-worker" | "cloud-run-job" | "in-process";
+  completion_worker?: "persistent-worker" | "in-process";
   free_agent_pool?: boolean;
 }
 
@@ -1025,7 +1025,7 @@ export default function Settings() {
                 <div className="rounded-md border p-3 text-xs text-muted-foreground space-y-1">
                   <div className="font-medium text-foreground text-sm">System status</div>
                   <p>Live competitor research: {aiStatus.live_research_configured === undefined ? 'unknown' : aiStatus.live_research_configured ? 'configured (Tavily on the API)' : 'unavailable — named competitors stay empty until a backend research key is set'}</p>
-                  <p>Completion worker: {aiStatus.completion_worker === undefined ? 'unknown' : aiStatus.completion_worker === 'railway-worker' ? 'Railway worker' : aiStatus.completion_worker === 'cloud-run-job' ? 'Cloud Run Job' : 'in-process fallback (local/dev)'}</p>
+                  <p>Completion worker: {aiStatus.completion_worker === undefined ? 'unknown' : aiStatus.completion_worker === 'persistent-worker' ? 'Persistent worker' : 'in-process fallback (local/dev)'}</p>
                   <p>Free agent pool: {aiStatus.free_agent_pool === undefined ? 'unknown' : aiStatus.free_agent_pool ? 'active for this saved model' : 'off — the saved model is pinned'}</p>
                 </div>
               )}

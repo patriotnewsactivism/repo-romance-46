@@ -5,8 +5,8 @@
 Current production targets are:
 
 - Vercel — frontend;
-- Railway `repofinisher-api` — API/control plane;
-- Railway `repofinisher-worker` — persistent completion worker;
+- Contabo `repofinisher-api` — API/control plane;
+- Contabo `repofinisher-worker` — persistent completion worker;
 - Supabase — auth/database/durable state;
 - GitHub Actions — CI.
 
@@ -38,14 +38,14 @@ Frontend changes require:
 
 API changes require:
 
-- Railway deployment success;
+- Contabo deployment success;
 - `/api/healthz` success;
 - CORS verification;
 - relevant authenticated flow verification.
 
 Worker changes require:
 
-- Railway worker deployment success;
+- Contabo worker deployment success;
 - no crash loop;
 - durable session polling/lease behavior verified.
 

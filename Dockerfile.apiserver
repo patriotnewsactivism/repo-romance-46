@@ -1,20 +1,26 @@
-# RepoFinisher API + persistent Railway worker image
+# syntax=docker/dockerfile:1
+# RepoFinisher API + persistent Contabo worker image
 FROM node:22-slim AS builder
 
 WORKDIR /app
 
-RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
+# Corepack uses Node's fetch; honor the build environment's configured proxy.
+ENV NODE_USE_ENV_PROXY=1
+
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
+    corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 COPY . .
 
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
+    pnpm install --frozen-lockfile
 RUN pnpm --filter @workspace/api-server build
 
 FROM node:22-slim AS runner
 
 WORKDIR /app
-
-RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
 COPY --from=builder /app/node_modules ./node_modules
@@ -25,5 +31,7 @@ COPY --from=builder /app/lib ./lib
 ENV NODE_ENV=production
 ENV PORT=8080
 EXPOSE 8080
+
+USER node
 
 CMD ["node", "artifacts/api-server/dist/index.mjs"]

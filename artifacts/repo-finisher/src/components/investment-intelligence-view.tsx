@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { apiBaseUrl } from '@/lib/api-base-url';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -71,8 +72,6 @@ function evidenceClass(item: EvidenceItem) {
   }
 }
 
-const productionApiBaseUrl = 'https://repofinisher-api-production.up.railway.app';
-
 async function directAuthenticatedFetch<T>(
   path: string,
   init: RequestInit = {},
@@ -97,7 +96,7 @@ async function directAuthenticatedFetch<T>(
     headers.set('content-type', 'application/json');
   }
 
-  const response = await fetch(`${productionApiBaseUrl}${path}`, {
+  const response = await fetch(`${apiBaseUrl ?? ''}${path}`, {
     ...init,
     headers,
     cache: 'no-store',

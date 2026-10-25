@@ -15,15 +15,15 @@ Do not reduce the product to a recommendation dashboard or one-shot code generat
 Current production architecture:
 
 - **Vercel** — React/Vite frontend from `artifacts/repo-finisher`.
-- **Railway** — persistent Express API service `repofinisher-api`.
-- **Railway** — persistent background worker service `repofinisher-worker`.
+- **Contabo** — persistent Express API service `repofinisher-api`.
+- **Contabo** — persistent background worker service `repofinisher-worker`.
 - **Supabase** — Auth, Postgres, RLS, durable execution state, Vault-backed trusted data paths.
 - **GitHub + GitHub Actions** — source control, branches, draft PRs, CI/build/test evidence.
 - **Sentry** — optional application observability.
 
 Canonical frontend: `https://portfolio.donmatthews.live`.
 
-Cloud Run is retired. Do not reintroduce Cloud Run as an active deployment target merely because legacy files remain in the repository.
+Railway is shut down by explicit user instruction and must not be reconnected, deployed to, or used for rollback. Cloud Run is retired. Do not reintroduce Cloud Run as an active deployment target merely because legacy files remain in the repository.
 
 ## Security boundaries
 
@@ -66,11 +66,11 @@ Automatic merge is not authorized by default.
 
 The scheduled Apex ↔ Think Tank loop (`docs/APEX_THINKTANK_LOOP.md`) is bound by this contract: it may only push `fix/apex-*` branches and open draft PRs, and a patch counts as verified only when its regression test fails before and passes after, run locally. Model or debate consensus is never evidence.
 
-## Railway worker contract
+## Contabo worker contract
 
 Finish-until-target work is durable state in Supabase, not an HTTP request lifetime.
 
-The Railway worker:
+The Contabo worker:
 
 - polls active `repo_completion_sessions`;
 - claims work through the existing `worker_token` / `lease_expires_at` / heartbeat contract;
@@ -79,7 +79,7 @@ The Railway worker:
 - releases leases when a processing cycle ends;
 - must tolerate restart without duplicating completed branch writes.
 
-The API service should use `REPOFINISHER_WORKER_MODE=railway-persistent` in production so requests queue durable work for the persistent worker instead of relying on in-process background execution.
+The API service should use `REPOFINISHER_WORKER_MODE=persistent` in production so requests queue durable work for the persistent worker instead of relying on in-process background execution.
 
 Local development may use the in-process fallback.
 
@@ -108,9 +108,9 @@ Use `docs/DEFINITION_OF_DONE.md`.
 
 For frontend changes, verify the Vercel deployment and canonical domain.
 
-For backend changes, verify Railway build/runtime state and `/api/healthz`.
+For backend changes, verify the Contabo Compose build/container health and public `/api/healthz`. Use `deploy/contabo/compose.yml`; Caddy is the single trusted proxy.
 
-For worker changes, verify the Railway worker process remains alive and can safely claim durable work.
+For worker changes, verify the Contabo worker process remains alive and can safely claim durable work.
 
 Do not infer runtime success from a merge.
 
@@ -125,7 +125,7 @@ Canonical documents:
 - `docs/ARCHITECTURE.md`
 - `docs/OPERATIONS.md`
 - `docs/PROJECT_STATE.md`
-- `docs/RAILWAY_MIGRATION.md`
+- `docs/CONTABO_MIGRATION.md`
 - `docs/DEFINITION_OF_DONE.md`
 - `docs/RELEASE-CHECKLIST.md`
 - `docs/INCIDENT_RESPONSE.md`

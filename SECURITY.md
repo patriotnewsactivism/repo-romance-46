@@ -1,6 +1,6 @@
 # Security Policy
 
-RepoFinisher's production security model is built around Vercel, Railway, Supabase, and GitHub.
+RepoFinisher's production security model is built around Vercel, Contabo, Supabase, and GitHub.
 
 ## Secret placement
 
@@ -15,9 +15,9 @@ Only browser-safe values may be exposed through `VITE_*`:
 
 Never expose trusted backend keys, provider API keys, GitHub access tokens, signing secrets, or encryption keys through Vercel client variables.
 
-### Railway
+### Contabo
 
-Trusted server-only values belong on the Railway API/worker services:
+Trusted server-only values belong on the Contabo API/worker services:
 
 - `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY`
 - `PLAN_SIGNING_SECRET`

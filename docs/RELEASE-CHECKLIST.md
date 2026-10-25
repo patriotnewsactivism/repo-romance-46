@@ -15,31 +15,31 @@
 - [ ] RLS/policies/functions are verified.
 - [ ] GitHub OAuth provider is enabled when auth changes depend on it.
 - [ ] Redirect allow list includes the canonical frontend callback.
-- [ ] Trusted service credentials are available to Railway.
+- [ ] Trusted service credentials are available to Contabo.
 
 ## Vercel frontend
 
 - [ ] Deployment builds from the intended commit.
 - [ ] Root page loads.
 - [ ] SPA routes work.
-- [ ] Browser bundle uses Railway API, not a retired Cloud Run URL.
+- [ ] Browser bundle uses the canonical Contabo API; no active requests target retired hosts.
 - [ ] Supabase public variables are present.
 - [ ] Canonical frontend domain resolves to Vercel.
 
-## Railway API
+## Contabo API
 
 - [ ] `repofinisher-api` builds from the intended commit.
 - [ ] Service remains running.
-- [ ] Railway health check passes.
+- [ ] Compose API and worker health checks pass.
 - [ ] `GET /api/healthz` returns success.
 - [ ] CORS permits the intended Vercel origin.
 - [ ] Trusted Supabase/signing/encryption variables are configured.
 - [ ] Authenticated API request succeeds.
 
-## Railway worker
+## Contabo worker
 
 - [ ] `repofinisher-worker` builds from the intended commit.
-- [ ] Start command is `node artifacts/api-server/dist/railway-worker.mjs`.
+- [ ] Start command is `node artifacts/api-server/dist/persistent-worker.mjs`.
 - [ ] Service remains running without a restart loop.
 - [ ] Trusted Supabase/signing/encryption variables are configured.
 - [ ] Active durable session can be claimed.
@@ -49,7 +49,7 @@
 ## Domains
 
 - [ ] `portfolio.donmatthews.live` points to Vercel.
-- [ ] `api.portfolio.donmatthews.live` points to Railway.
+- [ ] `api.portfolio.donmatthews.live` points to Contabo.
 - [ ] TLS is valid on both.
 - [ ] No canonical hostname still routes to retired Google infrastructure.
 
@@ -60,7 +60,7 @@
 - [ ] GitHub connection persists.
 - [ ] Repository list/analysis succeeds.
 - [ ] Settings save/reload works.
-- [ ] At least one bounded completion session progresses through the Railway worker when worker-affecting changes are released.
+- [ ] At least one bounded completion session progresses through the Contabo worker when worker-affecting changes are released.
 
 ## Release state wording
 

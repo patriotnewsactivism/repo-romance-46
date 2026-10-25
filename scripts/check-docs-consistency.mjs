@@ -8,7 +8,7 @@ const requiredFiles = [
   "docs/README.md",
   "docs/ARCHITECTURE.md",
   "docs/OPERATIONS.md",
-  "docs/RAILWAY_MIGRATION.md",
+  "docs/CONTABO_MIGRATION.md",
   "docs/PROJECT_STATE.md",
   "docs/DEFINITION_OF_DONE.md",
   "docs/REASONING_AND_LEARNING.md",
@@ -40,7 +40,8 @@ function requireTokens(path, tokens) {
 }
 
 function forbidTokens(path, tokens) {
-  const body = read(path);
+  // D002 and D001 are explicitly superseded decisions retained for audit.
+  const body = path === "docs/DECISIONS.md" ? read(path).split("## D002 —")[0] : read(path);
   for (const token of tokens) {
     if (body.includes(token)) {
       errors.push(`${path} contains retired canonical topology text: ${JSON.stringify(token)}`);
@@ -63,15 +64,15 @@ const canonical = [
 ];
 
 for (const path of canonical) {
-  requireTokens(path, ["Vercel", "Railway", "Supabase"]);
+  requireTokens(path, ["Vercel", "Contabo", "Supabase"]);
 }
 
 requireTokens("README.md", ["repofinisher-api", "repofinisher-worker"]);
-requireTokens("AGENTS.md", ["REPOFINISHER_WORKER_MODE=railway-persistent"]);
-requireTokens("docs/ARCHITECTURE.md", ["railway-worker.ts", "worker_token", "lease_expires_at"]);
-requireTokens("docs/OPERATIONS.md", ["repofinisher-api-production.up.railway.app", "/api/healthz"]);
+requireTokens("AGENTS.md", ["REPOFINISHER_WORKER_MODE=persistent"]);
+requireTokens("docs/ARCHITECTURE.md", ["persistent-worker.ts", "worker_token", "lease_expires_at"]);
+requireTokens("docs/OPERATIONS.md", ["api.portfolio.donmatthews.live", "/api/healthz", "deploy/contabo/compose.yml"]);
 requireTokens("docs/DECISIONS.md", ["D002", "superseded"]);
-requireTokens("docs/PROJECT_STATE.md", ["2026-09-19", "hbv52064.up.railway.app"]);
+requireTokens("docs/PROJECT_STATE.md", ["2026-10-25", "Contabo"]);
 
 const retiredPhrases = [
   "Vercel is not an approved deployment target",
@@ -79,6 +80,8 @@ const retiredPhrases = [
   "Production runtime is Google Cloud Run",
   "Canonical production is Cloud Run",
   "Current production source topology is Google Cloud Run",
+  "https://repofinisher-api-production.up.railway.app",
+  "REPOFINISHER_WORKER_MODE=railway-persistent",
 ];
 
 for (const path of canonical) forbidTokens(path, retiredPhrases);

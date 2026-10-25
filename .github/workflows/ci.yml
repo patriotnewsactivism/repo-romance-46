@@ -28,11 +28,13 @@ jobs:
           required=(
             "vercel.json"
             "Dockerfile.apiserver"
-            "artifacts/api-server/src/railway-worker.ts"
+            "artifacts/api-server/src/persistent-worker.ts"
+            "deploy/contabo/compose.yml"
+            "deploy/contabo/Caddyfile"
           )
           for path in "${required[@]}"; do
             if [[ ! -e "$path" ]]; then
-              echo "Required Vercel/Railway production artifact is missing: $path" >&2
+              echo "Required Vercel/Contabo production artifact is missing: $path" >&2
               exit 1
             fi
           done
@@ -47,6 +49,13 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Validate Contabo deployment configuration
+        env:
+          REPOFINISHER_ENV_FILE: ./runtime.env.example
+        run: |
+          docker compose --env-file deploy/contabo/compose.env.example -f deploy/contabo/compose.yml config --quiet
+          bash -n deploy/contabo/deploy.sh
 
       - name: Enforce canonical documentation topology
         run: node scripts/check-docs-consistency.mjs

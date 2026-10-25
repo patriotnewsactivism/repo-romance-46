@@ -71,3 +71,5 @@ Thumbs.db
 
 # apex-sync local ledger
 .apex-sync/
+deploy/contabo/runtime.env
+deploy/contabo/compose.env
