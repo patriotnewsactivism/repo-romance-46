@@ -1,0 +1,81 @@
+name: repofinisher
+
+x-environment: &environment
+  NODE_ENV: production
+  REPOFINISHER_WORKER_MODE: persistent
+
+x-runtime: &runtime
+  image: ${REPOFINISHER_IMAGE:-repofinisher:local}
+  build:
+    context: ../..
+    dockerfile: Dockerfile.apiserver
+  env_file: ${REPOFINISHER_ENV_FILE:-./runtime.env}
+  environment: *environment
+  init: true
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp:rw,nosuid,size=256m
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: '3'
+
+services:
+  api:
+    <<: *runtime
+    environment:
+      <<: *environment
+      PORT: '8080'
+    ports:
+      - 127.0.0.1:8080:8080
+    expose: ['8080']
+    stop_grace_period: 30s
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8080/api/healthz').then(async r=>{if(!r.ok||(await r.json()).status!=='ok')process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 4
+
+  worker:
+    <<: *runtime
+    command: [node, artifacts/api-server/dist/persistent-worker.mjs]
+    environment:
+      <<: *environment
+      REPOFINISHER_WORKER_HEALTH_FILE: /tmp/repofinisher-worker-heartbeat
+    stop_grace_period: 5m
+    healthcheck:
+      test: [CMD, node, -e, "const fs=require('node:fs');try{const t=Number(fs.readFileSync('/tmp/repofinisher-worker-heartbeat','utf8'));if(!Number.isFinite(t)||Date.now()-t>60000)process.exit(1)}catch{process.exit(1)}"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 4
+
+  caddy:
+    image: caddy:2.11.7-alpine
+    restart: unless-stopped
+    environment:
+      API_DOMAIN: ${API_DOMAIN:-api.portfolio.donmatthews.live}
+    ports:
+      - 80:80
+      - 443:443
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+
+volumes:
+  caddy_data:
+  caddy_config:

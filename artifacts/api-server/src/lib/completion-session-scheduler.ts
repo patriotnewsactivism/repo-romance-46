@@ -3,7 +3,7 @@ import { runInBackground } from "./background-tasks";
 import { processCompletionSession } from "./completion-session-worker";
 
 export type CompletionWorkerMode =
-  | "railway-worker"
+  | "persistent-worker"
   | "in-process"
   | "already-running";
 
@@ -29,16 +29,17 @@ function workerMode() {
   return String(process.env.REPOFINISHER_WORKER_MODE || "").trim().toLowerCase();
 }
 
-export function configuredCompletionWorker(): "railway-worker" | "in-process" {
+export function configuredCompletionWorker(): "persistent-worker" | "in-process" {
   const mode = workerMode();
-  if (mode === "railway-persistent" || mode === "railway-worker" || mode === "persistent") {
-    return "railway-worker";
+  if (mode === "persistent" || mode === "persistent-worker" || (!mode && process.env.NODE_ENV === "production")) {
+    return "persistent-worker";
   }
+  if (mode && mode !== "in-process") throw new Error("Unsupported REPOFINISHER_WORKER_MODE. Use persistent or in-process.");
   return "in-process";
 }
 
 /**
- * Railway production uses a persistent worker service that polls durable
+ * Production uses a persistent worker service on Contabo that polls durable
  * completion-session state in Supabase. The API only needs to leave the session
  * active/queued; the worker claims it using the existing row lease/heartbeat
  * contract. Local development keeps the in-process fallback.
@@ -50,8 +51,8 @@ export async function scheduleCompletionSession(
 ): Promise<CompletionWorkerMode> {
   if (await recentlyActive(supabase, userId, sessionId)) return "already-running";
 
-  if (configuredCompletionWorker() === "railway-worker") {
-    return "railway-worker";
+  if (configuredCompletionWorker() === "persistent-worker") {
+    return "persistent-worker";
   }
 
   runInBackground(processCompletionSession(supabase, userId, sessionId), `completion-session:${sessionId}`);

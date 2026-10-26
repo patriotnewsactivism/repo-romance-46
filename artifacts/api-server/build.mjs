@@ -19,7 +19,7 @@ async function buildAll() {
     entryPoints: [
       path.resolve(artifactDir, "src/index.ts"),
       path.resolve(artifactDir, "src/completion-session-job.ts"),
-      path.resolve(artifactDir, "src/railway-worker.ts"),
+      path.resolve(artifactDir, "src/persistent-worker.ts"),
     ],
     platform: "node",
     bundle: true,

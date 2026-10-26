@@ -2,6 +2,8 @@
 
 ## Production topology
 
+This is the authorized target. Deployment evidence and outstanding cutover requirements are tracked in `PROJECT_STATE.md`.
+
 ```text
 Browser
   |
@@ -12,9 +14,9 @@ Vercel
   |
   | Supabase JWT
   v
-Railway
+Contabo
   repofinisher-api
-  api.portfolio.donmatthews.live (planned canonical API hostname)
+  api.portfolio.donmatthews.live (Caddy HTTPS proxy)
   |
   +------> Supabase Auth/Postgres/RLS/Vault
   |
@@ -25,7 +27,7 @@ Railway
 Supabase durable completion sessions
   |
   v
-Railway
+Contabo
   repofinisher-worker
   persistent polling + lease/heartbeat claims
   |
@@ -41,12 +43,12 @@ The frontend:
 - authenticates through Supabase;
 - starts GitHub OAuth through Supabase;
 - receives Supabase sessions;
-- sends the Supabase bearer token to the Railway API;
+- sends the Supabase bearer token to the Contabo API;
 - never receives service-role, signing, encryption, or provider secrets.
 
 ## API/control plane
 
-`artifacts/api-server` is a persistent Express service deployed on Railway.
+`artifacts/api-server` is a persistent Express service deployed on Contabo.
 
 Responsibilities include:
 
@@ -65,7 +67,7 @@ Health endpoint:
 
 ## Persistent worker plane
 
-`artifacts/api-server/src/railway-worker.ts` is the Railway worker entrypoint.
+`artifacts/api-server/src/persistent-worker.ts` is the Contabo worker entrypoint.
 
 The worker polls active `repo_completion_sessions` from Supabase and passes each candidate through the existing `processCompletionSession` lease logic.
 
@@ -79,7 +81,7 @@ The existing worker contract protects against duplicate execution through:
 
 Production API configuration uses:
 
-`REPOFINISHER_WORKER_MODE=railway-persistent`
+`REPOFINISHER_WORKER_MODE=persistent`
 
 This tells the API to leave durable work queued for the persistent worker instead of depending on an in-process task.
 
@@ -101,7 +103,7 @@ GitHub Client ID/Secret are configured in Supabase Auth, not Vercel.
 
 Supabase stores user/session/application state.
 
-Railway stores server-only runtime environment variables.
+Contabo loads server-only runtime environment variables from a restricted `runtime.env` file; `deploy/contabo/compose.yml` starts the API, worker and Caddy.
 
 Vercel stores browser-safe build/runtime variables.
 
@@ -109,8 +111,8 @@ Do not cross these trust boundaries.
 
 ## Apex ↔ Think Tank self-heal loop
 
-A scheduled GitHub Actions workflow (`.github/workflows/apex-thinktank-sync.yml`, code in `scripts/src/apex-sync/`) is the only automation that writes to another repository. It reads Apex component health with a read-only token, debates a minimal patch with Think Tank, verifies it locally, and opens a draft PR in Apex. It does not touch the Vercel frontend, the Railway API/worker, or Supabase state. Details and gates: [`APEX_THINKTANK_LOOP.md`](APEX_THINKTANK_LOOP.md).
+A scheduled GitHub Actions workflow (`.github/workflows/apex-thinktank-sync.yml`, code in `scripts/src/apex-sync/`) is the only automation that writes to another repository. It reads Apex component health with a read-only token, debates a minimal patch with Think Tank, verifies it locally, and opens a draft PR in Apex. It does not touch the Vercel frontend, the Contabo API/worker, or Supabase state. Details and gates: [`APEX_THINKTANK_LOOP.md`](APEX_THINKTANK_LOOP.md).
 
 ## Legacy infrastructure
 
-Cloud Run and Cloud Run Jobs are retired. Legacy files may remain temporarily for migration history or cleanup, but active code, CI, documentation, and operations must target Vercel/Railway/Supabase.
+Railway, Cloud Run and Cloud Run Jobs are retired. Legacy files may remain temporarily for migration history or cleanup, but active code, CI, documentation, and operations must target Vercel/Contabo/Supabase.

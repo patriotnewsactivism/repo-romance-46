@@ -11,7 +11,7 @@ import { apiCors, installApiRateLimits } from "./middleware/api-rate-limits";
 
 const app: Express = express();
 
-// Behind Railway's load balancer the client IP arrives in X-Forwarded-For;
+// Behind the single Caddy reverse proxy the client IP arrives in X-Forwarded-For;
 // without this the rate limiter would bucket every request under one proxy IP.
 app.set("trust proxy", 1);
 

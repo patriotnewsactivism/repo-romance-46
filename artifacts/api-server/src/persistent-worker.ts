@@ -1,4 +1,5 @@
 import { setTimeout as sleep } from "node:timers/promises";
+import { writeFile, unlink } from "node:fs/promises";
 import { createServiceSupabaseClient } from "./lib/service-supabase";
 import { processCompletionSession } from "./lib/completion-session-worker";
 
@@ -12,14 +13,25 @@ function positiveInteger(raw: string | undefined, fallback: number, max: number)
   return Math.min(parsed, max);
 }
 
-const pollMs = positiveInteger(process.env.RAILWAY_WORKER_POLL_MS, DEFAULT_POLL_MS, 60_000);
+const pollMs = positiveInteger(process.env.REPOFINISHER_WORKER_POLL_MS, DEFAULT_POLL_MS, 60_000);
 const concurrency = positiveInteger(
-  process.env.RAILWAY_WORKER_CONCURRENCY,
+  process.env.REPOFINISHER_WORKER_CONCURRENCY,
   DEFAULT_CONCURRENCY,
   MAX_CONCURRENCY,
 );
 
 let stopping = false;
+let healthy = false;
+const heartbeatFile = process.env.REPOFINISHER_WORKER_HEALTH_FILE;
+
+async function heartbeat() {
+  if (!heartbeatFile || !healthy || stopping) return;
+  try {
+    await writeFile(heartbeatFile, String(Date.now()), { mode: 0o600 });
+  } catch {
+    console.error(JSON.stringify({ level: "error", event: "persistent_worker_health_write_failed" }));
+  }
+}
 process.on("SIGTERM", () => {
   stopping = true;
 });
@@ -49,6 +61,10 @@ async function loadCandidates() {
 async function runBatch() {
   const supabase = createServiceSupabaseClient();
   const candidates = await loadCandidates();
+  // A live process with broken Supabase access is not a healthy worker. Only
+  // publish readiness after a real queue read; keep it fresh during long jobs.
+  healthy = true;
+  await heartbeat();
   if (!candidates.length) return 0;
 
   const selected = candidates.slice(0, concurrency);
@@ -64,7 +80,7 @@ async function runBatch() {
       const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
       console.error(JSON.stringify({
         level: "error",
-        event: "railway_worker_session_failed",
+        event: "persistent_worker_session_failed",
         sessionId: session?.id,
         message,
       }));
@@ -78,29 +94,38 @@ async function main() {
   createServiceSupabaseClient();
   console.log(JSON.stringify({
     level: "info",
-    event: "railway_worker_started",
+    event: "persistent_worker_started",
     concurrency,
     pollMs,
   }));
 
-  while (!stopping) {
-    try {
-      const processed = await runBatch();
-      if (!processed) await sleep(pollMs);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(JSON.stringify({
-        level: "error",
-        event: "railway_worker_poll_failed",
-        message,
-      }));
-      await sleep(Math.min(Math.max(pollMs, 5_000), 30_000));
+  const healthTimer = setInterval(() => void heartbeat(), 10_000);
+  healthTimer.unref();
+  try {
+    while (!stopping) {
+      try {
+        const processed = await runBatch();
+        if (!processed) await sleep(pollMs);
+      } catch (error) {
+        healthy = false;
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(JSON.stringify({
+          level: "error",
+          event: "persistent_worker_poll_failed",
+          message,
+        }));
+        await sleep(Math.min(Math.max(pollMs, 5_000), 30_000));
+      }
     }
+  } finally {
+    healthy = false;
+    clearInterval(healthTimer);
+    if (heartbeatFile) await unlink(heartbeatFile).catch(() => undefined);
   }
 
   console.log(JSON.stringify({
     level: "info",
-    event: "railway_worker_stopped",
+    event: "persistent_worker_stopped",
   }));
 }
 
@@ -108,7 +133,7 @@ main().catch((error) => {
   const message = error instanceof Error ? error.message : String(error);
   console.error(JSON.stringify({
     level: "fatal",
-    event: "railway_worker_crashed",
+    event: "persistent_worker_crashed",
     message,
   }));
   process.exitCode = 1;

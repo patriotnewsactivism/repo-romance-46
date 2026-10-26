@@ -3,8 +3,8 @@
  *
  * Production topology:
  *   frontend -> Vercel
- *   API      -> Railway
- *   worker   -> Railway
+ *   API      -> Contabo
+ *   worker   -> Contabo
  *   auth/db  -> Supabase
  *
  * This validates service seams instead of assuming one host serves the entire app.
@@ -32,7 +32,7 @@ async function request(label, target, init = {}, validate = async (response) => 
 }
 
 async function checkApiHealth() {
-  return request('Railway API /api/healthz', new URL('/api/healthz', apiUrl), {}, async (response) => {
+  return request('Contabo API /api/healthz', new URL('/api/healthz', apiUrl), {}, async (response) => {
     if (!response.ok) return false;
     const body = await response.json().catch(() => null);
     return body?.status === 'ok';
@@ -41,7 +41,7 @@ async function checkApiHealth() {
 
 async function checkAiStatusRoute() {
   const target = new URL('/api/preferences/ai-status', apiUrl);
-  return request('Railway API /api/preferences/ai-status route', target, {}, async (response) => {
+  return request('Contabo API /api/preferences/ai-status route', target, {}, async (response) => {
     const contentType = (response.headers.get('content-type') || '').toLowerCase();
     const body = await response.text();
 
@@ -71,7 +71,7 @@ async function checkCorsSeam() {
     return true;
   }
   const target = new URL('/api/preferences/ai-status', apiUrl);
-  return request('Vercel frontend -> Railway API CORS preflight', target, {
+  return request('Vercel frontend -> Contabo API CORS preflight', target, {
     method: 'OPTIONS',
     headers: {
       Origin: expectedFrontendOrigin,

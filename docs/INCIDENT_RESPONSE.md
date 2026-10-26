@@ -20,7 +20,7 @@ Check:
 
 If the browser is calling a `.run.app` RepoFinisher API, the deployment is stale or misconfigured.
 
-## API diagnosis — Railway
+## API diagnosis — Contabo
 
 Check:
 
@@ -33,7 +33,7 @@ Check:
 - CORS origin;
 - upstream provider errors.
 
-Use the Railway service domain to separate API health from custom DNS issues.
+On the Contabo server, compare `http://127.0.0.1:8080/api/healthz` with the public API hostname to distinguish container health from Caddy/DNS/TLS issues. Inspect `docker compose --env-file deploy/contabo/compose.env -f deploy/contabo/compose.yml ps` and bounded `logs --tail 100 api worker caddy`; do not print expanded environment configuration.
 
 ### API cooldown and shared-IP diagnosis
 
@@ -63,7 +63,7 @@ To investigate safely:
   request caching and polling before changing budgets.
 - Compare `request_ip_source`, `trusted_forwarded_hops`,
   `forwarded_header_present`, `forwarded_header_entries`, and
-  `selected_ip_equals_socket_peer` with the documented Railway proxy topology.
+  `selected_ip_equals_socket_peer` with the documented Contabo proxy topology.
   These fields describe the existing selection without recording addresses.
   The app still trusts exactly one proxy hop. Multiple header entries alone do
   not prove incorrect attribution or authorize trusting more hops.
@@ -79,7 +79,7 @@ To investigate safely:
 Keep origin allowlists, authentication, rate-limit budgets and proxy trust
 unchanged until evidence supports a bounded correction.
 
-## Worker diagnosis — Railway
+## Worker diagnosis — Contabo
 
 Check:
 
@@ -109,14 +109,14 @@ Check:
 
 Frontend hostname must resolve to Vercel.
 
-API hostname must resolve to Railway.
+API hostname must resolve to Contabo.
 
 If either still resolves to Google Frontend/Cloud Run infrastructure, correct DNS before debugging application code at that hostname.
 
 ## Safe rollback
 
 - Frontend: roll back to a known-good Vercel deployment.
-- API/worker: roll back to known-good Railway deployments.
+- API/worker: roll back to known-good Contabo deployments.
 - Database: prefer forward recovery unless a migration has an explicit safe reversal.
 
 Cloud Run is not the canonical emergency rollback target.

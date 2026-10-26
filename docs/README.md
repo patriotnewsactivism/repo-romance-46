@@ -1,6 +1,6 @@
 # RepoFinisher Documentation Index
 
-Canonical production topology is **Vercel frontend + Railway API/worker + Supabase auth/data + GitHub source/CI**.
+Canonical production topology is **Vercel frontend + Contabo API/worker + Supabase auth/data + GitHub source/CI**.
 
 Start with:
 
@@ -9,7 +9,7 @@ Start with:
 - [`PROJECT_STATE.md`](PROJECT_STATE.md) — time-sensitive rollout state.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — stable system design.
 - [`OPERATIONS.md`](OPERATIONS.md) — production runbook.
-- [`RAILWAY_MIGRATION.md`](RAILWAY_MIGRATION.md) — current Cloud Run → Railway migration/cutover.
+- [`CONTABO_MIGRATION.md`](CONTABO_MIGRATION.md) — current Contabo API/worker migration and verification.
 - [`DEFINITION_OF_DONE.md`](DEFINITION_OF_DONE.md) — completion evidence standard.
 - [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md) — production release gates.
 - [`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md) — incident handling.
@@ -24,7 +24,7 @@ Historical only:
 ## Documentation rules
 
 1. Vercel is the canonical frontend host.
-2. Railway is the canonical persistent API and worker host.
+2. Contabo is the canonical persistent API and worker host.
 3. Supabase remains auth/database/durable-state infrastructure.
 4. Cloud Run must not be described as active production infrastructure.
 5. `PROJECT_STATE.md` is time-sensitive and must be updated after runtime verification.

@@ -7,6 +7,7 @@ import { ApiError, setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-
 import { supabase } from '@/integrations/supabase/client';
 import { captureOperationalError, setSentryRoute, setSentryUser } from '@/lib/observability';
 import { AuthenticatedCacheProvider } from '@/lib/authenticated-cache';
+import { apiBaseUrl } from '@/lib/api-base-url';
 
 import Landing from '@/pages/landing';
 import Auth from '@/pages/auth';
@@ -17,18 +18,8 @@ import Settings from '@/pages/settings';
 import SharedAnalysis from '@/pages/shared-analysis';
 import NotFound from '@/pages/not-found';
 
-// Vercel serves the SPA; Railway serves the persistent API/worker plane.
-// Ignore the retired Cloud Run URL even if a stale Vercel build variable still
-// contains it, so production cannot silently route back to decommissioned compute.
-const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim().replace(/\/$/, '');
-const productionApiBaseUrl = 'https://repofinisher-api-production.up.railway.app';
-const retiredApiBaseUrls = new Set([
-  'https://repofinisher-api-z6kubh2jtq-uc.a.run.app',
-]);
 const canonicalProductionOrigin = 'https://portfolio.donmatthews.live';
-const localHostnames = new Set(['localhost', '127.0.0.1', '::1']);
 const legacyProductionHostnames = new Set(['repofinisher.donmatthews.live']);
-const isLocalBrowser = typeof window !== 'undefined' && localHostnames.has(window.location.hostname);
 
 if (typeof window !== 'undefined' && legacyProductionHostnames.has(window.location.hostname)) {
   window.location.replace(
@@ -36,16 +27,7 @@ if (typeof window !== 'undefined' && legacyProductionHostnames.has(window.locati
   );
 }
 
-const apiBaseUrl =
-  configuredApiBaseUrl && !retiredApiBaseUrls.has(configuredApiBaseUrl)
-    ? configuredApiBaseUrl
-    : isLocalBrowser
-      ? undefined
-      : productionApiBaseUrl;
-
-if (apiBaseUrl) {
-  setBaseUrl(apiBaseUrl);
-}
+setBaseUrl(apiBaseUrl ?? '');
 
 setAuthTokenGetter(async () => {
   const { data } = await supabase.auth.getSession();

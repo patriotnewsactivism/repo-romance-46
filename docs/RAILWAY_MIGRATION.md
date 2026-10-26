@@ -1,3 +1,5 @@
+> Historical migration record. Superseded on 2026-10-25 by [the Contabo migration](CONTABO_MIGRATION.md). Railway is shut down and must not be used for deployment or rollback.
+
 # Railway Migration and Cutover
 
 **Started:** 2026-09-19
