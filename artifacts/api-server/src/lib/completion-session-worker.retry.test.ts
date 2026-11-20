@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@workspace/db";
 import { blockSession, retryBlockedIteration, type CompletionSessionRow } from "./completion-session-worker";
 
 vi.mock("./completion-session-scheduler", () => ({

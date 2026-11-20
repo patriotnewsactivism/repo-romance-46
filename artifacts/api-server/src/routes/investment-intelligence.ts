@@ -23,7 +23,7 @@ import {
   type ScenarioInput,
   type ValueImprovementSuggestion,
 } from "@workspace/repo-os";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@workspace/db";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
 import { type AIProviderConfig } from "../lib/ai-provider";

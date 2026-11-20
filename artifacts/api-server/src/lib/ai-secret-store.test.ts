@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@workspace/db";
 import { describe, expect, it, vi } from "vitest";
 import { deleteAiVaultSecret, readAiVaultSecret, storeAiVaultSecret } from "./ai-secret-store";
 

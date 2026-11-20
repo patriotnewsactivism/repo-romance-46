@@ -5,7 +5,7 @@
  * signal orange and electric purple, condensed poster type.
  */
 export const BRAND = {
-  name: 'Deadstock',
-  tagline: 'Repo salvage, priced honestly.',
-  shortName: 'Deadstock',
+  name: 'Bluebook',
+  tagline: 'Every repo, priced honestly.',
+  shortName: 'Bluebook',
 } as const;

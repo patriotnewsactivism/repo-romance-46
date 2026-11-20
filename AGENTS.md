@@ -17,7 +17,7 @@ Current production architecture:
 - **Vercel** — React/Vite frontend from `artifacts/repo-finisher`.
 - **Contabo** — persistent Express API service `repofinisher-api`.
 - **Contabo** — persistent background worker service `repofinisher-worker`.
-- **Supabase** — Auth, Postgres, RLS, durable execution state, Vault-backed trusted data paths.
+- **Postgres (self-hosted via Docker Compose)** — durable execution state. Authentication is first-party (`/api/auth/*`); user-supplied secrets are sealed with `SECRET_ENCRYPTION_KEY`. There is no Supabase dependency: row ownership is enforced in the API data client (`lib/db/src/client.ts`), not by database RLS.
 - **GitHub + GitHub Actions** — source control, branches, draft PRs, CI/build/test evidence.
 - **Sentry** — optional application observability.
 
@@ -31,7 +31,8 @@ Never commit secrets.
 
 Never place these in frontend code or `VITE_*` variables:
 
-- Supabase secret/service-role keys;
+- the Postgres connection string with credentials;
+- OAuth client secrets;
 - GitHub access tokens;
 - AI provider API keys;
 - `PLAN_SIGNING_SECRET`;
@@ -39,7 +40,7 @@ Never place these in frontend code or `VITE_*` variables:
 - Sentry auth tokens;
 - private keys or credential JSON.
 
-GitHub OAuth Client ID/Secret are configured in Supabase Auth's GitHub provider. The browser receives only normal OAuth/session results.
+GitHub OAuth Client ID/Secret live in `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` on the API service. The browser receives only normal OAuth/session results.
 
 User-supplied AI provider credentials must remain behind the trusted server/Vault boundary.
 
@@ -68,7 +69,7 @@ The scheduled Apex ↔ Think Tank loop (`docs/APEX_THINKTANK_LOOP.md`) is bound 
 
 ## Contabo worker contract
 
-Finish-until-target work is durable state in Supabase, not an HTTP request lifetime.
+Finish-until-target work is durable state in Postgres, not an HTTP request lifetime.
 
 The Contabo worker:
 
@@ -148,4 +149,4 @@ pnpm --filter @workspace/repo-finisher dev
 
 On a local hostname the SPA calls the API with relative `/api` URLs. `CORS_ALLOWED_ORIGINS` should include `http://localhost:3000` when the browser sends an Origin header through that proxy.
 
-`/api/healthz` and the landing page render without Supabase credentials. Authenticated GitHub analysis, repository writes, and Vault-backed AI settings need the trusted values listed in `.env.example`. Do not put service-role keys, signing secrets, or encryption keys in `VITE_*`.
+`/api/healthz` and the landing page render without GitHub OAuth credentials. Authenticated GitHub analysis, repository writes, and encrypted AI settings need the trusted values listed in `.env.example`. Do not put database URLs, OAuth secrets, signing secrets, or encryption keys in `VITE_*`.

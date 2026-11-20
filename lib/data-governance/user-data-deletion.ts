@@ -1,7 +1,7 @@
 /**
  * User Data Deletion Service – implements right-to-be-forgotten and account cleanup.
  */
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@workspace/db';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,

@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@workspace/db";
 import { runInBackground } from "./background-tasks";
 import { processCompletionSession } from "./completion-session-worker";
 

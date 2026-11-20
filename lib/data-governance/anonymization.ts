@@ -1,7 +1,7 @@
 /**
  * Anonymization Service for learning data privacy compliance.
  */
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@workspace/db';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,

@@ -16,7 +16,7 @@
  * rejects is surfaced as `needsReconnect` instead of an empty portfolio.
  */
 
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@workspace/db";
 
 /** Every affiliation a user can legitimately act on. */
 export const GITHUB_SYNC_AFFILIATION = "owner,collaborator,organization_member";

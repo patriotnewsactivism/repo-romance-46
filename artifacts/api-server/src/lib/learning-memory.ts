@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@workspace/db";
 
 export type MemoryScope = "repo" | "cross_repo" | "portfolio";
 export type MemoryCategory =
