@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'wouter';
 import { supabase } from '@/integrations/supabase/client';
-import { setAuthTokenGetter, useConnectGithub } from '@workspace/api-client-react';
+import { customFetch, setAuthTokenGetter, useConnectGithub } from '@workspace/api-client-react';
 import { Loader2 } from 'lucide-react';
 
 export default function AuthCallback() {
@@ -21,13 +21,23 @@ export default function AuthCallback() {
       setAuthTokenGetter(async () => session.access_token);
 
       const providerToken = session.provider_token;
-      if (!providerToken) {
-        throw new Error(
-          'GitHub sign-in succeeded, but Supabase did not return a GitHub provider token. Check the Supabase GitHub provider and OAuth redirect configuration, then reconnect.',
-        );
+
+      if (providerToken) {
+        await connectGithub.mutateAsync({ data: { providerToken } });
+        return;
       }
 
-      await connectGithub.mutateAsync({ data: { providerToken } });
+      // Supabase only returns `provider_token` immediately after the OAuth
+      // handshake. A returning user can sign in without one, which used to be a
+      // hard error even though a perfectly good stored connection existed.
+      // Ask the API to resync with the stored credential instead. If that
+      // credential is dead the dashboard shows the reconnect card, which is the
+      // correct place to fix it.
+      try {
+        await customFetch('/api/github/sync', { method: 'POST', responseType: 'json' });
+      } catch (syncError) {
+        console.warn('GitHub repository resync did not complete after sign-in:', syncError);
+      }
     };
 
     const handleCallback = async () => {

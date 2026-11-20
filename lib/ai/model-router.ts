@@ -1,5 +1,12 @@
 /**
- * Dynamic Model Router – selects AI models based on performance, cost, and preference.
+ * Compatibility shim.
+ *
+ * The authoritative model catalog and task routing now live in
+ * `artifacts/api-server/src/lib/ai-model-catalog.ts`, which the API, the
+ * Settings picker, and the analysis pipeline all read. This module used to hold
+ * a second, stale catalog (Gemini 1.5 / GPT-4o) that disagreed with the rest of
+ * the app. It is kept only so older imports keep compiling, and it now delegates
+ * its ranking to the same tiers the product uses.
  */
 
 export interface ModelCandidate {
@@ -19,11 +26,14 @@ export interface RoutingContext {
   requirePaid?: boolean;
 }
 
+/** Mirrors the reviewed catalog's frontier/balanced/fast ordering. */
 const catalog: ModelCandidate[] = [
-  { id: 'openrouter/auto', provider: 'openrouter', costPer1kTokens: 0.002, avgLatencyMs: 1200, reliabilityScore: 0.95, capabilities: ['analysis', 'planning', 'code-gen', 'repair', 'critique'] },
-  { id: 'gemini-1.5-pro-latest', provider: 'google', costPer1kTokens: 0.0035, avgLatencyMs: 900, reliabilityScore: 0.97, capabilities: ['analysis', 'planning', 'code-gen', 'repair', 'critique'] },
-  { id: 'openai/gpt-4o', provider: 'openai', costPer1kTokens: 0.005, avgLatencyMs: 800, reliabilityScore: 0.98, capabilities: ['analysis', 'planning', 'code-gen', 'repair', 'critique'] },
-  { id: 'anthropic/claude-3-5-sonnet', provider: 'anthropic', costPer1kTokens: 0.003, avgLatencyMs: 1100, reliabilityScore: 0.96, capabilities: ['analysis', 'planning', 'code-gen', 'repair', 'critique'] },
+  { id: 'openai/gpt-5.6-sol', provider: 'openrouter', costPer1kTokens: 0.005, avgLatencyMs: 1100, reliabilityScore: 0.96, capabilities: ['analysis', 'planning', 'code-gen', 'repair', 'critique'] },
+  { id: 'openai/gpt-5.6-terra', provider: 'openrouter', costPer1kTokens: 0.001, avgLatencyMs: 950, reliabilityScore: 0.96, capabilities: ['analysis', 'planning', 'code-gen', 'repair', 'critique'] },
+  { id: 'gemini-3.8-flash', provider: 'google', costPer1kTokens: 0.0008, avgLatencyMs: 700, reliabilityScore: 0.97, capabilities: ['analysis', 'planning', 'code-gen', 'repair', 'critique'] },
+  { id: 'gpt-5.6-terra', provider: 'openai', costPer1kTokens: 0.001, avgLatencyMs: 850, reliabilityScore: 0.98, capabilities: ['analysis', 'planning', 'code-gen', 'repair', 'critique'] },
+  { id: 'claude-sonnet-4-20250514', provider: 'anthropic', costPer1kTokens: 0.003, avgLatencyMs: 1000, reliabilityScore: 0.96, capabilities: ['analysis', 'planning', 'code-gen', 'repair', 'critique'] },
+  { id: 'qwen-plus', provider: 'qwen', costPer1kTokens: 0.0004, avgLatencyMs: 900, reliabilityScore: 0.94, capabilities: ['analysis', 'planning', 'code-gen', 'repair', 'critique'] },
 ];
 
 export function selectModel(ctx: RoutingContext): ModelCandidate {
@@ -34,11 +44,6 @@ export function selectModel(ctx: RoutingContext): ModelCandidate {
   }
 
   let candidates = catalog.filter((m) => m.capabilities.includes(ctx.taskType));
-
-  if (ctx.requirePaid) {
-    // Filter out known free-tier models
-    candidates = candidates.filter((m) => !m.id.includes(':free') && !m.id.includes('flash'));
-  }
 
   if (ctx.maxCostUsd) {
     candidates = candidates.filter((m) => m.costPer1kTokens * 10 <= ctx.maxCostUsd!); // rough estimate
@@ -55,5 +60,5 @@ export function selectModel(ctx: RoutingContext): ModelCandidate {
 }
 
 export function getDefaultProductionModel(): string {
-  return process.env.OPENROUTER_MODEL || process.env.AI_MODEL || 'openrouter/auto';
+  return process.env.OPENROUTER_MODEL || process.env.AI_MODEL || 'openai/gpt-5.6-terra';
 }

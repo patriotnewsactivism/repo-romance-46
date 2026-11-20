@@ -30,6 +30,44 @@ If `AI_PROVIDER` is explicitly configured and its matching platform credential e
 
 A user-saved exact model identifier takes precedence over in-code defaults. Historical `AI_MODEL` / `OPENROUTER_MODEL` / `GEMINI_MODEL` environment variables are ignored so a model slug cannot leak across providers.
 
+## Model catalog and task routing
+
+`artifacts/api-server/src/lib/ai-model-catalog.ts` is the single source of truth for
+model IDs, tiers, capabilities, prices, and per-task routing. Provider defaults in
+`ai-model-config.ts` and the Settings picker both read from it, so the API, the UI,
+and the router can no longer disagree about which models exist.
+
+Each catalog entry declares:
+
+- provider and exact slug;
+- tier (`frontier`, `balanced`, `fast`, `free`);
+- context window, strict-JSON support, and reasoning-effort support;
+- input/output price per million tokens;
+- the RepoFinisher tasks it is genuinely good at.
+
+Tasks are routed deliberately rather than by one global default:
+
+| Task | Preference | Why |
+| --- | --- | --- |
+| `repo_grading` | balanced → frontier | Structured, repeatable scoring; cheaper and steadier than frontier. |
+| `valuation` | frontier → balanced | A wrong multiple is expensive; pay for reasoning and context. |
+| `builder_prompt` | frontier → balanced | The prompt is the product; this is the task that justifies a premium model. |
+| `suggestion_generation` | balanced → fast | High-volume list generation at a fraction of frontier cost. |
+| `market_research` | frontier → balanced | Demand claims must be evidence-backed. |
+| `code_planning` | frontier → balanced | Plans become branches and PRs. |
+| `long_context_review` | frontier → balanced | Needs a large window more than price efficiency. |
+| `fast_classify` | fast → free → balanced | Routing and tagging should stay cheap and quick. |
+
+`selectModelCandidates(task)` / `selectModelForTask(task)` apply the profile's JSON,
+context, and price constraints, then rank by tier preference, task strength, context
+fit, and price headroom. A user-pinned catalog model always wins. `describeTaskRouting()`
+returns the safe, credential-free routing description used by operator diagnostics.
+
+The OpenAI in-code default is now `gpt-5.6-terra` (balanced), replacing `gpt-4o`.
+The Anthropic default remains `claude-sonnet-4-20250514`, Google remains
+`gemini-3.8-flash`, Qwen remains `qwen-plus`, and OpenRouter remains the free
+agent-pool sentinel because the pool fallback contract is keyed to that slug.
+
 ## User BYOK flow
 
 The Settings UI stores:

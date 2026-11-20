@@ -4,6 +4,8 @@ import {
   useGetGithubStatus,
   useGetPortfolioSummary,
   useListAnalyses,
+  getGetGithubStatusQueryKey,
+  getGetPortfolioSummaryQueryKey,
   useRunAnalysis,
   useDeleteAnalysis,
   getListAnalysesQueryKey,
@@ -19,7 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { PortfolioIntelligenceSnapshot } from '@/lib/portfolio-types';
-import { Plus, Code, AlertCircle, CheckCircle, Loader2, Trash2, Settings2 } from 'lucide-react';
+import { Plus, Code, AlertCircle, CheckCircle, Loader2, Trash2, Settings2, RefreshCw } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -36,6 +38,7 @@ export default function Dashboard() {
   const [snapshot, setSnapshot] = useState<PortfolioIntelligenceSnapshot | null>(null);
   const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [snapshotRefreshing, setSnapshotRefreshing] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   const latestCompletedAnalysis = useMemo(
     () => analyses?.find((analysis) => analysis.status === 'complete') ?? null,
@@ -121,6 +124,31 @@ export default function Dashboard() {
     setLocation('/auth');
   };
 
+  const handleSyncRepos = async () => {
+    setSyncing(true);
+    try {
+      const result = await customFetch<{ repoCount: number; lastSyncedAt: string | null }>('/api/github/sync', {
+        method: 'POST',
+        responseType: 'json',
+      });
+      toast.success(`Synced ${result.repoCount} repositories`);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: getGetGithubStatusQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: getGetPortfolioSummaryQueryKey() }),
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      toast.error('Repository sync failed', {
+        description: /reconnect|bad credentials|401/i.test(message)
+          ? 'GitHub authorization expired. Reconnect GitHub to resync.'
+          : message,
+      });
+      await queryClient.invalidateQueries({ queryKey: getGetGithubStatusQueryKey() });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   if (githubLoading) {
     return (
       <div className="min-h-screen bg-background dark">
@@ -185,6 +213,10 @@ export default function Dashboard() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => void handleSyncRepos()} disabled={syncing} className="gap-2">
+              {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Sync repositories
+            </Button>
             <Button variant="outline" onClick={() => setLocation('/settings')} className="gap-2">
               <Settings2 className="h-4 w-4" />
               Discovery filters

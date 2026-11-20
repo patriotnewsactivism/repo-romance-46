@@ -24,6 +24,7 @@ import assuranceRouter from "./assurance";
 import learningAuditRouter from "./learning-audit";
 import continuousReposRouter from "./continuous-repos";
 import externalCompletionPromptsRouter from "./external-completion-prompts";
+import repoBusinessRouter from "./repo-business";
 
 const router: IRouter = Router();
 
@@ -43,6 +44,7 @@ router.use(assuranceRouter);
 router.use(learningAuditRouter);
 router.use(continuousReposRouter);
 router.use(externalCompletionPromptsRouter);
+router.use(repoBusinessRouter);
 router.use(valuationRouter);
 router.use(tieredIntelligenceRouter);
 router.use(portfolioIntelligenceRouter);
