@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RecommendationCard } from '@/components/recommendation-card';
 import { StrategyView } from '@/components/strategy-view';
-import { GitBranch, Lock } from 'lucide-react';
+import { Lock } from 'lucide-react';
+import { BRAND } from '@/lib/brand';
 
 export default function SharedAnalysis() {
   const params = useParams();
@@ -52,7 +53,7 @@ export default function SharedAnalysis() {
           </CardHeader>
           <CardContent>
             <Link href="/">
-              <Button className="w-full">Go to RepoFinisher</Button>
+              <Button className="w-full">Go to {BRAND.name}</Button>
             </Link>
           </CardContent>
         </Card>
@@ -65,16 +66,19 @@ export default function SharedAnalysis() {
   return (
     <div className="min-h-screen bg-background dark">
       {/* Header */}
-      <div className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+      <div className="border-b-[3px] border-foreground bg-background sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center gap-4">
               <Link href="/" className="flex items-center gap-2">
-                <GitBranch className="w-6 h-6 text-primary" />
-                <span className="font-bold text-xl">RepoFinisher</span>
+                <span
+                  aria-hidden
+                  className="block h-6 w-6 rotate-[-8deg] border-[3px] border-foreground bg-primary shadow-[3px_3px_0_#9B5CFF]"
+                />
+                <span className="na-title text-xl">{BRAND.name}</span>
               </Link>
-              <div className="h-6 w-px bg-border" />
-              <span className="text-sm text-muted-foreground">Shared Analysis</span>
+              <div className="h-6 w-px bg-foreground/30" />
+              <span className="na-kicker text-muted-foreground">Shared Analysis</span>
             </div>
             <Link href="/auth">
               <Button variant="outline" size="sm">

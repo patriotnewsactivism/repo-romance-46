@@ -1,5 +1,6 @@
 import type { ReactElement, ReactNode } from "react";
 import * as Sentry from "@sentry/react";
+import { BRAND } from "@/lib/brand";
 
 const dsn =
   (import.meta.env.VITE_SENTRY_DSN as string | undefined)?.trim() ?? "";
@@ -119,7 +120,7 @@ function CrashFallback({
     <main className="min-h-screen bg-background text-foreground grid place-items-center p-6">
       <section className="w-full max-w-lg rounded-lg border border-border bg-card p-6 shadow-xl">
         <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-          RepoFinisher recovery
+          {BRAND.name} recovery
         </p>
         <h1 className="mt-2 text-2xl font-semibold">
           The interface hit an unexpected error.

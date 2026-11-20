@@ -11,6 +11,7 @@ import {
 } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { getSession, signOut } from '@/lib/auth';
+import { BRAND } from '@/lib/brand';
 import { AppHeader } from '@/components/app-header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -916,7 +917,7 @@ export default function Settings() {
                     <p className="text-xs text-muted-foreground">
                       {selectedOpenRouterModel?.reasoningMandatory
                         ? 'This model requires reasoning. Choose a supported effort or use its provider default.'
-                        : 'RepoFinisher will send this effort with OpenRouter analysis requests.'}
+                        : `${BRAND.name} will send this effort with OpenRouter analysis requests.`}
                     </p>
                   </div>
                 ) : null}

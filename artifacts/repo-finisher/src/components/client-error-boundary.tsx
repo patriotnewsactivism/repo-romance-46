@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { reportClientError } from '@/lib/telemetry';
+import { BRAND } from '@/lib/brand';
 
 interface Props {
   children: ReactNode;
@@ -30,7 +31,7 @@ export class ClientErrorBoundary extends Component<Props, State> {
       <main className="min-h-screen bg-background text-foreground flex items-center justify-center p-6 dark">
         <section className="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-xl">
           <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Application error</p>
-          <h1 className="mt-2 text-2xl font-semibold">Repo Finisher hit an unexpected problem.</h1>
+          <h1 className="mt-2 text-2xl font-semibold">{BRAND.name} hit an unexpected problem.</h1>
           <p className="mt-3 text-sm text-muted-foreground">
             The failure was reported securely. Reload the app to recover; your stored analysis data is not changed by this screen.
           </p>
