@@ -1,58 +1,33 @@
 import { Link } from 'wouter';
 import { BRAND } from '@/lib/brand';
 
-const MARQUEE_ITEMS = [
-  'Draft PRs only ★',
-  'Automatic merge disabled ★',
-  'Honest portfolio numbers ★',
-  'Evidence ceiling ★',
+const TRUST_POINTS = [
+  'Draft PRs only',
+  'Automatic merge disabled',
+  'Honest portfolio numbers',
+  'Evidence ceiling',
 ];
-
-const REVERSE_MARQUEE_ITEMS = ['Draft PRs only ✱', 'Automatic merge disabled ✱'];
 
 const STEPS = [
   {
+    index: '01',
     title: 'Inspect',
     body: 'Read the tree, tests, CI, docs, and intended product from current GitHub evidence — not from a vibe.',
-    icon: (
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-        <circle cx="6" cy="5" r="2.5" />
-        <circle cx="6" cy="19" r="2.5" />
-        <circle cx="18" cy="9" r="2.5" />
-        <path d="M6 8v8M18 12c0 4-8 2-12 4" />
-      </svg>
-    ),
   },
   {
+    index: '02',
     title: 'Score',
     body: 'Completion and readiness with an evidence ceiling. Present value is replacement cost. Potential is a labeled scenario.',
-    icon: (
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-        <path d="M4 18a8 8 0 1 1 16 0" />
-        <path d="M12 18l4-6" />
-      </svg>
-    ),
   },
   {
+    index: '03',
     title: 'Draft PR',
     body: 'Exact-plan writes on an isolated branch. Automatic merge stays off. Failed CI can get bounded repair.',
-    icon: (
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-        <circle cx="6" cy="5" r="2.5" />
-        <circle cx="6" cy="19" r="2.5" />
-        <circle cx="18" cy="19" r="2.5" />
-        <path d="M6 8v8M18 16V9a3 3 0 0 0-3-3h-3" />
-      </svg>
-    ),
   },
   {
+    index: '04',
     title: 'Iterate',
     body: 'Finish until target re-scores after each pass and stops when the target, budget, or evidence ceiling says stop.',
-    icon: (
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-        <path d="M4 11V9a3 3 0 0 1 3-3h11l-3-3M20 13v2a3 3 0 0 1-3 3H6l3 3" />
-      </svg>
-    ),
   },
 ];
 
@@ -74,143 +49,223 @@ const CAPABILITIES = [
   },
 ];
 
+const READOUT = [
+  { label: 'Completion', value: '68', unit: '%', width: '68%' },
+  { label: 'Production readiness', value: '41', unit: '%', width: '41%' },
+  { label: 'Demand', value: '72', unit: '/100', width: '72%' },
+];
+
+const VALUATION = [
+  { label: 'Present value', value: '$12.4k', note: 'replacement cost' },
+  { label: 'Potential', value: '$31.0k', note: 'labeled scenario' },
+];
+
+const PRIMARY_BTN =
+  'inline-flex h-11 items-center justify-center rounded-[3px] border border-[#4C8DFF] bg-[#4C8DFF] px-5 text-[14px] font-semibold text-[#07090A] transition-[filter,box-shadow] duration-150 hover:brightness-[1.08] active:brightness-125 active:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.25)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4C8DFF]';
+
+const SECONDARY_BTN =
+  'inline-flex h-11 items-center justify-center rounded-[3px] border border-[#2A3236] bg-[#14181A] px-5 text-[14px] font-medium text-[#E8ECEE] transition-colors duration-150 hover:border-[#3A4549] hover:bg-[#1A2023] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4C8DFF]';
+
+const KICKER = 'font-mono text-[11px] uppercase tracking-[0.18em] text-[#6B7A80]';
+const BODY = 'text-[13.5px] leading-[1.65] text-[#9AA6AB]';
+
 export default function Landing() {
   return (
-    <div className="dark min-h-screen bg-background font-mono text-foreground">
-      <nav className="sticky top-0 z-50 flex items-center justify-between border-b-[3px] border-foreground bg-background px-5 py-[22px] sm:px-12">
-        <Link
-          href="/"
-          className="flex items-center gap-3 text-[26px] uppercase tracking-[1px] text-foreground sm:text-[30px]"
-        >
-          <span
-            aria-hidden
-            className="block h-[34px] w-[34px] rotate-[-8deg] border-[3px] border-foreground bg-primary shadow-[4px_4px_0_#9B5CFF]"
-          />
-          <span className="na-title">{BRAND.name}</span>
-        </Link>
-        <Link
-          href="/auth"
-          data-testid="button-signin"
-          className="na-btn px-5 py-[9px] text-base shadow-[4px_4px_0_#9B5CFF]"
-        >
-          Sign In
-        </Link>
-      </nav>
+    <div className="cs-scope dark min-h-screen bg-[#0E1113] text-[#E8ECEE]">
+      <header className="sticky top-0 z-50 border-b border-[#2A3236] bg-[#0E1113]/95 backdrop-blur">
+        <div className="mx-auto flex h-16 max-w-[1180px] items-center justify-between gap-4 px-5 sm:px-8">
+          <Link
+            href="/"
+            className="flex items-center gap-2.5 rounded-[3px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#4C8DFF]"
+          >
+            <span aria-hidden className="block h-[18px] w-[18px] rounded-[3px] bg-[#4C8DFF]" />
+            <span className="text-[16px] font-semibold tracking-[-0.01em] text-[#E8ECEE]">{BRAND.name}</span>
+          </Link>
 
-      <section className="na-hero-lines relative grid items-center gap-10 border-b-[3px] border-foreground bg-background px-5 pb-16 pt-14 sm:px-12 lg:grid-cols-[1fr_440px]">
-        <div className="relative">
-          <div className="na-sticker">
-            <i aria-hidden />
-            <span className="na-title">{BRAND.name}</span>
-          </div>
-          <h1 className="na-slam-1 text-[56px] leading-none tracking-[-1px] sm:text-[80px] lg:text-[112px]">
-            Inspect the graveyard.
-            <span className="block text-primary [text-shadow:6px_6px_0_#9B5CFF]">
-              Finish what is actually there.
-            </span>
-          </h1>
-          <p className="na-slam-2 mb-8 mt-7 max-w-[620px] border-l-[6px] border-[#9B5CFF] pl-[18px] text-[17px] leading-relaxed">
-            {BRAND.name} scores completion and production readiness from repository evidence, puts an
-            honest planning number on the portfolio, then opens draft PRs and iterates until a target —
-            or a safe stop.
-          </p>
-          <div className="na-slam-3">
-            <Link href="/auth" data-testid="button-cta-hero" className="na-btn">
-              Connect GitHub &amp; Analyze
+          <nav className="flex items-center gap-2" aria-label="Primary">
+            <a
+              href="#method"
+              className="hidden rounded-[3px] px-3 py-2 text-[13px] text-[#9AA6AB] transition-colors duration-150 hover:text-[#E8ECEE] sm:inline-flex"
+            >
+              Method
+            </a>
+            <a
+              href="#capabilities"
+              className="hidden rounded-[3px] px-3 py-2 text-[13px] text-[#9AA6AB] transition-colors duration-150 hover:text-[#E8ECEE] sm:inline-flex"
+            >
+              Capabilities
+            </a>
+            <Link
+              href="/auth"
+              data-testid="button-signin"
+              className="rounded-[3px] px-3 py-2 text-[13px] text-[#9AA6AB] transition-colors duration-150 hover:text-[#E8ECEE] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4C8DFF]"
+            >
+              Sign in
             </Link>
-          </div>
+            <Link href="/auth" className={`${PRIMARY_BTN} hidden sm:inline-flex`}>
+              Connect GitHub
+            </Link>
+          </nav>
         </div>
+      </header>
 
-        <div className="na-slam-photo relative">
-          <img
-            src="https://media.base44.com/images/public/6b006b03970f606f18f9a372/b2f0148cb_generated_099dcb6e.jpg"
-            alt="Rusted toolbox opened on concrete"
-            className="block aspect-[4/5] w-full border-4 border-foreground object-cover shadow-[14px_14px_0_#FF4D2E]"
-          />
-          <div className="na-badge">Draft PRs only</div>
+      <section className="border-b border-[#2A3236]">
+        <div className="mx-auto grid max-w-[1180px] items-start gap-14 px-5 pb-16 pt-14 sm:px-8 lg:grid-cols-[1.1fr_0.9fr] lg:pb-24 lg:pt-20">
+          <div className="animate-[cold-steel-in_0.6s_ease-out_both]">
+            <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#4C8DFF]">
+              Repository intelligence
+            </p>
+            <h1 className="mt-5 text-[42px] font-semibold leading-[1.03] tracking-[-0.035em] text-[#E8ECEE] sm:text-[58px]">
+              Inspect the graveyard.
+              <span className="mt-2 block text-[#6B7A80]">Finish what is actually there.</span>
+            </h1>
+            <p className="mt-7 max-w-[560px] text-[15px] leading-[1.65] text-[#9AA6AB]">
+              {BRAND.name} scores completion and production readiness from repository evidence, puts an honest
+              planning number on the portfolio, then opens draft PRs and iterates until a target — or a safe stop.
+            </p>
+            <div className="mt-9 flex flex-wrap items-center gap-3">
+              <Link href="/auth" data-testid="button-cta-hero" className={PRIMARY_BTN}>
+                Connect GitHub &amp; analyze
+              </Link>
+              <a href="#method" className={SECONDARY_BTN}>
+                See the method
+              </a>
+            </div>
+            <p className="mt-6 font-mono text-[11px] leading-[1.7] text-[#6B7A80]">
+              Read-only until you approve a branch. Draft PRs only — never an automatic merge.
+            </p>
+          </div>
+
+          <div className="animate-[cold-steel-in_0.7s_0.1s_ease-out_both] rounded-[3px] border border-[#2A3236] bg-[#14181A] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.35)]">
+            <div className="flex items-center justify-between border-b border-[#2A3236] pb-3">
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#6B7A80]">
+                Example readout
+              </span>
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#4C8DFF]">Scored</span>
+            </div>
+
+            <p className="mt-4 font-mono text-[12.5px] text-[#E8ECEE]">acme/checkout-service</p>
+
+            <div className="mt-5 space-y-4">
+              {READOUT.map((row) => (
+                <div key={row.label}>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-[12px] text-[#9AA6AB]">{row.label}</span>
+                    <span className="font-mono text-[13px] tabular-nums text-[#E8ECEE]">
+                      {row.value}
+                      <span className="text-[#6B7A80]">{row.unit}</span>
+                    </span>
+                  </div>
+                  <div className="mt-2 h-[3px] w-full bg-[#202729]">
+                    <div className="h-full bg-[#4C8DFF]" style={{ width: row.width }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-6 grid grid-cols-2 gap-3 border-t border-[#2A3236] pt-4">
+              {VALUATION.map((row) => (
+                <div key={row.label}>
+                  <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#6B7A80]">{row.label}</p>
+                  <p className="mt-1.5 text-[18px] font-semibold tabular-nums tracking-[-0.02em] text-[#E8ECEE]">
+                    {row.value}
+                  </p>
+                  <p className="mt-0.5 font-mono text-[10px] text-[#6B7A80]">{row.note}</p>
+                </div>
+              ))}
+            </div>
+
+            <p className="mt-4 border-t border-[#2A3236] pt-3 font-mono text-[10px] leading-[1.6] text-[#6B7A80]">
+              Evidence ceiling 72% · numbers are a planning aid, not a guarantee.
+            </p>
+          </div>
         </div>
       </section>
 
-      <div className="na-marquee">
-        <div className="na-marquee-track">
-          {[0, 1, 2].map((group) =>
-            MARQUEE_ITEMS.map((item) => <span key={`${group}-${item}`}>{item}</span>),
-          )}
+      <div className="border-b border-[#2A3236] bg-[#0C0F11]">
+        <div className="mx-auto grid max-w-[1180px] grid-cols-2 divide-y divide-[#2A3236] sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+          {TRUST_POINTS.map((point) => (
+            <div
+              key={point}
+              className="flex items-center gap-2.5 px-5 py-4 font-mono text-[10.5px] uppercase tracking-[0.14em] text-[#6B7A80] sm:px-6"
+            >
+              <span aria-hidden className="block h-1.5 w-1.5 shrink-0 bg-[#4C8DFF]" />
+              {point}
+            </div>
+          ))}
         </div>
       </div>
 
-      <section className="grid items-center gap-12 border-y-[3px] border-[#0A0A0A] bg-[#F5F1E8] px-5 py-16 text-[#0A0A0A] sm:px-12 lg:grid-cols-[1fr_420px]">
-        <div>
-          <h2 className="mb-11 text-[40px] leading-none sm:text-[64px]">
-            <b className="bg-[#FF4D2E] px-3 font-normal text-[#0A0A0A] shadow-[6px_6px_0_#0A0A0A]">
-              How a repo actually gets finished
-            </b>
+      <section id="method" className="border-b border-[#2A3236]">
+        <div className="mx-auto max-w-[1180px] px-5 py-16 sm:px-8 lg:py-20">
+          <p className={KICKER}>Method</p>
+          <h2 className="mt-3 max-w-[720px] text-[30px] font-semibold leading-[1.1] tracking-[-0.03em] text-[#E8ECEE] sm:text-[38px]">
+            How a repo actually gets finished
           </h2>
-          <div className="grid gap-[22px] sm:grid-cols-2">
+
+          <div className="mt-10 grid gap-px bg-[#2A3236] sm:grid-cols-2">
             {STEPS.map((step) => (
-              <div key={step.title} className="na-stub">
-                <div className="na-ic">{step.icon}</div>
-                <h3>{step.title}</h3>
-                <p>{step.body}</p>
+              <div key={step.index} className="bg-[#0E1113] p-6 sm:p-7">
+                <div className="flex items-baseline gap-3">
+                  <span className="font-mono text-[11px] tabular-nums text-[#4C8DFF]">{step.index}</span>
+                  <h3 className="text-[18px] font-semibold tracking-[-0.01em] text-[#E8ECEE]">{step.title}</h3>
+                </div>
+                <p className={`mt-3 max-w-[440px] ${BODY}`}>{step.body}</p>
               </div>
             ))}
           </div>
         </div>
-        <div>
-          <img
-            src="https://media.base44.com/images/public/6b006b03970f606f18f9a372/2f116a648_generated_ccf811b6.jpg"
-            alt="Crumpled receipt still life"
-            className="block aspect-[4/3] w-full rotate-[2deg] border-4 border-[#0A0A0A] object-cover shadow-[12px_12px_0_#9B5CFF]"
-          />
+      </section>
+
+      <section id="capabilities" className="border-b border-[#2A3236]">
+        <div className="mx-auto max-w-[1180px] px-5 py-16 sm:px-8 lg:py-20">
+          <p className={KICKER}>Capabilities</p>
+          <h2 className="mt-3 text-[30px] font-semibold leading-[1.1] tracking-[-0.03em] text-[#E8ECEE] sm:text-[38px]">
+            What you can do
+          </h2>
+
+          <div className="mt-10 grid gap-4 md:grid-cols-3">
+            {CAPABILITIES.map((capability) => (
+              <div
+                key={capability.tag}
+                className="rounded-[3px] border border-[#2A3236] bg-[#14181A] p-6 transition-colors duration-200 hover:border-[#3A4549]"
+              >
+                <span className="inline-block rounded-[2px] border border-[#2A3236] px-2 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[#4C8DFF]">
+                  {capability.tag}
+                </span>
+                <h3 className="mt-4 text-[17px] font-semibold tracking-[-0.01em] text-[#E8ECEE]">
+                  {capability.title}
+                </h3>
+                <p className={`mt-2.5 ${BODY}`}>{capability.body}</p>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
-      <div className="na-marquee na-marquee--purple">
-        <div className="na-marquee-track">
-          {[0, 1, 2, 3, 4].map((group) =>
-            REVERSE_MARQUEE_ITEMS.map((item) => <span key={`${group}-${item}`}>{item}</span>),
-          )}
-        </div>
-      </div>
-
-      <section className="px-5 py-16 sm:px-12">
-        <h2 className="mb-11 text-[40px] leading-none sm:text-[64px]">What you can do</h2>
-        <div className="grid gap-[26px] md:grid-cols-3">
-          {CAPABILITIES.map((capability) => (
-            <div key={capability.tag} className="na-ticket">
-              <span className="na-tag">{capability.tag}</span>
-              <h3>{capability.title}</h3>
-              <p>{capability.body}</p>
+      <section className="border-b border-[#2A3236]">
+        <div className="mx-auto max-w-[1180px] px-5 py-16 sm:px-8 lg:py-20">
+          <div className="rounded-[3px] border border-[#2A3236] bg-[#14181A] px-6 py-12 text-center sm:px-12">
+            <h2 className="mx-auto max-w-[720px] text-[30px] font-semibold leading-[1.1] tracking-[-0.03em] text-[#E8ECEE] sm:text-[40px]">
+              Your unfinished repos still count
+            </h2>
+            <p className="mx-auto mt-4 max-w-[560px] text-[14px] leading-[1.65] text-[#9AA6AB]">
+              Connect GitHub, pick a model in Settings, run analysis, then finish until the scorecard moves.
+            </p>
+            <div className="mt-8 flex justify-center">
+              <Link href="/auth" data-testid="button-cta-footer" className={PRIMARY_BTN}>
+                Get started free
+              </Link>
             </div>
-          ))}
-        </div>
-        <div className="mt-11">
-          <img
-            src="https://media.base44.com/images/public/6b006b03970f606f18f9a372/e8ca75fe4_generated_ccd4aacb.jpg"
-            alt="Neon arrow sign"
-            className="block aspect-[16/5] w-full border-4 border-foreground object-cover shadow-[12px_12px_0_#9B5CFF]"
-          />
+          </div>
         </div>
       </section>
 
-      <section className="border-t-[3px] border-foreground bg-primary px-5 py-24 text-center text-[#0A0A0A] sm:px-12">
-        <h2 className="mx-auto mb-6 max-w-[900px] text-[46px] leading-none sm:text-[92px]">
-          Your unfinished repos still count
-        </h2>
-        <p className="mx-auto mb-[34px] max-w-[640px] text-lg font-bold leading-relaxed">
-          Connect GitHub, pick a model in Settings, run analysis, then finish until the scorecard moves.
-        </p>
-        <Link
-          href="/auth"
-          data-testid="button-cta-footer"
-          className="na-btn na-btn--ink px-10 py-4 text-[26px]"
-        >
-          Get Started Free
-        </Link>
-      </section>
-
-      <footer className="border-t-[3px] border-foreground bg-background px-5 py-[26px] text-center text-[13px] uppercase tracking-[2px] text-foreground sm:px-12">
-        {BRAND.name} · Draft PRs only · Automatic merge disabled
+      <footer className="mx-auto flex max-w-[1180px] flex-col items-center justify-between gap-2 px-5 py-6 font-mono text-[10.5px] uppercase tracking-[0.14em] text-[#6B7A80] sm:flex-row sm:px-8">
+        <span>
+          {BRAND.name} · {BRAND.tagline}
+        </span>
+        <span>Draft PRs only · automatic merge disabled</span>
       </footer>
     </div>
   );

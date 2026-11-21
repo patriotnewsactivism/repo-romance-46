@@ -123,6 +123,8 @@
   --chart-4: 38 100% 60%;
   --chart-5: 142 70% 45%;
 
+  --ui-border-color: #f5f1e8;
+
   --shadow-2xs: 2px 2px 0 rgba(245, 241, 232, 0.18);
   --shadow-xs: 3px 3px 0 rgba(245, 241, 232, 0.18);
   --shadow-sm: 3px 3px 0 rgba(245, 241, 232, 0.22);
@@ -193,6 +195,20 @@
   --app-font-serif: Georgia, serif;
   --app-font-mono: 'Courier New', ui-monospace, Menlo, monospace;
   --radius: 0rem;
+
+  /* Themeable surface tokens — Neon Aftermarket defaults. */
+  --ui-border-width: 3px;
+  --ui-border-color: #0a0a0a;
+  --ui-shadow-card: 8px 8px 0 #ff4d2e;
+  --ui-shadow-btn: 6px 6px 0 #9b5cff;
+  --ui-shadow-btn-hover: 6px 6px 0 #ff4d2e;
+  --ui-shadow-btn-sm: 4px 4px 0 #9b5cff;
+  --ui-shadow-mark: 3px 3px 0 #9b5cff;
+  --ui-accent-strong: #9b5cff;
+  --ui-display-font: 'Anton', Impact, 'Arial Narrow Bold', 'Franklin Gothic Condensed', sans-serif;
+  --ui-display-weight: 400;
+  --ui-display-transform: uppercase;
+  --ui-display-tracking: 0.01em;
   --shadow-2xs: 0px 1px 2px 0px rgba(0, 0, 0, 0.05);
   --shadow-xs: 0px 1px 3px 0px rgba(0, 0, 0, 0.1);
   --shadow-sm: 0px 2px 4px -1px rgba(0, 0, 0, 0.06);
@@ -257,10 +273,10 @@
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Anton', Impact, 'Arial Narrow Bold', 'Franklin Gothic Condensed', sans-serif;
-    font-weight: 400;
-    text-transform: uppercase;
-    letter-spacing: 0.01em;
+    font-family: var(--ui-display-font);
+    font-weight: var(--ui-display-weight);
+    text-transform: var(--ui-display-transform);
+    letter-spacing: var(--ui-display-tracking);
   }
 
   code, pre, .font-mono {
@@ -356,10 +372,10 @@
 /* ------------------------------------------------------------------ */
 
 .na-title {
-  font-family: 'Anton', Impact, 'Arial Narrow Bold', 'Franklin Gothic Condensed', sans-serif;
-  font-weight: 400;
-  text-transform: uppercase;
-  letter-spacing: 0.01em;
+  font-family: var(--ui-display-font);
+  font-weight: var(--ui-display-weight);
+  text-transform: var(--ui-display-transform);
+  letter-spacing: var(--ui-display-tracking);
 }
 
 .na-kicker {
@@ -756,4 +772,85 @@
 
 .cs-field:focus-within::after {
   transform: scaleY(1);
+}
+
+/* ------------------------------------------------------------------ */
+/* Cold Steel theme scope                                              */
+/* Graphite surfaces, hairline rules, system sans type, signal blue.   */
+/* Applied as a wrapper class on the auth, landing and dashboard       */
+/* surfaces, so shared primitives inherit the palette via tokens.      */
+/* ------------------------------------------------------------------ */
+.cs-scope {
+  --background: 200 9% 7%;
+  --foreground: 200 10% 92%;
+  --border: 197 9% 19%;
+
+  --card: 197 10% 9%;
+  --card-foreground: 200 10% 92%;
+  --card-border: 197 9% 19%;
+
+  --popover: 197 10% 9%;
+  --popover-foreground: 200 10% 92%;
+  --popover-border: 197 9% 19%;
+
+  --primary: 216 100% 65%;
+  --primary-foreground: 200 25% 4%;
+
+  --secondary: 197 10% 9%;
+  --secondary-foreground: 200 10% 92%;
+
+  --muted: 197 10% 9%;
+  --muted-foreground: 195 8% 46%;
+
+  --accent: 216 100% 65%;
+  --accent-foreground: 200 25% 4%;
+
+  --destructive: 0 72% 52%;
+  --destructive-foreground: 200 10% 96%;
+
+  --input: 197 9% 19%;
+  --ring: 216 100% 65%;
+
+  --sidebar: 200 9% 7%;
+  --sidebar-foreground: 200 10% 92%;
+  --sidebar-border: 197 9% 19%;
+  --sidebar-primary: 216 100% 65%;
+  --sidebar-primary-foreground: 200 25% 4%;
+  --sidebar-accent: 197 10% 9%;
+  --sidebar-accent-foreground: 200 10% 92%;
+  --sidebar-ring: 216 100% 65%;
+
+  --chart-1: 216 100% 65%;
+  --chart-2: 190 62% 55%;
+  --chart-3: 200 10% 92%;
+  --chart-4: 32 90% 60%;
+  --chart-5: 152 52% 46%;
+
+  --ui-border-width: 1px;
+  --ui-border-color: #2a3236;
+  --ui-shadow-card: none;
+  --ui-shadow-btn: none;
+  --ui-shadow-btn-hover: none;
+  --ui-shadow-btn-sm: none;
+  --ui-shadow-mark: none;
+  --ui-accent-strong: #4c8dff;
+  --ui-display-font: -apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --ui-display-weight: 600;
+  --ui-display-transform: none;
+  --ui-display-tracking: -0.02em;
+  --app-font-mono: ui-monospace, Menlo, 'Courier New', monospace;
+
+  font-family: -apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  color: hsl(var(--foreground));
+}
+
+/* The wordmark and card titles read as plain product type, not posters. */
+.cs-scope .na-title {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Brand mark: a solid signal-blue square — no rotation, no offset shadow. */
+.cs-scope [data-brand-mark] {
+  transform: none;
 }

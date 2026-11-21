@@ -151,7 +151,7 @@ export default function Dashboard() {
 
   if (githubLoading) {
     return (
-      <div className="min-h-screen bg-background dark">
+      <div className="cs-scope dark min-h-screen bg-background">
         <AppHeader section="Portfolio" onSignOut={() => void handleSignOut()} />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <Skeleton className="h-8 w-64 mb-8" />
@@ -167,7 +167,7 @@ export default function Dashboard() {
 
   if (!githubStatus?.connected) {
     return (
-      <div className="min-h-screen bg-background dark">
+      <div className="cs-scope dark min-h-screen bg-background">
         <AppHeader section="Portfolio" onSignOut={() => void handleSignOut()} />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 flex justify-center">
           <Card className="max-w-md w-full">
@@ -192,7 +192,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-background dark">
+    <div className="cs-scope dark min-h-screen bg-background">
       <AppHeader
         section="Portfolio"
         user={{
@@ -204,10 +204,12 @@ export default function Dashboard() {
       />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div className="space-y-1">
-            <h1 className="text-2xl font-bold tracking-tight">Portfolio</h1>
-            <p className="text-sm text-muted-foreground max-w-2xl">
+        <div className="flex flex-col gap-5 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between">
+          <div className="space-y-2">
+            <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.02em] text-foreground sm:text-[30px]">
+              Portfolio
+            </h1>
+            <p className="max-w-2xl text-[13.5px] leading-relaxed text-muted-foreground">
               Find repositories, grade them on completeness / uniqueness / demand / competition, and finish the
               strongest opportunities first.
             </p>
@@ -240,16 +242,16 @@ export default function Dashboard() {
         <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader className="pb-3">
-              <CardDescription className="text-xs uppercase tracking-wide">Repositories</CardDescription>
-              <CardTitle className="text-3xl font-bold">
+              <CardDescription className="font-mono text-[11px] uppercase tracking-[0.16em]">Repositories</CardDescription>
+              <CardTitle className="text-[30px] font-semibold tracking-[-0.02em] tabular-nums">
                 {portfolioLoading ? <Skeleton className="h-9 w-16" /> : portfolio?.repoCount || 0}
               </CardTitle>
             </CardHeader>
           </Card>
           <Card>
             <CardHeader className="pb-3">
-              <CardDescription className="text-xs uppercase tracking-wide">Scored now</CardDescription>
-              <CardTitle className="text-3xl font-bold">
+              <CardDescription className="font-mono text-[11px] uppercase tracking-[0.16em]">Scored now</CardDescription>
+              <CardTitle className="text-[30px] font-semibold tracking-[-0.02em] tabular-nums">
                 {snapshotLoading && !snapshot ? (
                   <Skeleton className="h-9 w-16" />
                 ) : (
@@ -260,16 +262,16 @@ export default function Dashboard() {
           </Card>
           <Card>
             <CardHeader className="pb-3">
-              <CardDescription className="text-xs uppercase tracking-wide">Languages</CardDescription>
-              <CardTitle className="text-3xl font-bold">
+              <CardDescription className="font-mono text-[11px] uppercase tracking-[0.16em]">Languages</CardDescription>
+              <CardTitle className="text-[30px] font-semibold tracking-[-0.02em] tabular-nums">
                 {portfolioLoading ? <Skeleton className="h-9 w-16" /> : portfolio?.languages.length || 0}
               </CardTitle>
             </CardHeader>
           </Card>
           <Card>
             <CardHeader className="pb-3">
-              <CardDescription className="text-xs uppercase tracking-wide">Analyses</CardDescription>
-              <CardTitle className="text-3xl font-bold">
+              <CardDescription className="font-mono text-[11px] uppercase tracking-[0.16em]">Analyses</CardDescription>
+              <CardTitle className="text-[30px] font-semibold tracking-[-0.02em] tabular-nums">
                 {analysesLoading ? <Skeleton className="h-9 w-16" /> : analyses?.length || 0}
               </CardTitle>
             </CardHeader>

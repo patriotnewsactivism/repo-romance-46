@@ -5,20 +5,20 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-none font-['Anton',Impact,sans-serif] uppercase tracking-[1px] text-sm cursor-pointer transition-[box-shadow,background,transform,color] duration-150 focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-[#9B5CFF] focus-visible:outline-offset-[3px] focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-none [font-family:var(--ui-display-font)] [text-transform:var(--ui-display-transform)] [letter-spacing:var(--ui-display-tracking)] text-sm font-semibold cursor-pointer transition-[box-shadow,background,transform,color,filter] duration-150 focus-visible:outline focus-visible:outline-[3px] focus-visible:[outline-color:var(--ui-accent-strong)] focus-visible:outline-offset-[3px] focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
         default:
-          "border-[3px] border-foreground bg-primary text-primary-foreground shadow-[6px_6px_0_#9B5CFF] hover:bg-foreground hover:text-primary-foreground hover:shadow-[6px_6px_0_#FF4D2E] active:translate-x-[3px] active:translate-y-[3px] active:shadow-[3px_3px_0_#9B5CFF]",
+          "[border-width:var(--ui-border-width)] [border-style:solid] [border-color:var(--ui-border-color)] bg-primary text-primary-foreground [box-shadow:var(--ui-shadow-btn)] hover:bg-foreground hover:text-primary-foreground hover:[box-shadow:var(--ui-shadow-btn-hover)] active:translate-x-[2px] active:translate-y-[2px] active:[box-shadow:var(--ui-shadow-btn)]",
         destructive:
-          "border-[3px] border-foreground bg-destructive text-destructive-foreground shadow-[6px_6px_0_#9B5CFF] hover:bg-foreground hover:text-destructive active:translate-x-[3px] active:translate-y-[3px] active:shadow-[3px_3px_0_#9B5CFF]",
+          "[border-width:var(--ui-border-width)] [border-style:solid] [border-color:var(--ui-border-color)] bg-destructive text-destructive-foreground [box-shadow:var(--ui-shadow-btn)] hover:bg-foreground hover:text-destructive active:translate-x-[2px] active:translate-y-[2px] active:[box-shadow:var(--ui-shadow-btn)]",
         outline:
-          "border-[3px] border-foreground bg-background text-foreground shadow-[4px_4px_0_#9B5CFF] hover:bg-foreground hover:text-background active:translate-x-[3px] active:translate-y-[3px] active:shadow-[2px_2px_0_#9B5CFF]",
+          "[border-width:var(--ui-border-width)] [border-style:solid] [border-color:var(--ui-border-color)] bg-background text-foreground [box-shadow:var(--ui-shadow-btn-sm)] hover:bg-foreground hover:text-background active:translate-x-[2px] active:translate-y-[2px] active:[box-shadow:var(--ui-shadow-btn-sm)]",
         secondary:
-          "border-[3px] border-foreground bg-secondary text-secondary-foreground shadow-[4px_4px_0_#FF4D2E] hover:bg-foreground hover:text-background active:translate-x-[3px] active:translate-y-[3px] active:shadow-[2px_2px_0_#FF4D2E]",
+          "[border-width:var(--ui-border-width)] [border-style:solid] [border-color:var(--ui-border-color)] bg-secondary text-secondary-foreground [box-shadow:var(--ui-shadow-btn-sm)] hover:bg-foreground hover:text-background active:translate-x-[2px] active:translate-y-[2px] active:[box-shadow:var(--ui-shadow-btn-sm)]",
         ghost:
-          "border-[3px] border-transparent text-foreground hover:bg-foreground/10 hover:text-foreground",
+          "[border-width:var(--ui-border-width)] border-transparent text-foreground hover:bg-foreground/10 hover:text-foreground",
         link: "border-transparent text-primary underline-offset-4 hover:underline",
       },
       size: {

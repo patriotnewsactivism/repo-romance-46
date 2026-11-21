@@ -36,7 +36,7 @@ export function AppHeader({ section, user, actions, onSignOut }: AppHeaderProps)
   return (
     <header
       data-app-header
-      className="sticky top-0 z-[100] border-b-[3px] border-foreground bg-background text-foreground"
+      className="sticky top-0 z-[100] [border-bottom-width:var(--ui-border-width)] [border-bottom-style:solid] [border-bottom-color:var(--ui-border-color)] bg-background text-foreground"
     >
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-3 sm:px-6 lg:px-8">
         <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -46,7 +46,8 @@ export function AppHeader({ section, user, actions, onSignOut }: AppHeaderProps)
           >
             <span
               aria-hidden
-              className="block h-6 w-6 shrink-0 rotate-[-8deg] border-[3px] border-foreground bg-primary shadow-[3px_3px_0_#9B5CFF]"
+              data-brand-mark
+              className="block h-6 w-6 shrink-0 rotate-[-8deg] [border-width:var(--ui-border-width)] [border-style:solid] [border-color:var(--ui-border-color)] bg-primary [box-shadow:var(--ui-shadow-mark)]"
             />
             <span className="na-title truncate text-lg text-foreground sm:text-xl">{BRAND.name}</span>
           </Link>
@@ -54,7 +55,7 @@ export function AppHeader({ section, user, actions, onSignOut }: AppHeaderProps)
           {section && (
             <>
               <div className="hidden h-6 w-px bg-foreground/30 lg:block" />
-              <span className="hidden truncate text-sm font-bold uppercase tracking-[2px] text-muted-foreground lg:block">
+              <span className="hidden truncate font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-muted-foreground lg:block">
                 {section}
               </span>
             </>
