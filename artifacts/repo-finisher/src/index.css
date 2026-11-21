@@ -722,3 +722,38 @@
     animation: none;
   }
 }
+
+/* Cold Steel entrance — used by the sign-in screen. */
+@keyframes cold-steel-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Cold Steel field wrapper — the accent edge slides in on focus. */
+.cs-field {
+  position: relative;
+}
+
+.cs-field::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #4c8dff;
+  border-radius: 3px 0 0 3px;
+  transform: scaleY(0);
+  transform-origin: top;
+  transition: transform 0.22s ease-out;
+}
+
+.cs-field:focus-within::after {
+  transform: scaleY(1);
+}
