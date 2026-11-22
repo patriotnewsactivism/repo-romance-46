@@ -69,6 +69,9 @@ Thumbs.db
 # ...but the documented template is checked in on purpose
 !.env.example
 
+# pnpm content store created beside the workspace mount
+.pnpm-store/
+
 # apex-sync local ledger
 .apex-sync/
 deploy/contabo/runtime.env
