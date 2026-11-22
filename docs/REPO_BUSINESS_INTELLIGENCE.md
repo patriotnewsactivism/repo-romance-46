@@ -26,7 +26,8 @@ GET  /api/repo-business/:analysisId/detail?repo=owner/name&live=1&suggestions=18
 POST /api/repo-business/:analysisId/prompt   { repo, target, topN, useAi }
 ```
 
-All three require an authenticated Supabase session. The detail and prompt routes
+All three require an authenticated session (the bearer token issued by the first-party
+auth flow). The detail and prompt routes
 enrich stored analysis evidence with a live GitHub tree read when a GitHub
 connection exists; if GitHub is rate-limited or the token is dead, they degrade to
 stored evidence and say so in `evidenceSource`.
