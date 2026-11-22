@@ -53,7 +53,7 @@ The worker publishes its health file only after successfully reading the Supabas
 
 ## Vercel frontend
 
-`vercel.json` builds `artifacts/repo-finisher/dist/public`. Production `VITE_API_BASE_URL` should be `https://api.portfolio.donmatthews.live`. The source ignores retired platform URLs left in old build variables; both generated API calls and direct valuation requests share this resolver.
+`vercel.json` builds `artifacts/repo-finisher/dist/public`. It also proxies `/api/*` to `https://api.portfolio.donmatthews.live/api/*`, so first-party auth and the GitHub OAuth start/callback routes work on the canonical frontend origin; without that route the SPA catch-all answers them with its 404 page. Production `VITE_API_BASE_URL` should be `https://api.portfolio.donmatthews.live`, and the API's `PUBLIC_ORIGIN` must stay `https://portfolio.donmatthews.live` (the registered GitHub callback base and the page the browser returns to). The source ignores retired platform URLs left in old build variables; both generated API calls and direct valuation requests share this resolver.
 
 Deploy the frontend after the Contabo API is healthy through the public domain. Verify root/SPA routes, browser API requests, Supabase auth, GitHub OAuth callback and Settings save/reload. Keep preview protection and existing secret boundaries intact.
 

@@ -6,6 +6,7 @@
   "outputDirectory": "artifacts/repo-finisher/dist/public",
   "alias": ["portfolio.donmatthews.live"],
   "routes": [
+    { "src": "/api/(.*)", "dest": "https://api.portfolio.donmatthews.live/api/$1" },
     { "handle": "filesystem" },
     { "src": "/.*", "dest": "/index.html" }
   ]
