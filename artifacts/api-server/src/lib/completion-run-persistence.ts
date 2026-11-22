@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@workspace/db";
 
 const OUTCOME_COLUMNS = new Set([
   "analysis_id",

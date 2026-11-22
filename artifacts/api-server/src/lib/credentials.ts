@@ -7,7 +7,7 @@
  * consistent and there is one place to audit when a secret's storage changes.
  */
 
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@workspace/db";
 import { decryptSecret } from "./secrets";
 import { readAiVaultSecret } from "./ai-secret-store";
 import { defaultAiModel } from "./ai-model-config";

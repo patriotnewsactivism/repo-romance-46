@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
+import authRouter from "./auth";
 import analysisRouter from "./analysis";
 import preferencesRouter from "./preferences";
 import githubRouter from "./github";
@@ -24,10 +25,12 @@ import assuranceRouter from "./assurance";
 import learningAuditRouter from "./learning-audit";
 import continuousReposRouter from "./continuous-repos";
 import externalCompletionPromptsRouter from "./external-completion-prompts";
+import repoBusinessRouter from "./repo-business";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(authRouter);
 router.use(analysisRouter);
 router.use(preferencesRouter);
 router.use(githubRouter);
@@ -43,6 +46,7 @@ router.use(assuranceRouter);
 router.use(learningAuditRouter);
 router.use(continuousReposRouter);
 router.use(externalCompletionPromptsRouter);
+router.use(repoBusinessRouter);
 router.use(valuationRouter);
 router.use(tieredIntelligenceRouter);
 router.use(portfolioIntelligenceRouter);

@@ -1,5 +1,5 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@workspace/db";
 import { config, requireConfig } from "./config";
 
 export type AsyncJobKind = "agentic_preview" | "analysis" | "ci_repair" | "portfolio_run";

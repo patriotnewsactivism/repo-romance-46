@@ -2,7 +2,7 @@
  * Global Kill Switch for immediate human override of autonomous operations.
  * Workers poll the kill_switch_status table in Supabase.
  */
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@workspace/db';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,

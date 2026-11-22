@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@workspace/db";
 import { callAI, type AIProviderConfig } from "./ai-provider";
 import { parseModelJsonLenient } from "./parse-model-json";
 import { loadAdaptiveLearningContext } from "./adaptive-learning";

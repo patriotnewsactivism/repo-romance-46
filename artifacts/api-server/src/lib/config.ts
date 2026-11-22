@@ -2,8 +2,8 @@
  * Validated runtime configuration.
  *
  * Reading `process.env` inline hid two real problems: the server booted with
- * Supabase unconfigured and only failed on the first authenticated request,
- * and secret-bearing features silently degraded instead of refusing to start.
+ * its data layer unconfigured and only failed on the first request, and
+ * secret-bearing features silently degraded instead of refusing to start.
  * Everything the server needs is resolved and checked here.
  */
 
@@ -37,14 +37,19 @@ function corsAllowedOrigins(): string[] {
 export interface AppConfig {
   nodeEnv: string;
   isProduction: boolean;
-  supabaseUrl: string;
-  supabaseAnonKey: string;
+  /** Postgres connection string. The API is the only component that needs it. */
+  databaseUrl: string;
   /** HMAC key for signing change plans. Required before any repository write. */
   planSigningSecret: string;
   /** AES-256-GCM key (32 bytes, base64 or hex) for secrets at rest. */
   secretEncryptionKey: string;
   /** Exact origins allowed to call this API. */
   corsAllowedOrigins: string[];
+  /** Public origin of the web app. GitHub OAuth returns here after sign-in. */
+  publicOrigin: string;
+  /** GitHub OAuth app credentials (created by the operator, not in the repo). */
+  githubClientId: string;
+  githubClientSecret: string;
 }
 
 export function loadConfig(): AppConfig {
@@ -52,11 +57,13 @@ export function loadConfig(): AppConfig {
   return {
     nodeEnv,
     isProduction: nodeEnv === "production",
-    supabaseUrl: normalizeUrl(env("SUPABASE_URL", "VITE_SUPABASE_URL")),
-    supabaseAnonKey: env("SUPABASE_ANON_KEY", "VITE_SUPABASE_ANON_KEY"),
+    databaseUrl: env("DATABASE_URL"),
     planSigningSecret: env("PLAN_SIGNING_SECRET"),
     secretEncryptionKey: env("SECRET_ENCRYPTION_KEY", "AI_KEY_ENCRYPTION_KEY"),
     corsAllowedOrigins: corsAllowedOrigins(),
+    publicOrigin: normalizeUrl(env("PUBLIC_ORIGIN")) || "http://localhost:3000",
+    githubClientId: env("GITHUB_OAUTH_CLIENT_ID", "GITHUB_CLIENT_ID"),
+    githubClientSecret: env("GITHUB_OAUTH_CLIENT_SECRET", "GITHUB_CLIENT_SECRET"),
   };
 }
 

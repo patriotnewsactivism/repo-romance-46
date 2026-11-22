@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@workspace/db";
 import { asyncHandler } from "../lib/async-handler";
 import { requireAuth } from "../middlewares/auth";
 import {

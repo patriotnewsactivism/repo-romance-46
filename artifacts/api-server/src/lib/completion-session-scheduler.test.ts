@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@workspace/db";
 
 const mocks = vi.hoisted(() => ({ process: vi.fn(async () => undefined), background: vi.fn() }));
 vi.mock("./completion-session-worker", () => ({ processCompletionSession: mocks.process }));

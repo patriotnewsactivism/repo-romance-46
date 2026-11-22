@@ -1,7 +1,6 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient, pool, type SupabaseClient } from "@workspace/db";
 import { createHash } from "node:crypto";
 import type { Request, Response, NextFunction } from "express";
-import { config } from "../lib/config";
 import { captureException } from "../instrument";
 
 declare global {
@@ -19,9 +18,10 @@ interface CachedIdentity {
 }
 
 /**
- * Verified identities, keyed by a hash of the bearer token so the token itself
+ * Verified identities, keyed by a hash of the bearer ****** so the token itself
  * never sits in memory as a map key. Short-lived: a revoked session stops
- * working within `IDENTITY_TTL_MS`, and Supabase remains the source of truth.
+ * working within `IDENTITY_TTL_MS`, and the session table remains the source
+ * of truth.
  */
 const identityCache = new Map<string, CachedIdentity>();
 const IDENTITY_TTL_MS = 60_000;
@@ -51,22 +51,27 @@ export function clearIdentityCache(): void {
   identityCache.clear();
 }
 
-function anonClient(token: string): SupabaseClient {
-  return createClient(config.supabaseUrl, config.supabaseAnonKey, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  });
+/** Request-scoped client: reads and writes are constrained to this user. */
+function userClient(userId: string): SupabaseClient {
+  return createClient("", "", { userId });
+}
+
+async function resolveSessionUserId(token: string): Promise<string | null> {
+  const { rows } = await pool.query<{ user_id: string }>(
+    `select user_id from app_sessions where token_hash = $1 and expires_at > now()`,
+    [cacheKey(token)],
+  );
+  return rows[0]?.user_id ?? null;
 }
 
 /**
- * Require a *verified* Supabase session.
+ * Require a verified session.
  *
- * The previous implementation base64-decoded the JWT payload and trusted its
- * `sub` claim, reasoning that RLS would catch anything wrong. That only holds
- * for calls that go through PostgREST: routes also used `req.userId` to decide
- * whose GitHub token and AI key to load, so a self-signed JWT naming another
- * user's id was enough to act as them. The token is now verified against
- * Supabase before any identity is attached.
+ * Sessions are opaque tokens issued by /api/auth/*. The hash is looked up in
+ * `app_sessions` before any identity is attached, so a forged or expired token
+ * can never act as another user. The attached client is scoped to that user,
+ * which is the replacement for the row-level security the database used to
+ * enforce.
  */
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers["authorization"];
@@ -81,31 +86,23 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
     return;
   }
 
-  if (!config.supabaseUrl || !config.supabaseAnonKey) {
-    res.status(500).json({ error: "Supabase not configured" });
-    return;
-  }
-
   const key = cacheKey(token);
   const cached = readCache(key);
   if (cached) {
-    req.supabase = anonClient(token);
+    req.supabase = userClient(cached);
     req.userId = cached;
     next();
     return;
   }
 
-  const client = anonClient(token);
-  client.auth
-    .getUser(token)
-    .then(({ data, error }) => {
-      const userId = data?.user?.id;
-      if (error || !userId) {
+  resolveSessionUserId(token)
+    .then((userId) => {
+      if (!userId) {
         res.status(401).json({ error: "Invalid or expired session" });
         return;
       }
       writeCache(key, userId);
-      req.supabase = client;
+      req.supabase = userClient(userId);
       req.userId = userId;
       next();
     })

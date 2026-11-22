@@ -1,18 +1,16 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { config, requireConfig } from "./config";
+import { createServiceClient, type SupabaseClient } from "@workspace/db";
 
 let cached: SupabaseClient | null = null;
 
+/**
+ * Unrestricted data client for trusted server code.
+ *
+ * This is the equivalent of the old Supabase service-role client: it is not
+ * scoped to a user, so every query that uses it must constrain ownership
+ * itself. Request-scoped work should use `req.supabase` instead, which the
+ * auth middleware binds to the signed-in user.
+ */
 export function createServiceSupabaseClient(): SupabaseClient {
-  if (cached) return cached;
-
-  const backendKey = requireConfig(
-    process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "",
-    "SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY",
-  );
-
-  cached = createClient(config.supabaseUrl, backendKey, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  });
+  if (!cached) cached = createServiceClient();
   return cached;
 }

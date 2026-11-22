@@ -4,6 +4,8 @@ import {
   useGetGithubStatus,
   useGetPortfolioSummary,
   useListAnalyses,
+  getGetGithubStatusQueryKey,
+  getGetPortfolioSummaryQueryKey,
   useRunAnalysis,
   useDeleteAnalysis,
   getListAnalysesQueryKey,
@@ -19,7 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { PortfolioIntelligenceSnapshot } from '@/lib/portfolio-types';
-import { Plus, Code, AlertCircle, CheckCircle, Loader2, Trash2, Settings2 } from 'lucide-react';
+import { Plus, Code, AlertCircle, CheckCircle, Loader2, Trash2, Settings2, RefreshCw } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -36,6 +38,7 @@ export default function Dashboard() {
   const [snapshot, setSnapshot] = useState<PortfolioIntelligenceSnapshot | null>(null);
   const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [snapshotRefreshing, setSnapshotRefreshing] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   const latestCompletedAnalysis = useMemo(
     () => analyses?.find((analysis) => analysis.status === 'complete') ?? null,
@@ -121,9 +124,34 @@ export default function Dashboard() {
     setLocation('/auth');
   };
 
+  const handleSyncRepos = async () => {
+    setSyncing(true);
+    try {
+      const result = await customFetch<{ repoCount: number; lastSyncedAt: string | null }>('/api/github/sync', {
+        method: 'POST',
+        responseType: 'json',
+      });
+      toast.success(`Synced ${result.repoCount} repositories`);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: getGetGithubStatusQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: getGetPortfolioSummaryQueryKey() }),
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      toast.error('Repository sync failed', {
+        description: /reconnect|bad credentials|401/i.test(message)
+          ? 'GitHub authorization expired. Reconnect GitHub to resync.'
+          : message,
+      });
+      await queryClient.invalidateQueries({ queryKey: getGetGithubStatusQueryKey() });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   if (githubLoading) {
     return (
-      <div className="min-h-screen bg-background dark">
+      <div className="cs-scope dark min-h-screen bg-background">
         <AppHeader section="Portfolio" onSignOut={() => void handleSignOut()} />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <Skeleton className="h-8 w-64 mb-8" />
@@ -139,7 +167,7 @@ export default function Dashboard() {
 
   if (!githubStatus?.connected) {
     return (
-      <div className="min-h-screen bg-background dark">
+      <div className="cs-scope dark min-h-screen bg-background">
         <AppHeader section="Portfolio" onSignOut={() => void handleSignOut()} />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 flex justify-center">
           <Card className="max-w-md w-full">
@@ -164,7 +192,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-background dark">
+    <div className="cs-scope dark min-h-screen bg-background">
       <AppHeader
         section="Portfolio"
         user={{
@@ -176,15 +204,21 @@ export default function Dashboard() {
       />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div className="space-y-1">
-            <h1 className="text-2xl font-bold tracking-tight">Portfolio</h1>
-            <p className="text-sm text-muted-foreground max-w-2xl">
+        <div className="flex flex-col gap-5 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between">
+          <div className="space-y-2">
+            <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.02em] text-foreground sm:text-[30px]">
+              Portfolio
+            </h1>
+            <p className="max-w-2xl text-[13.5px] leading-relaxed text-muted-foreground">
               Find repositories, grade them on completeness / uniqueness / demand / competition, and finish the
               strongest opportunities first.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => void handleSyncRepos()} disabled={syncing} className="gap-2">
+              {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Sync repositories
+            </Button>
             <Button variant="outline" onClick={() => setLocation('/settings')} className="gap-2">
               <Settings2 className="h-4 w-4" />
               Discovery filters
@@ -208,16 +242,16 @@ export default function Dashboard() {
         <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader className="pb-3">
-              <CardDescription className="text-xs uppercase tracking-wide">Repositories</CardDescription>
-              <CardTitle className="text-3xl font-bold">
+              <CardDescription className="font-mono text-[11px] uppercase tracking-[0.16em]">Repositories</CardDescription>
+              <CardTitle className="text-[30px] font-semibold tracking-[-0.02em] tabular-nums">
                 {portfolioLoading ? <Skeleton className="h-9 w-16" /> : portfolio?.repoCount || 0}
               </CardTitle>
             </CardHeader>
           </Card>
           <Card>
             <CardHeader className="pb-3">
-              <CardDescription className="text-xs uppercase tracking-wide">Scored now</CardDescription>
-              <CardTitle className="text-3xl font-bold">
+              <CardDescription className="font-mono text-[11px] uppercase tracking-[0.16em]">Scored now</CardDescription>
+              <CardTitle className="text-[30px] font-semibold tracking-[-0.02em] tabular-nums">
                 {snapshotLoading && !snapshot ? (
                   <Skeleton className="h-9 w-16" />
                 ) : (
@@ -228,16 +262,16 @@ export default function Dashboard() {
           </Card>
           <Card>
             <CardHeader className="pb-3">
-              <CardDescription className="text-xs uppercase tracking-wide">Languages</CardDescription>
-              <CardTitle className="text-3xl font-bold">
+              <CardDescription className="font-mono text-[11px] uppercase tracking-[0.16em]">Languages</CardDescription>
+              <CardTitle className="text-[30px] font-semibold tracking-[-0.02em] tabular-nums">
                 {portfolioLoading ? <Skeleton className="h-9 w-16" /> : portfolio?.languages.length || 0}
               </CardTitle>
             </CardHeader>
           </Card>
           <Card>
             <CardHeader className="pb-3">
-              <CardDescription className="text-xs uppercase tracking-wide">Analyses</CardDescription>
-              <CardTitle className="text-3xl font-bold">
+              <CardDescription className="font-mono text-[11px] uppercase tracking-[0.16em]">Analyses</CardDescription>
+              <CardTitle className="text-[30px] font-semibold tracking-[-0.02em] tabular-nums">
                 {analysesLoading ? <Skeleton className="h-9 w-16" /> : analyses?.length || 0}
               </CardTitle>
             </CardHeader>

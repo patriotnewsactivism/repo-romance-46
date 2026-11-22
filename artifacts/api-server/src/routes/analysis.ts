@@ -1,11 +1,12 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@workspace/db";
 import { requireAuth } from "../middlewares/auth";
 import { asyncHandler } from "../lib/async-handler";
 import { loadAiCredential, loadGithubCredential, normalizeAiProvider, requireGithubCredential } from "../lib/credentials";
 import { assertAiReady } from "../lib/ai-preflight";
 import { defaultAiModel } from "../lib/ai-model-config";
+import { selectModelForTask, type AiTaskKind } from "../lib/ai-model-catalog";
 import { callAIJson } from "../lib/call-ai-json";
 import { runInBackground } from "../lib/background-tasks";
 import {
@@ -816,12 +817,25 @@ export function getStageModels(provider: string, tier: string, exactModel?: stri
   return { ...stages, profilerModel: pinned, critiqueModel: pinned, synthesisModel: pinned };
 }
 
-/** Per-stage fallbacks used only when no exact model identifier is configured. */
+/**
+ * Per-stage fallbacks used only when no exact model identifier is configured.
+ *
+ * The model is chosen for the *tier's job*, not just the provider. A fast scan
+ * should not pay for a frontier model, and a deep scan should not be pinned to
+ * a fast one. OpenRouter keeps its free agent-pool sentinel because the pool
+ * failover contract in `ai-provider.ts` is keyed to that exact slug.
+ */
 function defaultStageModels(provider: string, tier: string): StageModels {
+  const task: AiTaskKind =
+    tier === "deep" ? "long_context_review" : tier === "fast" ? "fast_classify" : "repo_grading";
+
   const base =
-    defaultAiModel(provider) ??
-    (provider === "github_models" || provider === "custom" ? "gpt-4o" : null) ??
-    defaultAiModel("openrouter")!;
+    provider === "openrouter"
+      ? defaultAiModel("openrouter")!
+      : provider === "github_models" || provider === "custom"
+        ? "gpt-4o"
+        : selectModelForTask(task, { provider });
+
   const useThinking = provider === "anthropic" && tier === "deep";
   return {
     profilerModel: base,

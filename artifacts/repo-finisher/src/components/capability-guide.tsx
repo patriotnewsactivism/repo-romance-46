@@ -1,6 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { BarChart3, FileDown, FileText, Repeat2, Search, ShieldCheck, Sparkles } from "lucide-react";
+import { BRAND } from "@/lib/brand";
 
 const tools = [
   {
@@ -19,7 +20,7 @@ const tools = [
     icon: Search,
     title: "Research market & competitors",
     badge: "Source-backed",
-    detail: "Uses live external research when configured. Competitor names, customer pricing, features, and URLs are only shown when source evidence supports them; otherwise RepoFinisher says the evidence is unavailable.",
+    detail: `Uses live external research when configured. Competitor names, customer pricing, features, and URLs are only shown when source evidence supports them; otherwise ${BRAND.name} says the evidence is unavailable.`,
   },
   {
     icon: Sparkles,

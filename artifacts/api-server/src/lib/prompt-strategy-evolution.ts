@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@workspace/db";
 
 export const IMMUTABLE_AGENT_SAFETY_POLICY = `IMMUTABLE SAFETY AND APPROVAL POLICY:
 - Repository writes require the product's existing exact-plan approval or an explicit bounded higher-autonomy opt-in.

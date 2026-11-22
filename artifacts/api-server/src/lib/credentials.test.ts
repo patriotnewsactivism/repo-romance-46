@@ -112,7 +112,7 @@ describe("model resolution", () => {
   it("uses application defaults when the app has no saved model", () => {
     expect(platformAiModel("google")).toBe("gemini-3.8-flash");
     expect(platformAiModel("openrouter")).toBe("nex-agi/nex-n2.5-mini:free");
-    expect(platformAiModel("openai")).toBe("gpt-4o");
+    expect(platformAiModel("openai")).toBe("gpt-5.6-terra");
     expect(platformAiModel("anthropic")).toBe("claude-sonnet-4-20250514");
   });
 
@@ -125,7 +125,7 @@ describe("model resolution", () => {
 
     expect(platformAiModel("google")).toBe("gemini-3.8-flash");
     expect(platformAiModel("openrouter")).toBe("nex-agi/nex-n2.5-mini:free");
-    expect(platformAiModel("openai")).toBe("gpt-4o");
+    expect(platformAiModel("openai")).toBe("gpt-5.6-terra");
     expect(platformAiModel("anthropic")).toBe("claude-sonnet-4-20250514");
   });
 });

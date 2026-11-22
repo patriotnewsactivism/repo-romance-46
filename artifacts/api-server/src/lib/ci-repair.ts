@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { runInBackground } from "./background-tasks";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@workspace/db";
 import { type AIProviderConfig } from "./ai-provider";
 import { callAIJson } from "./call-ai-json";
 import { loadAiCredential, loadGithubCredential, requireGithubCredential, toAiProviderConfig } from "./credentials";

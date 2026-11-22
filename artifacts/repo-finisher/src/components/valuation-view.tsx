@@ -2,6 +2,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ShieldCheck, Sigma } from "lucide-react";
 import { PortfolioValuationV2Panel } from "@/components/portfolio-valuation-v2-panel";
+import { BRAND } from "@/lib/brand";
 
 export function ValuationView({ analysisId }: { analysisId: string }) {
   return (
@@ -12,7 +13,7 @@ export function ValuationView({ analysisId }: { analysisId: string }) {
           <h3 className="font-semibold">How this number is built</h3>
         </div>
         <p className="text-sm text-muted-foreground leading-relaxed">
-          RepoFinisher does not invent comparable acquisitions or TAM. Present value is replacement cost and traction-adjusted evidence. Potential value is a labeled planning scenario. Confidence, overlap, and synergy are applied after those repository-level ranges exist.
+          {BRAND.name} does not invent comparable acquisitions or TAM. Present value is replacement cost and traction-adjusted evidence. Potential value is a labeled planning scenario. Confidence, overlap, and synergy are applied after those repository-level ranges exist.
         </p>
         <div className="flex flex-wrap gap-2">
           <Badge variant="outline" className="gap-1"><ShieldCheck className="h-3 w-3" /> Replacement cost</Badge>

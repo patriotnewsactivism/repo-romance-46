@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Anton&display=swap');
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @plugin "@tailwindcss/typography";
@@ -67,70 +67,72 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-/* DARK MODE (primary mode for this app) */
+/* DARK MODE (primary mode for this app) — Neon Aftermarket palette */
 .dark {
-  --button-outline: rgba(255, 255, 255, 0.1);
-  --badge-outline: rgba(255, 255, 255, 0.05);
+  --button-outline: rgba(245, 241, 232, 0.18);
+  --badge-outline: rgba(245, 241, 232, 0.08);
 
   --opaque-button-border-intensity: 9;
 
-  --elevate-1: rgba(255, 255, 255, 0.04);
-  --elevate-2: rgba(255, 255, 255, 0.09);
+  --elevate-1: rgba(245, 241, 232, 0.06);
+  --elevate-2: rgba(245, 241, 232, 0.12);
 
-  --background: 220 12% 9%;
-  --foreground: 210 15% 92%;
-  
-  --border: 217 15% 20%;
-  
-  --card: 222 18% 11%;
-  --card-foreground: 210 15% 92%;
-  --card-border: 217 15% 18%;
-  
-  --sidebar: 222 20% 9%;
-  --sidebar-foreground: 210 12% 82%;
-  --sidebar-border: 217 15% 16%;
-  --sidebar-primary: 189 95% 52%;
-  --sidebar-primary-foreground: 222 20% 8%;
-  --sidebar-accent: 217 18% 16%;
-  --sidebar-accent-foreground: 210 15% 92%;
-  --sidebar-ring: 189 95% 52%;
-  
-  --popover: 222 18% 12%;
-  --popover-foreground: 210 15% 92%;
-  --popover-border: 217 15% 22%;
-  
-  --primary: 189 95% 52%;
-  --primary-foreground: 222 20% 8%;
-  
-  --secondary: 217 18% 18%;
-  --secondary-foreground: 210 15% 92%;
-  
-  --muted: 217 15% 16%;
-  --muted-foreground: 215 10% 58%;
-  
-  --accent: 189 95% 52%;
-  --accent-foreground: 222 20% 8%;
-  
-  --destructive: 0 72% 51%;
-  --destructive-foreground: 210 15% 98%;
-  
-  --input: 217 15% 24%;
-  --ring: 189 95% 52%;
-  
-  --chart-1: 189 95% 52%;
-  --chart-2: 282 80% 60%;
-  --chart-3: 38 55% 52%;
-  --chart-4: 340 75% 55%;
+  --background: 0 0% 4%;
+  --foreground: 42 39% 93%;
+
+  --border: 42 39% 93%;
+
+  --card: 0 0% 4%;
+  --card-foreground: 42 39% 93%;
+  --card-border: 42 39% 93%;
+
+  --sidebar: 0 0% 4%;
+  --sidebar-foreground: 42 39% 93%;
+  --sidebar-border: 42 39% 93%;
+  --sidebar-primary: 9 100% 59%;
+  --sidebar-primary-foreground: 0 0% 4%;
+  --sidebar-accent: 263 100% 68%;
+  --sidebar-accent-foreground: 0 0% 4%;
+  --sidebar-ring: 263 100% 68%;
+
+  --popover: 0 0% 4%;
+  --popover-foreground: 42 39% 93%;
+  --popover-border: 42 39% 93%;
+
+  --primary: 9 100% 59%;
+  --primary-foreground: 0 0% 4%;
+
+  --secondary: 0 0% 10%;
+  --secondary-foreground: 42 39% 93%;
+
+  --muted: 0 0% 10%;
+  --muted-foreground: 42 20% 72%;
+
+  --accent: 263 100% 68%;
+  --accent-foreground: 0 0% 4%;
+
+  --destructive: 9 100% 45%;
+  --destructive-foreground: 42 39% 93%;
+
+  --input: 42 39% 93%;
+  --ring: 263 100% 68%;
+
+  --chart-1: 9 100% 59%;
+  --chart-2: 263 100% 68%;
+  --chart-3: 42 39% 93%;
+  --chart-4: 38 100% 60%;
   --chart-5: 142 70% 45%;
 
-  --shadow-2xs: 0px 1px 2px 0px rgba(0, 0, 0, 0.3);
-  --shadow-xs: 0px 1px 3px 0px rgba(0, 0, 0, 0.4);
-  --shadow-sm: 0px 2px 4px -1px rgba(0, 0, 0, 0.3);
-  --shadow: 0px 3px 6px -2px rgba(0, 0, 0, 0.35);
-  --shadow-md: 0px 4px 8px -2px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0px 6px 12px -3px rgba(0, 0, 0, 0.45);
-  --shadow-xl: 0px 10px 20px -4px rgba(0, 0, 0, 0.5);
-  --shadow-2xl: 0px 16px 32px -6px rgba(0, 0, 0, 0.6);
+  --ui-border-color: #f5f1e8;
+
+  --shadow-2xs: 2px 2px 0 rgba(245, 241, 232, 0.18);
+  --shadow-xs: 3px 3px 0 rgba(245, 241, 232, 0.18);
+  --shadow-sm: 3px 3px 0 rgba(245, 241, 232, 0.22);
+  --shadow: 4px 4px 0 rgba(245, 241, 232, 0.22);
+  --shadow-md: 5px 5px 0 rgba(245, 241, 232, 0.24);
+  --shadow-lg: 6px 6px 0 rgba(245, 241, 232, 0.26);
+  --shadow-xl: 8px 8px 0 rgba(245, 241, 232, 0.28);
+  --shadow-2xl: 10px 10px 0 rgba(245, 241, 232, 0.3);
 }
 
 /* LIGHT MODE (fallback) */
@@ -145,54 +147,68 @@
 
   --background: 210 15% 98%;
   --foreground: 222 18% 12%;
-  
+
   --border: 217 12% 85%;
-  
+
   --card: 0 0% 100%;
   --card-foreground: 222 18% 12%;
   --card-border: 217 12% 88%;
-  
+
   --sidebar: 210 15% 97%;
   --sidebar-foreground: 222 15% 20%;
   --sidebar-border: 217 12% 88%;
-  --sidebar-primary: 189 95% 42%;
+  --sidebar-primary: 9 100% 55%;
   --sidebar-primary-foreground: 0 0% 100%;
   --sidebar-accent: 217 18% 92%;
   --sidebar-accent-foreground: 222 18% 12%;
-  --sidebar-ring: 189 95% 42%;
-  
+  --sidebar-ring: 263 100% 62%;
+
   --popover: 0 0% 100%;
   --popover-foreground: 222 18% 12%;
   --popover-border: 217 12% 85%;
-  
-  --primary: 189 95% 42%;
+
+  --primary: 9 100% 55%;
   --primary-foreground: 0 0% 100%;
-  
+
   --secondary: 217 18% 92%;
   --secondary-foreground: 222 18% 12%;
-  
+
   --muted: 217 12% 94%;
   --muted-foreground: 215 10% 42%;
-  
-  --accent: 189 95% 42%;
+
+  --accent: 263 100% 62%;
   --accent-foreground: 0 0% 100%;
-  
+
   --destructive: 0 72% 51%;
   --destructive-foreground: 0 0% 100%;
-  
+
   --input: 217 12% 82%;
-  --ring: 189 95% 42%;
-  
-  --chart-1: 189 95% 42%;
-  --chart-2: 282 80% 50%;
+  --ring: 263 100% 62%;
+
+  --chart-1: 9 100% 55%;
+  --chart-2: 263 100% 62%;
   --chart-3: 47 90% 44%;
   --chart-4: 340 75% 45%;
   --chart-5: 142 70% 35%;
 
-  --app-font-sans: 'Inter', -apple-system, system-ui, sans-serif;
+  --app-font-sans: 'Courier New', ui-monospace, Menlo, monospace;
   --app-font-serif: Georgia, serif;
-  --app-font-mono: 'JetBrains Mono', Menlo, monospace;
-  --radius: 0.375rem;
+  --app-font-mono: 'Courier New', ui-monospace, Menlo, monospace;
+  --radius: 0rem;
+
+  /* Themeable surface tokens — Neon Aftermarket defaults. */
+  --ui-border-width: 3px;
+  --ui-border-color: #0a0a0a;
+  --ui-shadow-card: 8px 8px 0 #ff4d2e;
+  --ui-shadow-btn: 6px 6px 0 #9b5cff;
+  --ui-shadow-btn-hover: 6px 6px 0 #ff4d2e;
+  --ui-shadow-btn-sm: 4px 4px 0 #9b5cff;
+  --ui-shadow-mark: 3px 3px 0 #9b5cff;
+  --ui-accent-strong: #9b5cff;
+  --ui-display-font: 'Anton', Impact, 'Arial Narrow Bold', 'Franklin Gothic Condensed', sans-serif;
+  --ui-display-weight: 400;
+  --ui-display-transform: uppercase;
+  --ui-display-tracking: 0.01em;
   --shadow-2xs: 0px 1px 2px 0px rgba(0, 0, 0, 0.05);
   --shadow-xs: 0px 1px 3px 0px rgba(0, 0, 0, 0.1);
   --shadow-sm: 0px 2px 4px -1px rgba(0, 0, 0, 0.06);
@@ -255,13 +271,14 @@
   body {
     @apply font-sans antialiased bg-background text-foreground;
   }
-  
+
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Space Grotesk', var(--app-font-sans);
-    font-weight: 600;
-    letter-spacing: -0.02em;
+    font-family: var(--ui-display-font);
+    font-weight: var(--ui-display-weight);
+    text-transform: var(--ui-display-transform);
+    letter-spacing: var(--ui-display-tracking);
   }
-  
+
   code, pre, .font-mono {
     font-family: var(--app-font-mono);
   }
@@ -339,11 +356,501 @@
   .border.hover-elevate:not(.no-hover-interaction-elevate)::after {
     inset: -1px;
   }
-  
+
   .text-gradient-cyan {
     background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--chart-2)));
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Neon Aftermarket brand system                                       */
+/* Black paper, cream rules, signal orange, electric purple,           */
+/* condensed poster type, hard offset shadows, perforated ticket edges. */
+/* ------------------------------------------------------------------ */
+
+.na-title {
+  font-family: var(--ui-display-font);
+  font-weight: var(--ui-display-weight);
+  text-transform: var(--ui-display-transform);
+  letter-spacing: var(--ui-display-tracking);
+}
+
+.na-kicker {
+  font-family: var(--app-font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+
+/* Slab button — exact behaviour contract from the approved design. */
+.na-btn {
+  display: inline-block;
+  font-family: 'Anton', Impact, 'Arial Narrow Bold', Arial, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  text-decoration: none;
+  cursor: pointer;
+  background: #ff4d2e;
+  color: #0a0a0a;
+  border: 3px solid #f5f1e8;
+  box-shadow: 6px 6px 0 #9b5cff;
+  padding: 12px 26px;
+  font-size: 20px;
+  transition: box-shadow 0.15s, background 0.15s, transform 0.15s;
+}
+
+.na-btn:hover {
+  background: #f5f1e8;
+  box-shadow: 6px 6px 0 #ff4d2e;
+}
+
+.na-btn:active {
+  transform: translate(3px, 3px);
+  box-shadow: 3px 3px 0 #9b5cff;
+}
+
+.na-btn:focus-visible {
+  outline: 3px solid #9b5cff;
+  outline-offset: 3px;
+}
+
+/* Ink slab used on the orange closing panel. */
+.na-btn--ink {
+  background: #0a0a0a;
+  color: #f5f1e8;
+  box-shadow: 6px 6px 0 #f5f1e8;
+}
+
+.na-btn--ink:hover {
+  background: #9b5cff;
+  color: #f5f1e8;
+  box-shadow: 6px 6px 0 #f5f1e8;
+}
+
+/* Rotated sticker + badge. */
+.na-sticker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  background: #ff4d2e;
+  color: #0a0a0a;
+  border: 3px solid #f5f1e8;
+  box-shadow: 8px 8px 0 #9b5cff;
+  padding: 12px 22px;
+  font-size: 34px;
+  text-transform: uppercase;
+  transform: rotate(-5deg);
+  margin-bottom: 34px;
+  animation: na-pop 0.7s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+.na-sticker i {
+  display: block;
+  width: 28px;
+  height: 28px;
+  background: #0a0a0a;
+  border: 3px solid #f5f1e8;
+}
+
+.na-badge {
+  position: absolute;
+  top: -22px;
+  right: -18px;
+  width: 110px;
+  height: 110px;
+  border-radius: 50%;
+  background: #9b5cff;
+  border: 4px solid #f5f1e8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: rotate(12deg);
+  box-shadow: 5px 5px 0 #0a0a0a;
+  color: #f5f1e8;
+  font-family: 'Anton', Impact, 'Arial Narrow Bold', Arial, sans-serif;
+  font-size: 20px;
+  text-transform: uppercase;
+  text-align: center;
+  line-height: 1.1;
+  padding: 10px;
+}
+
+/* Diagonal hatch behind the hero. */
+.na-hero-lines::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    135deg,
+    transparent 0 22px,
+    rgba(155, 92, 255, 0.08) 22px 24px
+  );
+  pointer-events: none;
+}
+
+/* Marquee strips. */
+.na-marquee {
+  background: #ff4d2e;
+  color: #0a0a0a;
+  border-bottom: 3px solid #f5f1e8;
+  overflow: hidden;
+  white-space: nowrap;
+  padding: 12px 0;
+}
+
+.na-marquee--purple {
+  background: #9b5cff;
+  color: #f5f1e8;
+}
+
+.na-marquee-track {
+  display: inline-block;
+  animation: na-run 28s linear infinite;
+  font-family: 'Anton', Impact, 'Arial Narrow Bold', Arial, sans-serif;
+  font-size: 26px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+.na-marquee--purple .na-marquee-track {
+  animation-direction: reverse;
+}
+
+.na-marquee-track span {
+  margin: 0 26px;
+}
+
+/* Perforated ticket edges. */
+.na-stub {
+  position: relative;
+  background: #f5f1e8;
+  color: #0a0a0a;
+  padding: 26px 20px 24px;
+  border: 3px solid #0a0a0a;
+  box-shadow: 8px 8px 0 #ff4d2e;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 330px;
+  animation: na-snap 0.6s both;
+  -webkit-mask: radial-gradient(circle 11px at 0 50%, transparent 98%, #000) left / 51% 100% no-repeat,
+    radial-gradient(circle 11px at 100% 50%, transparent 98%, #000) right / 51% 100% no-repeat;
+  mask: radial-gradient(circle 11px at 0 50%, transparent 98%, #000) left / 51% 100% no-repeat,
+    radial-gradient(circle 11px at 100% 50%, transparent 98%, #000) right / 51% 100% no-repeat;
+}
+
+.na-stub:nth-child(2) {
+  animation-delay: 0.12s;
+  background: #ff4d2e;
+  box-shadow: 8px 8px 0 #9b5cff;
+}
+
+.na-stub:nth-child(3) {
+  animation-delay: 0.24s;
+}
+
+.na-stub:nth-child(4) {
+  animation-delay: 0.36s;
+  background: #9b5cff;
+  color: #f5f1e8;
+  box-shadow: 8px 8px 0 #f5f1e8;
+}
+
+.na-stub .na-ic {
+  width: 46px;
+  height: 46px;
+  border: 3px solid #0a0a0a;
+  background: #0a0a0a;
+  color: #f5f1e8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.na-stub:nth-child(4) .na-ic {
+  border-color: #f5f1e8;
+}
+
+.na-stub h3 {
+  font-size: 34px;
+  text-transform: uppercase;
+  font-weight: 400;
+  letter-spacing: 0.5px;
+  padding-bottom: 12px;
+  border-bottom: 3px dashed currentColor;
+}
+
+.na-stub p {
+  font-family: var(--app-font-mono);
+  font-size: 13.5px;
+  line-height: 1.55;
+  font-weight: 700;
+}
+
+/* Capability tickets. */
+.na-ticket {
+  position: relative;
+  background: #0a0a0a;
+  border: 3px solid #f5f1e8;
+  box-shadow: 8px 8px 0 #ff4d2e;
+  padding: 26px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 300px;
+  animation: na-snap 0.6s both;
+  -webkit-mask: radial-gradient(circle 11px at 50% 0, transparent 98%, #000) top / 100% 51% no-repeat,
+    radial-gradient(circle 11px at 50% 100%, transparent 98%, #000) bottom / 100% 51% no-repeat;
+  mask: radial-gradient(circle 11px at 50% 0, transparent 98%, #000) top / 100% 51% no-repeat,
+    radial-gradient(circle 11px at 50% 100%, transparent 98%, #000) bottom / 100% 51% no-repeat;
+}
+
+.na-ticket:nth-child(2) {
+  animation-delay: 0.14s;
+  box-shadow: 8px 8px 0 #9b5cff;
+}
+
+.na-ticket:nth-child(3) {
+  animation-delay: 0.28s;
+}
+
+.na-tag {
+  font-family: var(--app-font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  display: inline-block;
+  align-self: flex-start;
+  background: #ff4d2e;
+  color: #0a0a0a;
+  padding: 4px 10px;
+  border: 2px solid #f5f1e8;
+}
+
+.na-ticket:nth-child(2) .na-tag {
+  background: #9b5cff;
+  color: #f5f1e8;
+}
+
+.na-ticket:nth-child(3) .na-tag {
+  background: #f5f1e8;
+  color: #0a0a0a;
+}
+
+.na-ticket h3 {
+  font-size: 38px;
+  line-height: 1;
+  text-transform: uppercase;
+  font-weight: 400;
+  padding-bottom: 14px;
+  border-bottom: 3px dashed #f5f1e8;
+}
+
+.na-ticket p {
+  font-family: var(--app-font-mono);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* Entrance motion. */
+.na-slam-1 {
+  animation: na-slam 0.8s 0.15s cubic-bezier(0.2, 1.2, 0.4, 1) both;
+}
+
+.na-slam-2 {
+  animation: na-slam 0.8s 0.35s both;
+}
+
+.na-slam-3 {
+  animation: na-slam 0.8s 0.5s both;
+}
+
+.na-slam-photo {
+  animation: na-slam 0.9s 0.3s both;
+}
+
+@keyframes na-run {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes na-slam {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes na-pop {
+  from {
+    opacity: 0;
+    transform: rotate(-20deg) scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(-5deg) scale(1);
+  }
+}
+
+@keyframes na-snap {
+  from {
+    opacity: 0;
+    transform: translateY(40px) rotate(-3deg);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .na-badge {
+    top: -16px;
+    right: 0;
+    width: 92px;
+    height: 92px;
+    font-size: 17px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .na-marquee-track,
+  .na-stub,
+  .na-ticket,
+  .na-sticker,
+  .na-slam-1,
+  .na-slam-2,
+  .na-slam-3,
+  .na-slam-photo {
+    animation: none;
+  }
+}
+
+/* Cold Steel entrance — used by the sign-in screen. */
+@keyframes cold-steel-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Cold Steel field wrapper — the accent edge slides in on focus. */
+.cs-field {
+  position: relative;
+}
+
+.cs-field::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #4c8dff;
+  border-radius: 3px 0 0 3px;
+  transform: scaleY(0);
+  transform-origin: top;
+  transition: transform 0.22s ease-out;
+}
+
+.cs-field:focus-within::after {
+  transform: scaleY(1);
+}
+
+/* ------------------------------------------------------------------ */
+/* Cold Steel theme scope                                              */
+/* Graphite surfaces, hairline rules, system sans type, signal blue.   */
+/* Applied as a wrapper class on the auth, landing and dashboard       */
+/* surfaces, so shared primitives inherit the palette via tokens.      */
+/* ------------------------------------------------------------------ */
+.cs-scope {
+  --background: 200 9% 7%;
+  --foreground: 200 10% 92%;
+  --border: 197 9% 19%;
+
+  --card: 197 10% 9%;
+  --card-foreground: 200 10% 92%;
+  --card-border: 197 9% 19%;
+
+  --popover: 197 10% 9%;
+  --popover-foreground: 200 10% 92%;
+  --popover-border: 197 9% 19%;
+
+  --primary: 216 100% 65%;
+  --primary-foreground: 200 25% 4%;
+
+  --secondary: 197 10% 9%;
+  --secondary-foreground: 200 10% 92%;
+
+  --muted: 197 10% 9%;
+  --muted-foreground: 195 8% 46%;
+
+  --accent: 216 100% 65%;
+  --accent-foreground: 200 25% 4%;
+
+  --destructive: 0 72% 52%;
+  --destructive-foreground: 200 10% 96%;
+
+  --input: 197 9% 19%;
+  --ring: 216 100% 65%;
+
+  --sidebar: 200 9% 7%;
+  --sidebar-foreground: 200 10% 92%;
+  --sidebar-border: 197 9% 19%;
+  --sidebar-primary: 216 100% 65%;
+  --sidebar-primary-foreground: 200 25% 4%;
+  --sidebar-accent: 197 10% 9%;
+  --sidebar-accent-foreground: 200 10% 92%;
+  --sidebar-ring: 216 100% 65%;
+
+  --chart-1: 216 100% 65%;
+  --chart-2: 190 62% 55%;
+  --chart-3: 200 10% 92%;
+  --chart-4: 32 90% 60%;
+  --chart-5: 152 52% 46%;
+
+  --ui-border-width: 1px;
+  --ui-border-color: #2a3236;
+  --ui-shadow-card: none;
+  --ui-shadow-btn: none;
+  --ui-shadow-btn-hover: none;
+  --ui-shadow-btn-sm: none;
+  --ui-shadow-mark: none;
+  --ui-accent-strong: #4c8dff;
+  --ui-display-font: -apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --ui-display-weight: 600;
+  --ui-display-transform: none;
+  --ui-display-tracking: -0.02em;
+  --app-font-mono: ui-monospace, Menlo, 'Courier New', monospace;
+
+  font-family: -apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  color: hsl(var(--foreground));
+}
+
+/* The wordmark and card titles read as plain product type, not posters. */
+.cs-scope .na-title {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Brand mark: a solid signal-blue square — no rotation, no offset shadow. */
+.cs-scope [data-brand-mark] {
+  transform: none;
 }

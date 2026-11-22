@@ -48,8 +48,8 @@ describe("getStageModels", () => {
 
   it("uses the shared in-code provider defaults when nothing is configured", () => {
     expect(getStageModels("google", "balanced").synthesisModel).toBe("gemini-3.8-flash");
-    expect(getStageModels("openai", "balanced").synthesisModel).toBe("gpt-4o");
-    expect(getStageModels("openai", "deep").synthesisModel).toBe("gpt-4o");
+    expect(getStageModels("openai", "balanced").synthesisModel).toBe("gpt-5.6-terra");
+    expect(getStageModels("openai", "deep").synthesisModel).toBe("gpt-5.6-sol");
     expect(getStageModels("anthropic", "balanced").synthesisModel).toBe("claude-sonnet-4-20250514");
     expect(getStageModels("github_models", "balanced").synthesisModel).toBe("gpt-4o");
   });

@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useStatusPolling } from "@/hooks/use-status-polling";
 import { useRepoHistory } from "@/hooks/use-repo-history";
+import { BRAND } from "@/lib/brand";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -284,7 +285,7 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
       if (latest.run.status === "succeeded") {
         toast.success(`${repo.split("/")[1]} was finished and verified in a draft PR.`);
       } else if (latest.run.status === "repairing") {
-        toast.success("CI found a failure and RepoFinisher is re-diagnosing and repairing it automatically.");
+        toast.success(`CI found a failure and ${BRAND.name} is re-diagnosing and repairing it automatically.`);
       } else if (latest.run.status === "verifying") {
         toast.success("Autonomous changes are in a draft PR. CI and deployment verification are running.");
       } else {
@@ -450,7 +451,7 @@ export function FinishRepoAction({ repo, nextSteps, analysisId, itemRank, initia
         </div>
         {!compact && (
           <p className="text-xs text-muted-foreground">
-            Generates a separate current-state engineering handoff for an outside coding LLM. It complements RepoFinisher; it does not replace or approve RepoFinisher's own repository writes.
+            Generates a separate current-state engineering handoff for an outside coding LLM. It complements {BRAND.name}; it does not replace or approve {BRAND.name}'s own repository writes.
           </p>
         )}
       </div>

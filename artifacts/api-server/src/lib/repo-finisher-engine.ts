@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@workspace/db";
 import { z } from "zod";
 import { type AIProviderConfig } from "./ai-provider";
 import { callAIJson } from "./call-ai-json";

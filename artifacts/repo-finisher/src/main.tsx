@@ -9,7 +9,7 @@ import './index.css';
 import './opaque-header.css';
 import './dark-theme-root.css';
 
-// RepoFinisher is dark-first. Apply the root state before React mounts so the
+// Bluebook is dark-first. Apply the root state before React mounts so the
 // first painted frame and all inherited colors use the correct palette.
 document.documentElement.classList.add('dark');
 document.documentElement.style.colorScheme = 'dark';

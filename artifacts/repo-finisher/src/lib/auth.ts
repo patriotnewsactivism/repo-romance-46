@@ -16,7 +16,10 @@ export async function signInWithGitHub() {
   await supabase.auth.signInWithOAuth({
     provider: 'github',
     options: {
-      scopes: 'repo',
+      // `repo` covers private repository read/write. `read:user` and
+      // `user:email` are what GitHub needs to identify the account; without
+      // them the connection works but the profile is incomplete.
+      scopes: 'repo read:user user:email',
       redirectTo: `${redirectOrigin}${import.meta.env.BASE_URL}auth/callback`
     }
   });

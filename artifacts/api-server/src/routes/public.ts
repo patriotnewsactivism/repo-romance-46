@@ -1,43 +1,43 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod";
+import { createServiceClient } from "@workspace/db";
 import { asyncHandler } from "../lib/async-handler";
 
 const router: IRouter = Router();
 
-// Public shared analysis view — no auth required, uses anon key over REST.
+// Public shared analysis view — no auth required. Uses the unrestricted client
+// because the share slug itself is the capability, and the rows are filtered by
+// `is_public` exactly as the old anon REST query did.
 router.get(
   "/public/analysis/:slug",
   asyncHandler(async (req, res) => {
     const { slug } = z.object({ slug: z.string().min(1) }).parse(req.params);
+    const db = createServiceClient();
 
-    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-    const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-    if (!supabaseUrl || !supabaseKey) throw new Error("Server is not configured for Supabase access.");
+    const { data: analysis, error } = await db
+      .from<Record<string, unknown>>("analyses")
+      .select("*")
+      .eq("share_slug", slug)
+      .eq("is_public", true)
+      .maybeSingle();
 
-    const analysisRes = await fetch(
-      `${supabaseUrl}/rest/v1/analyses?select=*&share_slug=eq.${encodeURIComponent(slug)}&is_public=eq.true`,
-      { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } },
-    );
-    if (!analysisRes.ok) throw new Error("Failed to fetch analysis");
-    const analyses = (await analysisRes.json()) as any[];
-    if (!analyses || analyses.length === 0) {
+    if (error) throw new Error(`Failed to fetch analysis: ${error.message}`);
+    if (!analysis) {
       throw Object.assign(new Error("Analysis not found or no longer shared."), { status: 404 });
     }
-    const analysis = analyses[0];
 
-    if (analysis.share_expires_at) {
-      const expires = new Date(analysis.share_expires_at).getTime();
-      if (Date.now() > expires) {
-        throw Object.assign(new Error("This shared analysis has expired."), { status: 410 });
-      }
+    const expiresAt = analysis["share_expires_at"];
+    if (expiresAt && Date.now() > new Date(String(expiresAt)).getTime()) {
+      throw Object.assign(new Error("This shared analysis has expired."), { status: 410 });
     }
 
-    const itemsRes = await fetch(
-      `${supabaseUrl}/rest/v1/analysis_items?select=*&analysis_id=eq.${encodeURIComponent(analysis.id)}&order=rank.asc`,
-      { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } },
-    );
-    if (!itemsRes.ok) throw new Error("Failed to fetch analysis items");
-    const items = await itemsRes.json();
+    const { data: items, error: itemsError } = await db
+      .from<Record<string, unknown>>("analysis_items")
+      .select("*")
+      .eq("analysis_id", analysis["id"])
+      .order("rank", { ascending: true });
+
+    if (itemsError) throw new Error(`Failed to fetch analysis items: ${itemsError.message}`);
 
     res.json({ analysis, items: items ?? [] });
   }),

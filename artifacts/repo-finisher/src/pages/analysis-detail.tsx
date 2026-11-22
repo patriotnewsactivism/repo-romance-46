@@ -16,6 +16,7 @@ import { StrategyView } from '@/components/strategy-view';
 import { ActionPlanView } from '@/components/action-plan-view';
 import { ValuationView } from '@/components/valuation-view';
 import { InvestmentIntelligenceView } from '@/components/investment-intelligence-view';
+import { RepoBusinessView } from '@/components/repo-business-view';
 import { Loader2, Brain, Layers, Sparkles, Search, Zap, Share2, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -205,6 +206,7 @@ export default function AnalysisDetail() {
                 </TabsTrigger>
                 <TabsTrigger value="strategy" data-testid="tab-strategy" className="shrink-0">Strategy</TabsTrigger>
                 <TabsTrigger value="action-plan" data-testid="tab-action-plan" className="shrink-0">Action Plan</TabsTrigger>
+                <TabsTrigger value="business" data-testid="tab-business" className="shrink-0">Business Grade</TabsTrigger>
                 <TabsTrigger value="investment" data-testid="tab-investment" className="shrink-0">Finish, Value & Reports</TabsTrigger>
                 <TabsTrigger value="valuation" data-testid="tab-valuation" className="shrink-0">Valuation method</TabsTrigger>
                 <TabsTrigger value="share" data-testid="tab-share" className="shrink-0">
@@ -230,6 +232,7 @@ export default function AnalysisDetail() {
 
             <TabsContent value="strategy"><StrategyView analysis={analysis} /></TabsContent>
             <TabsContent value="action-plan"><ActionPlanView analysisId={analysisId} /></TabsContent>
+            <TabsContent value="business"><RepoBusinessView analysisId={analysisId} /></TabsContent>
             <TabsContent value="investment"><InvestmentIntelligenceView analysisId={analysisId} /></TabsContent>
             <TabsContent value="valuation"><ValuationView analysisId={analysisId} /></TabsContent>
 

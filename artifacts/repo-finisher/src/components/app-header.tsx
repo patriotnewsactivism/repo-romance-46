@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react';
 import { Link, useLocation } from 'wouter';
 import { signOut } from '@/lib/auth';
-import { GitBranch, LayoutDashboard, LogOut, Menu, Settings } from 'lucide-react';
+import { LayoutDashboard, LogOut, Menu, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { BRAND } from '@/lib/brand';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,33 +36,38 @@ export function AppHeader({ section, user, actions, onSignOut }: AppHeaderProps)
   return (
     <header
       data-app-header
-      className="sticky top-0 z-[100] border-b border-white/10 text-white shadow-sm"
-      style={{ backgroundColor: '#0d1117', color: '#f1f5f9' }}
+      className="sticky top-0 z-[100] [border-bottom-width:var(--ui-border-width)] [border-bottom-style:solid] [border-bottom-color:var(--ui-border-color)] bg-background text-foreground"
     >
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-3 sm:px-6 lg:px-8">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <Link
             href="/dashboard"
-            className="flex min-w-0 items-center gap-2 rounded-md text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex min-w-0 items-center gap-2 rounded-none text-foreground focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-[#9B5CFF] focus-visible:outline-offset-[3px]"
           >
-            <GitBranch className="h-6 w-6 shrink-0 text-primary" />
-            <span className="truncate text-base font-bold text-white sm:text-lg">RepoFinisher</span>
+            <span
+              aria-hidden
+              data-brand-mark
+              className="block h-6 w-6 shrink-0 rotate-[-8deg] [border-width:var(--ui-border-width)] [border-style:solid] [border-color:var(--ui-border-color)] bg-primary [box-shadow:var(--ui-shadow-mark)]"
+            />
+            <span className="na-title truncate text-lg text-foreground sm:text-xl">{BRAND.name}</span>
           </Link>
 
           {section && (
             <>
-              <div className="hidden h-6 w-px bg-white/15 lg:block" />
-              <span className="hidden truncate text-sm font-medium text-slate-300 lg:block">{section}</span>
+              <div className="hidden h-6 w-px bg-foreground/30 lg:block" />
+              <span className="hidden truncate font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-muted-foreground lg:block">
+                {section}
+              </span>
             </>
           )}
 
           {userLabel && (
-            <div className="ml-2 hidden min-w-0 items-center gap-2 text-sm text-slate-300 lg:flex">
+            <div className="ml-2 hidden min-w-0 items-center gap-2 text-sm text-muted-foreground lg:flex">
               {user?.avatarUrl ? (
                 <img
                   src={user.avatarUrl}
                   alt={user.login || userLabel}
-                  className="h-6 w-6 shrink-0 rounded-full bg-slate-800 object-cover"
+                  className="h-6 w-6 shrink-0 rounded-full border-2 border-foreground bg-secondary object-cover"
                   onError={(event) => {
                     event.currentTarget.style.display = 'none';
                   }}
@@ -74,20 +80,20 @@ export function AppHeader({ section, user, actions, onSignOut }: AppHeaderProps)
 
         {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
 
-        <nav className="hidden shrink-0 items-center gap-1 text-white lg:flex" aria-label="Primary navigation">
+        <nav className="hidden shrink-0 items-center gap-1 text-foreground lg:flex" aria-label="Primary navigation">
           <Link href="/dashboard">
-            <Button variant="ghost" size="sm" className="gap-2 text-white hover:bg-white/10 hover:text-white">
+            <Button variant="ghost" size="sm" className="gap-2 text-foreground hover:bg-foreground/10 hover:text-foreground">
               <LayoutDashboard className="h-4 w-4" />
               Dashboard
             </Button>
           </Link>
           <Link href="/settings">
-            <Button variant="ghost" size="sm" className="gap-2 text-white hover:bg-white/10 hover:text-white">
+            <Button variant="ghost" size="sm" className="gap-2 text-foreground hover:bg-foreground/10 hover:text-foreground">
               <Settings className="h-4 w-4" />
               Settings
             </Button>
           </Link>
-          <Button variant="ghost" size="sm" className="gap-2 text-white hover:bg-white/10 hover:text-white" onClick={signOutHandler}>
+          <Button variant="ghost" size="sm" className="gap-2 text-foreground hover:bg-foreground/10 hover:text-foreground" onClick={signOutHandler}>
             <LogOut className="h-4 w-4" />
             Sign out
           </Button>
@@ -98,7 +104,7 @@ export function AppHeader({ section, user, actions, onSignOut }: AppHeaderProps)
             <Button
               variant="outline"
               size="icon"
-              className="shrink-0 border-white/20 bg-slate-900 text-white shadow-sm hover:bg-slate-800 hover:text-white lg:hidden"
+              className="shrink-0 lg:hidden"
               aria-label="Open navigation menu"
               data-testid="button-mobile-menu"
             >
@@ -110,7 +116,7 @@ export function AppHeader({ section, user, actions, onSignOut }: AppHeaderProps)
             sideOffset={8}
             className="z-[250] w-64 border-border bg-popover text-popover-foreground shadow-xl"
           >
-            <DropdownMenuLabel className="truncate">{section || 'RepoFinisher'}</DropdownMenuLabel>
+            <DropdownMenuLabel className="truncate">{section || BRAND.name}</DropdownMenuLabel>
             {userLabel ? (
               <div className="px-2 pb-2 text-xs text-muted-foreground">
                 <div className="truncate">{userLabel}</div>

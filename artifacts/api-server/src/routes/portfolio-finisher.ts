@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { runInBackground } from "../lib/background-tasks";
 import { Router, type IRouter } from "express";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@workspace/db";
 import { z } from "zod";
 import { asyncHandler } from "../lib/async-handler";
 import { requireAuth } from "../middlewares/auth";

@@ -475,7 +475,7 @@ async function fetchKeyFiles(
 }
 
 export async function finishRepoCore(
-  supabase: import("@supabase/supabase-js").SupabaseClient,
+  supabase: import("@workspace/db").SupabaseClient,
   userId: string,
   data: { repo: string; nextSteps?: string[]; analysisId?: string; itemRank?: number },
 ): Promise<FinishResult> {

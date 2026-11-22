@@ -11,6 +11,7 @@ import {
 } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { getSession, signOut } from '@/lib/auth';
+import { BRAND } from '@/lib/brand';
 import { AppHeader } from '@/components/app-header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -126,8 +127,8 @@ function modelPlaceholder(provider: AiProvider) {
     case 'openrouter': return 'openrouter/auto or provider/model-slug';
     case 'qwen': return 'qwen-plus (leave blank for default)';
     case 'google': return 'gemini-3.8-flash (leave blank for default)';
-    case 'openai': return 'Leave blank for platform default';
-    case 'anthropic': return 'Leave blank for platform default';
+    case 'openai': return 'gpt-5.6-terra (leave blank for default)';
+    case 'anthropic': return 'claude-sonnet-4-20250514 (leave blank for default)';
   }
 }
 
@@ -170,7 +171,6 @@ const MODEL_CATALOG: Record<AiProvider, Array<{ id: string; label: string; detai
     { id: OPENROUTER_FREE_AGENT_POOL_MODEL, label: 'Free agent pool', detail: 'Recommended: Nex Mini plus free tool-calling fallbacks, then a cheap paid tail if free models are exhausted' },
     { id: 'openai/gpt-5.6-sol', label: 'GPT-5.6 Sol', detail: 'Highest-capability coding and repository-finishing agent' },
     { id: 'openai/gpt-5.6-terra', label: 'GPT-5.6 Terra', detail: 'Strong balanced agent for broad portfolio work' },
-    { id: 'openai/gpt-5.6-luna', label: 'GPT-5.6 Luna', detail: 'Fast, economical agent for routine analysis' },
     { id: 'deepseek/deepseek-v4-flash-0731', label: 'DeepSeek V4 Flash', detail: 'High-value reasoning and coding default' },
     { id: 'google/gemini-3.7-pro', label: 'Gemini 3.7 Pro', detail: 'Deep reasoning and long-context repository review' },
     { id: 'google/gemini-3.7-flash', label: 'Gemini 3.7 Flash', detail: 'Fast long-context analysis' },
@@ -189,8 +189,8 @@ const MODEL_CATALOG: Record<AiProvider, Array<{ id: string; label: string; detai
     { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', detail: 'Fast, economical agent for routine analysis' },
   ],
   anthropic: [
-    { id: 'claude-opus-4.1', label: 'Claude Opus 4.1', detail: 'Premium architecture and code review' },
-    { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', detail: 'Balanced implementation and review' },
+    { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', detail: 'Recommended default: balanced implementation and review' },
+    { id: 'claude-opus-4.1', label: 'Claude Opus 4.1', detail: 'Premium architecture, valuation, and finality prompt authoring' },
   ],
   qwen: [
     { id: 'qwen-plus', label: 'Qwen Plus', detail: 'Recommended: alias tracking the current stable Plus model, so it never pins an aging version' },
@@ -917,7 +917,7 @@ export default function Settings() {
                     <p className="text-xs text-muted-foreground">
                       {selectedOpenRouterModel?.reasoningMandatory
                         ? 'This model requires reasoning. Choose a supported effort or use its provider default.'
-                        : 'RepoFinisher will send this effort with OpenRouter analysis requests.'}
+                        : `${BRAND.name} will send this effort with OpenRouter analysis requests.`}
                     </p>
                   </div>
                 ) : null}

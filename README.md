@@ -45,6 +45,11 @@ RepoFinisher includes or is designed to include:
 
 - full-portfolio repository discovery and prioritization;
 - completion and production-readiness scoring;
+- business grading: stage, letter grade, weighted dimensions, and an evidence ceiling;
+- demand indexing with named drivers and explicit evidence gaps;
+- fair-market valuation: present range, labeled potential scenario, and value unlocked by finishing;
+- finality contracts and per-gap builder-AI prompts for Codex, Claude Code, and Gemini CLI;
+- a ranked improvement plan (12–24 items per repository) with acceptance criteria;
 - confidence-adjusted valuation and opportunity analysis;
 - source-backed competitor/pricing/feature research;
 - evidence-driven multi-stage reasoning;
@@ -139,6 +144,7 @@ Important files:
 - [`AGENTS.md`](AGENTS.md)
 - [`SECURITY.md`](SECURITY.md)
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- [`docs/REPO_BUSINESS_INTELLIGENCE.md`](docs/REPO_BUSINESS_INTELLIGENCE.md)
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md)
 - [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md)
 - [`docs/CONTABO_MIGRATION.md`](docs/CONTABO_MIGRATION.md)

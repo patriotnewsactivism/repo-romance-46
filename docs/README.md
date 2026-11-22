@@ -14,6 +14,8 @@ Start with:
 - [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md) — production release gates.
 - [`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md) — incident handling.
 - [`DECISIONS.md`](DECISIONS.md) — durable architecture decisions.
+- [`REPO_BUSINESS_INTELLIGENCE.md`](REPO_BUSINESS_INTELLIGENCE.md) — repo grading, demand, fair-market valuation, and builder-AI finality prompts.
+- [`AI_PROVIDERS.md`](AI_PROVIDERS.md) — provider credentials, model catalog, and per-task model routing.
 - [`APEX_THINKTANK_LOOP.md`](APEX_THINKTANK_LOOP.md) — scheduled Apex ↔ Think Tank self-heal loop (draft PRs only).
 - [`../SECURITY.md`](../SECURITY.md) — secrets, auth, write boundaries.
 

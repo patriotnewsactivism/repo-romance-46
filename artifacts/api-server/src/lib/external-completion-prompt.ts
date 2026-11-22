@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@workspace/db";
 import { reasonAboutRepositoryPlan, type ReasonedPlanningResult } from "./reasoning-orchestrator";
 
 export type ExternalPromptProvider = "provider-neutral" | "codex" | "claude-code" | "gemini-cli";
